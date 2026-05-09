@@ -1,0 +1,18 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/Ball.gd" id="1_ball_script"]
+
+[node name="Ball" type="Node2D"]
+script = ExtResource("1_ball_script")
+
+[node name="NumberLabel" type="Label" parent="."]
+offset_left = -14.0
+offset_top = -14.0
+offset_right = 14.0
+offset_bottom = 14.0
+theme_override_colors/font_color = Color(0, 0, 0, 1)
+theme_override_font_sizes/font_size = 12
+horizontal_alignment = 1
+vertical_alignment = 1
+mouse_filter = 2
+text = "1"

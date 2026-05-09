@@ -1,0 +1,51 @@
+[gd_scene format=3 uid="uid://wneom1x02j5c"]
+
+[ext_resource type="PackedScene" path="res://scenes/Table.tscn" id="1_table_scene"]
+[ext_resource type="Script" uid="uid://cpk1835bhdruv" path="res://scripts/Main.gd" id="2_main_script"]
+
+[node name="Main" type="Node2D" unique_id=666290206]
+script = ExtResource("2_main_script")
+
+[node name="Table" parent="." unique_id=1446886136 instance=ExtResource("1_table_scene")]
+
+[node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=980633167]
+
+[node name="HUD" type="Control" parent="CanvasLayer" unique_id=841761493]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="TitleLabel" type="Label" parent="CanvasLayer/HUD" unique_id=492201580]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 18.0
+offset_right = 460.0
+offset_bottom = 54.0
+theme_override_colors/font_color = Color(0.93, 0.92, 0.84, 1)
+theme_override_font_sizes/font_size = 28
+text = "Kraken An Eight Ball"
+
+[node name="StatusLabel" type="Label" parent="CanvasLayer/HUD" unique_id=1124129470]
+layout_mode = 0
+offset_left = 24.0
+offset_top = 60.0
+offset_right = 760.0
+offset_bottom = 116.0
+theme_override_colors/font_color = Color(0.93, 0.92, 0.84, 1)
+theme_override_font_sizes/font_size = 18
+text = "Loading table..."
+autowrap_mode = 3
+
+[node name="ResultLabel" type="Label" parent="CanvasLayer/HUD" unique_id=556767554]
+layout_mode = 0
+offset_left = 350.0
+offset_top = 660.0
+offset_right = 850.0
+offset_bottom = 704.0
+theme_override_colors/font_color = Color(1, 0.88, 0.55, 1)
+theme_override_font_sizes/font_size = 24
+horizontal_alignment = 1

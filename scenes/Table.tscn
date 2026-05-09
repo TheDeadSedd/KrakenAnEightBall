@@ -1,0 +1,28 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/Table.gd" id="1_table_script"]
+
+[node name="Table" type="Node2D"]
+script = ExtResource("1_table_script")
+
+[node name="Pockets" type="Node2D" parent="."]
+
+[node name="TopLeftPocket" type="Area2D" parent="Pockets"]
+position = Vector2(94, 94)
+
+[node name="TopMiddlePocket" type="Area2D" parent="Pockets"]
+position = Vector2(600, 92)
+
+[node name="TopRightPocket" type="Area2D" parent="Pockets"]
+position = Vector2(1106, 94)
+
+[node name="BottomLeftPocket" type="Area2D" parent="Pockets"]
+position = Vector2(94, 626)
+
+[node name="BottomMiddlePocket" type="Area2D" parent="Pockets"]
+position = Vector2(600, 628)
+
+[node name="BottomRightPocket" type="Area2D" parent="Pockets"]
+position = Vector2(1106, 626)
+
+[node name="Balls" type="Node2D" parent="."]

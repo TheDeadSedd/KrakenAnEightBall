@@ -1,0 +1,8 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="PackedScene" path="res://scenes/Ball.tscn" id="1_ball_scene"]
+
+[node name="CueBall" instance=ExtResource("1_ball_scene")]
+ball_type = 1
+ball_number = 0
+ball_color = Color(0.960784, 0.960784, 0.937255, 1)
