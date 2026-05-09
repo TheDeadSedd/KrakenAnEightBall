@@ -38,8 +38,18 @@ const POCKET_CATCH_BONUS := 8.0
 
 # Starting layout.
 const CUE_START := Vector2(340, 360)
-const EIGHT_START := Vector2(850, 360)
-const RACK_SPACING := 30.0
+const RACK_ORIGIN := Vector2(790, 360)
+const RACK_ROWS := 5
+const RACK_SPACING_MULTIPLIER := 2.12
+
+# Escalation loop. Stylish shots immediately queue new ball drops.
+const BASE_SPAWN_POCKET_COUNT := 2
+const MULTI_POCKET_BONUS_THRESHOLD := 2
+const SPAWN_SEARCH_CENTER := Vector2(600, 360)
+const SPAWN_SEARCH_STEP := 34.0
+const SPAWN_SEARCH_RINGS := 10
+const SPAWN_DROP_STAGGER := 0.14
+const SPAWN_BALL_NUMBERS := [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]
 
 # Cue controls and aim preview.
 const MAX_DRAG_DISTANCE := 210.0
@@ -62,9 +72,20 @@ const PHYSICS_SUBSTEPS := 2
 
 var cue_ball: Ball
 var eight_ball: Ball
+var eight_start := Vector2.ZERO
 var drag_mouse_position := Vector2.ZERO
 var is_dragging := false
 var game_over := false
+var shot_active := false
+var shot_pocketed_object_balls := 0
+var shot_cue_touched_rail := false
+var shot_had_bank_pocket := false
+var shot_multi_pocket_bonus_awarded := false
+var shot_bank_bonus_awarded := false
+var pocketed_object_ball_spawn_progress := 0
+var pending_spawn_count := 0
+var spawn_drop_cooldown := 0.0
+var next_spawn_ball_index := 0
 var pocket_positions: Array[Vector2] = []
 var rail_rects: Array[Rect2] = []
 
@@ -95,6 +116,9 @@ func _physics_process(delta: float) -> void:
 			break
 		_resolve_rail_collisions()
 		_apply_ball_friction(step_delta)
+
+	_process_spawn_queue(delta)
+	_try_finish_shot()
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -221,24 +245,36 @@ func _spawn_starting_balls() -> void:
 	balls.add_child(cue_ball)
 	cue_ball.global_position = CUE_START
 
-	var rack_origin := Vector2(790, 360)
-	var rack_data := [
-		{"number": 1, "offset": Vector2(0, 0)},
-		{"number": 2, "offset": Vector2(RACK_SPACING, -RACK_SPACING / 2.0)},
-		{"number": 3, "offset": Vector2(RACK_SPACING, RACK_SPACING / 2.0)},
-		{"number": 4, "offset": Vector2(RACK_SPACING * 2.0, -RACK_SPACING)},
-		{"number": 8, "offset": Vector2(RACK_SPACING * 2.0, 0)},
-		{"number": 5, "offset": Vector2(RACK_SPACING * 2.0, RACK_SPACING)},
-		{"number": 6, "offset": Vector2(RACK_SPACING * 3.0, -RACK_SPACING / 2.0)},
-		{"number": 7, "offset": Vector2(RACK_SPACING * 3.0, RACK_SPACING / 2.0)},
+	var rack_numbers := _get_starting_rack_numbers()
+	var rack_spacing: float = cue_ball.radius * RACK_SPACING_MULTIPLIER
+	var index := 0
+
+	for row in range(RACK_ROWS):
+		for slot in range(row + 1):
+			var number: int = rack_numbers[index]
+			var position: Vector2 = _get_rack_position(row, slot, rack_spacing)
+			index += 1
+
+			var ball := _create_ball(_ball_type_from_number(number), number, _ball_color(number), position)
+			if number == 8:
+				eight_ball = ball
+				eight_start = position
+
+
+func _get_starting_rack_numbers() -> Array[int]:
+	return [
+		1,
+		2, 3,
+		4, 8, 5,
+		6, 7, 9, 10,
+		11, 12, 13, 14, 15,
 	]
 
-	for ball_data in rack_data:
-		var number: int = ball_data["number"]
-		var position: Vector2 = rack_origin + ball_data["offset"]
-		var ball := _create_ball(_ball_type_from_number(number), number, _ball_color(number), position)
-		if number == 8:
-			eight_ball = ball
+
+func _get_rack_position(row: int, slot: int, spacing: float) -> Vector2:
+	var x_offset: float = float(row) * spacing
+	var y_offset: float = (float(slot) - float(row) * 0.5) * spacing
+	return RACK_ORIGIN + Vector2(x_offset, y_offset)
 
 
 func _create_ball(ball_type: int, number: int, color: Color, position: Vector2) -> Ball:
@@ -257,14 +293,21 @@ func _ball_type_from_number(number: int) -> int:
 
 func _ball_color(number: int) -> Color:
 	var colors := {
-		1: Color("e1c542"),
-		2: Color("3f7edb"),
-		3: Color("cc5347"),
-		4: Color("7a57b5"),
-		5: Color("df8b2c"),
-		6: Color("3d9953"),
-		7: Color("8b3430"),
-		8: Color("202020"),
+		1: Color("f0c84b"),
+		2: Color("2e62c9"),
+		3: Color("d6453d"),
+		4: Color("7a48ad"),
+		5: Color("ef8b2c"),
+		6: Color("2c9b5d"),
+		7: Color("8b2f2c"),
+		8: Color("151515"),
+		9: Color("f5df68"),
+		10: Color("4f8cff"),
+		11: Color("f06458"),
+		12: Color("9a6bd1"),
+		13: Color("f2a14a"),
+		14: Color("46bd78"),
+		15: Color("b84842"),
 	}
 	return colors.get(number, Color("d7b347"))
 
@@ -272,14 +315,14 @@ func _ball_color(number: int) -> Color:
 func _move_balls(delta: float) -> void:
 	for child in balls.get_children():
 		var ball := child as Ball
-		if ball != null and ball.visible:
+		if ball != null and ball.is_gameplay_active():
 			ball.move_ball(delta)
 
 
 func _apply_ball_friction(delta: float) -> void:
 	for child in balls.get_children():
 		var ball := child as Ball
-		if ball != null and ball.visible:
+		if ball != null and ball.is_gameplay_active():
 			ball.apply_friction(delta)
 
 
@@ -294,7 +337,7 @@ func _get_active_balls() -> Array[Ball]:
 	var active_balls: Array[Ball] = []
 	for child in balls.get_children():
 		var ball := child as Ball
-		if ball != null and ball.visible:
+		if ball != null and ball.is_gameplay_active():
 			active_balls.append(ball)
 	return active_balls
 
@@ -332,7 +375,7 @@ func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2)
 func _resolve_rail_collisions() -> void:
 	for child in balls.get_children():
 		var ball := child as Ball
-		if ball == null or not ball.visible:
+		if ball == null or not ball.is_gameplay_active():
 			continue
 
 		_resolve_ball_inside_playfield(ball)
@@ -345,16 +388,20 @@ func _resolve_ball_inside_playfield(ball: Ball) -> void:
 	if position.x < bounds.position.x:
 		position.x = bounds.position.x
 		ball.velocity.x = abs(ball.velocity.x) * RAIL_RESTITUTION
+		_note_cue_rail_touch(ball)
 	elif position.x > bounds.end.x:
 		position.x = bounds.end.x
 		ball.velocity.x = -abs(ball.velocity.x) * RAIL_RESTITUTION
+		_note_cue_rail_touch(ball)
 
 	if position.y < bounds.position.y:
 		position.y = bounds.position.y
 		ball.velocity.y = abs(ball.velocity.y) * RAIL_RESTITUTION
+		_note_cue_rail_touch(ball)
 	elif position.y > bounds.end.y:
 		position.y = bounds.end.y
 		ball.velocity.y = -abs(ball.velocity.y) * RAIL_RESTITUTION
+		_note_cue_rail_touch(ball)
 
 	ball.global_position = position
 
@@ -362,7 +409,7 @@ func _resolve_ball_inside_playfield(ball: Ball) -> void:
 func _handle_pocket_checks() -> bool:
 	for child in balls.get_children():
 		var ball := child as Ball
-		if ball == null or not ball.visible:
+		if ball == null or not ball.is_gameplay_active():
 			continue
 
 		for pocket_position in pocket_positions:
@@ -401,6 +448,7 @@ func _release_shot(mouse_position: Vector2) -> void:
 		return
 
 	cue_ball.velocity += drag_vector * SHOT_POWER
+	_start_shot_tracking()
 	status_text_changed.emit("Shot taken. Wait for the balls to settle before shooting again.")
 	queue_redraw()
 
@@ -412,6 +460,9 @@ func _get_drag_vector(mouse_position: Vector2) -> Vector2:
 
 func _can_shoot() -> bool:
 	if game_over or not is_instance_valid(cue_ball) or not cue_ball.visible:
+		return false
+
+	if pending_spawn_count > 0:
 		return false
 
 	for child in balls.get_children():
@@ -433,7 +484,7 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 
 	if ball == eight_ball:
 		if DEBUG_NO_GAME_OVER:
-			_reset_ball(ball, EIGHT_START, "8 ball reset for testing.")
+			_reset_ball(ball, eight_start, "8 ball reset for testing.")
 			return
 		ball.sink()
 		_finish_game("8 ball sunk. Game over.")
@@ -441,7 +492,147 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 
 	ball.sink()
 	ball.queue_free()
+	_note_object_ball_pocketed()
 	status_text_changed.emit("Ball %s sunk." % ball.ball_number)
+
+
+func _start_shot_tracking() -> void:
+	shot_active = true
+	shot_pocketed_object_balls = 0
+	shot_cue_touched_rail = false
+	shot_had_bank_pocket = false
+	shot_multi_pocket_bonus_awarded = false
+	shot_bank_bonus_awarded = false
+
+
+func _note_cue_rail_touch(ball: Ball) -> void:
+	if shot_active and ball == cue_ball:
+		shot_cue_touched_rail = true
+
+
+func _note_object_ball_pocketed() -> void:
+	if not shot_active:
+		return
+
+	shot_pocketed_object_balls += 1
+	_award_base_spawn_progress()
+	_try_award_multi_pocket_bonus()
+
+	if shot_cue_touched_rail:
+		shot_had_bank_pocket = true
+		_try_award_bank_bonus()
+
+
+func _try_finish_shot() -> void:
+	if not shot_active or not _all_balls_stopped():
+		return
+
+	shot_active = false
+
+
+func _all_balls_stopped() -> bool:
+	if pending_spawn_count > 0:
+		return false
+
+	for child in balls.get_children():
+		var ball := child as Ball
+		if ball != null and ball.visible and ball.is_moving():
+			return false
+
+	return true
+
+
+func _award_base_spawn_progress() -> void:
+	pocketed_object_ball_spawn_progress += 1
+	if pocketed_object_ball_spawn_progress < BASE_SPAWN_POCKET_COUNT:
+		return
+
+	pocketed_object_ball_spawn_progress = 0
+	_queue_spawn_reward(1)
+
+
+func _try_award_multi_pocket_bonus() -> void:
+	if shot_multi_pocket_bonus_awarded:
+		return
+
+	if shot_pocketed_object_balls < MULTI_POCKET_BONUS_THRESHOLD:
+		return
+
+	shot_multi_pocket_bonus_awarded = true
+	_queue_spawn_reward(1)
+
+
+func _try_award_bank_bonus() -> void:
+	if shot_bank_bonus_awarded:
+		return
+
+	shot_bank_bonus_awarded = true
+	_queue_spawn_reward(1)
+
+
+func _queue_spawn_reward(spawn_count: int) -> void:
+	pending_spawn_count += spawn_count
+
+
+func _process_spawn_queue(delta: float) -> void:
+	if pending_spawn_count <= 0:
+		spawn_drop_cooldown = 0.0
+		return
+
+	spawn_drop_cooldown = max(spawn_drop_cooldown - delta, 0.0)
+	if spawn_drop_cooldown > 0.0:
+		return
+
+	_spawn_next_reward_ball()
+	pending_spawn_count -= 1
+	spawn_drop_cooldown = SPAWN_DROP_STAGGER
+
+
+func _spawn_next_reward_ball() -> void:
+	var ball_number: int = _get_next_spawn_ball_number()
+	var spawn_position: Vector2 = _find_safe_spawn_position(cue_ball.radius)
+	var ball: Ball = _create_ball(Ball.BallType.OBJECT, ball_number, _ball_color(ball_number), spawn_position)
+	ball.begin_spawn_drop(spawn_position)
+
+
+func _get_next_spawn_ball_number() -> int:
+	var ball_number: int = int(SPAWN_BALL_NUMBERS[next_spawn_ball_index])
+	next_spawn_ball_index = (next_spawn_ball_index + 1) % SPAWN_BALL_NUMBERS.size()
+	return ball_number
+
+
+func _find_safe_spawn_position(ball_radius: float) -> Vector2:
+	if _is_safe_ball_position(SPAWN_SEARCH_CENTER, ball_radius):
+		return SPAWN_SEARCH_CENTER
+
+	for ring in range(1, SPAWN_SEARCH_RINGS + 1):
+		var radius: float = SPAWN_SEARCH_STEP * ring
+		var sample_count: int = max(8, ring * 8)
+		for sample_index in range(sample_count):
+			var angle: float = TAU * float(sample_index) / float(sample_count)
+			var candidate: Vector2 = SPAWN_SEARCH_CENTER + Vector2.RIGHT.rotated(angle) * radius
+			if _is_safe_ball_position(candidate, ball_radius):
+				return candidate
+
+	return PLAYFIELD_RECT.get_center()
+
+
+func _is_safe_ball_position(candidate: Vector2, ball_radius: float, ignored_ball: Ball = null) -> bool:
+	if not PLAYFIELD_RECT.grow(-ball_radius).has_point(candidate):
+		return false
+
+	for pocket_position in pocket_positions:
+		if candidate.distance_to(pocket_position) < POCKET_RADIUS + ball_radius + 8.0:
+			return false
+
+	for child in balls.get_children():
+		var other_ball := child as Ball
+		if other_ball == null or other_ball == ignored_ball or not other_ball.visible:
+			continue
+		if candidate.distance_to(other_ball.get_safe_position()) < ball_radius + other_ball.radius + 4.0:
+			return false
+
+	return true
 
 
 func _reset_ball(ball: Ball, origin: Vector2, message: String) -> void:
@@ -467,21 +658,7 @@ func _find_nearest_safe_reset_position(ball: Ball, origin: Vector2) -> Vector2:
 
 
 func _is_safe_reset_position(ball: Ball, candidate: Vector2) -> bool:
-	if not PLAYFIELD_RECT.grow(-ball.radius).has_point(candidate):
-		return false
-
-	for pocket_position in pocket_positions:
-		if candidate.distance_to(pocket_position) < POCKET_RADIUS + ball.radius + 8.0:
-			return false
-
-	for child in balls.get_children():
-		var other_ball := child as Ball
-		if other_ball == null or other_ball == ball or not other_ball.visible:
-			continue
-		if candidate.distance_to(other_ball.global_position) < ball.radius + other_ball.radius + 4.0:
-			return false
-
-	return true
+	return _is_safe_ball_position(candidate, ball.radius, ball)
 
 
 func _finish_game(message: String) -> void:
