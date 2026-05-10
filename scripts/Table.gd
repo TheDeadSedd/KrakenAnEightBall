@@ -59,7 +59,6 @@ const PRESENTATION_MARGIN_TOP := 80.0
 const PRESENTATION_MARGIN_BOTTOM := 120.0
 const TABLE_FRAME_VISIBLE_BOUNDS := Rect2(311, 130, 1294, 794)
 const KRAKEN_ART_ALPHA := 0.18
-const POCKET_CATCH_BONUS := 8.0
 
 # Escalation loop. Stylish shots immediately queue new ball drops.
 const MULTI_POCKET_BONUS_THRESHOLD := 2
@@ -96,10 +95,10 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 
 #region Cached Node References
 # Scene-authored nodes stay the source of truth for geometry and cue art.
-# Future extraction: TableGeometry can own boundaries_root/pockets_root.
+# Future extraction: TableGeometry can own boundaries_root.
 @onready var balls: Node2D = $Balls
 @onready var boundaries_root: Node = get_node_or_null("Boundaries")
-@onready var pockets_root: Node = get_node_or_null("Pockets")
+@onready var pocket_system: PocketSystem = $PocketSystem
 @onready var aim_preview: AimPreview = $AimPreview
 @onready var spawn_system: SpawnSystem = $SpawnSystem
 @onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
@@ -130,8 +129,6 @@ var shot_bank_bonus_awarded := false
 var shot_bank_eligible_ball_ids: Dictionary = {}
 var table_frame_art_rect := Rect2()
 var playfield_rect := Rect2()
-var pocket_positions: Array[Vector2] = []
-var pocket_radii: Array[float] = []
 var boundary_shapes: Array[CollisionShape2D] = []
 var boundary_reference_rects: Array[Rect2] = []
 var perf_ball_pair_checks := 0
@@ -141,8 +138,6 @@ var perf_spatial_grid_max_cell_size := 0
 var perf_ball_collisions_resolved := 0
 var perf_rail_checks := 0
 var perf_rail_collisions_resolved := 0
-var perf_pocket_checks := 0
-var perf_pocket_captures := 0
 var perf_physics_process_ms := 0.0
 var perf_ball_collision_ms := 0.0
 var perf_rail_collision_ms := 0.0
@@ -154,10 +149,11 @@ var perf_pocket_check_ms := 0.0
 # Owns startup, per-frame orchestration, and update order.
 # Future extraction: this can become a thin coordinator after systems split.
 func _ready() -> void:
-	_cache_table_geometry()
+	pocket_system.setup(self)
 	aim_preview.setup(self)
 	spawn_system.setup(self)
 	wayfinder_system.setup(self)
+	_cache_table_geometry()
 	cue_controller.setup()
 	if Engine.is_editor_hint():
 		cue_controller.update_cue(cue_ball, false, is_dragging, Vector2.ZERO, MAX_DRAG_DISTANCE, game_over, 0.0)
@@ -285,18 +281,15 @@ func _draw_collision_debug() -> void:
 #endregion
 
 
-#region Table Geometry / Pockets Cache
-# Reads scene-authored boundaries and pockets. Future extraction: TableGeometry
-# plus PocketSystem for pocket center/radius ownership.
+#region Table Geometry Cache
+# Reads scene-authored boundaries. PocketSystem owns pocket center/radius caching.
 func _cache_table_geometry() -> void:
 	table_frame_art_rect = _calculate_table_frame_art_rect()
 	playfield_rect = SPAWN_REFERENCE_RECT
-	pocket_positions.clear()
-	pocket_radii.clear()
 	boundary_shapes.clear()
 	boundary_reference_rects.clear()
 
-	_build_pocket_positions()
+	pocket_system.cache_pockets()
 	_build_rail_debug_rects()
 	_cache_boundary_reference_rect()
 
@@ -304,27 +297,6 @@ func _cache_table_geometry() -> void:
 func _ensure_table_geometry_cached() -> void:
 	if table_frame_art_rect.size == Vector2.ZERO or playfield_rect.size == Vector2.ZERO:
 		_cache_table_geometry()
-
-
-func _build_pocket_positions() -> void:
-	if pockets_root == null:
-		return
-
-	for child in pockets_root.get_children():
-		var pocket_node := child as Node2D
-		if pocket_node == null:
-			continue
-
-		var collision_shape: CollisionShape2D = pocket_node.get_node_or_null("CollisionShape2D")
-		if collision_shape == null:
-			continue
-
-		var circle_shape: CircleShape2D = collision_shape.shape as CircleShape2D
-		if circle_shape == null:
-			continue
-
-		pocket_positions.append(collision_shape.global_position)
-		pocket_radii.append(circle_shape.radius)
 
 
 func _build_rail_debug_rects() -> void:
@@ -590,20 +562,14 @@ func _resolve_rail_collisions() -> void:
 
 
 #region Pockets / Pocket Capture
-# Scene-authored pocket circles decide when balls sink.
-# Future extraction candidate: PocketSystem.
+# PocketSystem detects captures; Table owns the consequence of a pocketed ball.
 func _handle_pocket_checks() -> bool:
-	for ball in _get_moving_active_balls():
-		for pocket_index in range(pocket_positions.size()):
-			perf_pocket_checks += 1
-			var pocket_position: Vector2 = pocket_positions[pocket_index]
-			var catch_radius: float = _get_pocket_catch_radius(pocket_radii[pocket_index], ball.radius)
-			if ball.global_position.distance_to(pocket_position) <= catch_radius:
-				perf_pocket_captures += 1
-				_handle_pocketed_ball(ball)
-				return true
+	var pocketed_ball: Ball = pocket_system.check_pockets(_get_moving_active_balls())
+	if pocketed_ball == null:
+		return false
 
-	return false
+	_handle_pocketed_ball(pocketed_ball)
+	return true
 
 
 func _get_moving_active_balls() -> Array[Ball]:
@@ -615,8 +581,6 @@ func _get_moving_active_balls() -> Array[Ball]:
 	return moving_balls
 
 
-func _get_pocket_catch_radius(pocket_radius: float, ball_radius: float) -> float:
-	return pocket_radius + ball_radius * 0.5 + POCKET_CATCH_BONUS
 #endregion
 
 
@@ -631,8 +595,7 @@ func _reset_performance_frame_stats() -> void:
 	perf_ball_collisions_resolved = 0
 	perf_rail_checks = 0
 	perf_rail_collisions_resolved = 0
-	perf_pocket_checks = 0
-	perf_pocket_captures = 0
+	pocket_system.reset_frame_stats()
 	perf_physics_process_ms = 0.0
 	perf_ball_collision_ms = 0.0
 	perf_rail_collision_ms = 0.0
@@ -992,8 +955,8 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"ball_collisions_resolved": perf_ball_collisions_resolved,
 		"rail_checks": perf_rail_checks,
 		"rail_collisions_resolved": perf_rail_collisions_resolved,
-		"pocket_checks": perf_pocket_checks,
-		"pocket_captures": perf_pocket_captures,
+		"pocket_checks": pocket_system.get_checks_this_frame(),
+		"pocket_captures": pocket_system.get_captures_this_frame(),
 		"aim_prediction_enabled": aim_preview.is_prediction_enabled(),
 		"shot_comparison_enabled": aim_preview.is_shot_path_debug_enabled(),
 		"physics_process_ms": perf_physics_process_ms,

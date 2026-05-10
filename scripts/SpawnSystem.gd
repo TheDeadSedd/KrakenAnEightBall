@@ -277,20 +277,10 @@ func _is_safe_ball_position(candidate: Vector2, ball_radius: float, ignored_ball
 	if not table.playfield_rect.grow(-ball_radius).has_point(candidate):
 		return false
 
-	if _is_position_too_close_to_pocket(candidate, ball_radius):
+	if table.pocket_system.is_position_too_close_to_pocket(candidate, ball_radius):
 		return false
 
 	return not _is_position_too_close_to_ball(candidate, ball_radius, ignored_ball)
-
-
-func _is_position_too_close_to_pocket(candidate: Vector2, ball_radius: float) -> bool:
-	for pocket_index in range(table.pocket_positions.size()):
-		var pocket_position: Vector2 = table.pocket_positions[pocket_index]
-		var pocket_radius: float = table.pocket_radii[pocket_index]
-		if candidate.distance_to(pocket_position) < pocket_radius + ball_radius + 8.0:
-			return true
-
-	return false
 
 
 func _is_position_too_close_to_ball(candidate: Vector2, ball_radius: float, ignored_ball: Ball) -> bool:

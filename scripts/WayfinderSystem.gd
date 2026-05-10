@@ -133,7 +133,7 @@ func _find_guided_pocket(target: Ball) -> Vector2:
 	_print_debug("Wayfinder guide search | target #%s | velocity=%s" % [target.ball_number, velocity_direction])
 	var max_turn_dot: float = cos(deg_to_rad(WAYFINDER_GUIDE_MAX_TURN_ANGLE_DEGREES))
 
-	for pocket_position in table.pocket_positions:
+	for pocket_position in table.pocket_system.get_pocket_positions():
 		var accepted: bool = _is_pocket_guidance_candidate(target, pocket_position, velocity_direction, max_turn_dot)
 		if not accepted:
 			continue
