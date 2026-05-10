@@ -63,6 +63,7 @@ const SHIP_FLOOR_TEXTURE := preload("res://assets/table_art/ship_floor.png")
 const TABLE_FRAME_TEXTURE := preload("res://assets/table_art/pool_table_frame.png")
 const KRAKEN_SILHOUETTE_TEXTURE := preload("res://assets/table_art/kraken_silhouette.png")
 const PIRATE_SHIP_SILHOUETTE_TEXTURE := preload("res://assets/table_art/pirate_ship_silhouette.png")
+const CUE_TEXTURE := preload("res://assets/table_art/tentacle_pool_cue.png")
 
 # Presentation layout. The underlying table dimensions stay the same; the whole play space is centered in a larger 1920x1080 canvas.
 const PRESENTATION_OFFSET_X := 360.0
@@ -136,10 +137,15 @@ const MAX_DRAG_DISTANCE := 210.0
 const MIN_SHOT_DISTANCE := 12.0
 const SHOT_POWER := 9.4
 const CUE_GAP := 22.0
-const CUE_LENGTH := 130.0
-const CUE_WIDTH := 5.0
 const CUE_MIN_PULLBACK := 8.0
 const CUE_MAX_PULLBACK := 78.0
+const CUE_TEXTURE_REGION := Rect2(88, 339, 1356, 310)
+const CUE_SPRITE_LENGTH := 230.0
+const CUE_IDLE_SWAY_AMOUNT := 0.02
+const CUE_IDLE_SWAY_SPEED := 2.2
+const CUE_PULLBACK_LERP_SPEED := 14.0
+const CUE_RECOIL_DURATION := 0.18
+const CUE_RECOIL_RETURN_RATIO := 0.18
 const AIM_GUIDE_LENGTH := 180.0
 const AIM_PREDICTION_ENABLED := true
 const AIM_PREDICTION_MAX_DISTANCE := 900.0
@@ -164,6 +170,8 @@ const BANK_DEBUG_MARKER_LIFETIME := 1.0
 @onready var balls: Node2D = $Balls
 @onready var boundaries_root: Node = get_node_or_null("Boundaries")
 @onready var pockets_root: Node = get_node_or_null("Pockets")
+@onready var cue_pivot: Node2D = $CuePivot
+@onready var cue_sprite: Sprite2D = $CuePivot/CueSprite
 
 var active_result_callouts: Array[ResultCallout] = []
 var pending_callout_messages: Array[String] = []
@@ -174,6 +182,11 @@ var eight_start := Vector2.ZERO
 var drag_mouse_position := Vector2.ZERO
 var is_dragging := false
 var game_over := false
+var cue_visual_pullback := 0.0
+var cue_recoil_timer := 0.0
+var cue_recoil_start_pullback := 0.0
+var cue_release_position := Vector2.ZERO
+var cue_release_rotation := 0.0
 var shot_active := false
 var shot_pocketed_object_balls := 0
 var shot_cue_touched_rail := false
@@ -198,7 +211,9 @@ var bank_debug_markers: Array[BankDebugMarker] = []
 
 func _ready() -> void:
 	_cache_table_geometry()
+	_configure_cue_sprite()
 	if Engine.is_editor_hint():
+		_update_cue_visual(0.0)
 		queue_redraw()
 		return
 
@@ -230,6 +245,7 @@ func _physics_process(delta: float) -> void:
 	_process_spawn_queue(delta)
 	_process_callout_queue(delta)
 	_try_finish_shot()
+	_update_cue_visual(delta)
 
 	if DEBUG_BANK_PREDICTION and (is_dragging or not bank_debug_markers.is_empty()):
 		queue_redraw()
@@ -284,17 +300,12 @@ func _draw() -> void:
 	var drag_vector: Vector2 = _get_drag_vector(drag_mouse_position)
 	var aim_direction: Vector2 = drag_vector.normalized()
 	var power_ratio: float = clamp(drag_vector.length() / MAX_DRAG_DISTANCE, 0.0, 1.0)
-	var cue_pullback: float = _get_cue_pullback(drag_vector)
-	var cue_tip: Vector2 = cue_ball.global_position - aim_direction * (CUE_GAP + cue_pullback)
-	var cue_end: Vector2 = cue_tip - aim_direction * CUE_LENGTH
 	if AIM_PREDICTION_ENABLED:
 		_draw_aim_prediction(cue_ball.global_position, aim_direction, power_ratio)
 	else:
 		var guide_length: float = min(AIM_GUIDE_LENGTH, drag_vector.length() * 1.2)
 		var guide_end: Vector2 = cue_ball.global_position + aim_direction * guide_length
 		draw_line(cue_ball.global_position, guide_end, _get_aim_power_color(power_ratio), AIM_LINE_WIDTH)
-	draw_line(cue_tip, cue_end, Color("d8c298"), CUE_WIDTH)
-	draw_circle(cue_end, 6.0, Color("8a5b36"))
 
 
 func _draw_table_art() -> void:
@@ -1038,6 +1049,7 @@ func _try_start_drag(mouse_position: Vector2) -> void:
 		return
 
 	is_dragging = true
+	cue_recoil_timer = 0.0
 	drag_mouse_position = mouse_position
 	queue_redraw()
 
@@ -1046,14 +1058,21 @@ func _release_shot(_mouse_position: Vector2) -> void:
 	if not is_dragging:
 		return
 
-	is_dragging = false
 	var release_position: Vector2 = drag_mouse_position
 	var drag_vector: Vector2 = _get_drag_vector(release_position)
+	var release_pullback: float = _get_cue_pullback(drag_vector)
+	var release_direction: Vector2 = drag_vector.normalized()
+	is_dragging = false
 	if drag_vector.length() < MIN_SHOT_DISTANCE:
+		cue_recoil_timer = 0.0
 		queue_redraw()
 		return
 
 	cue_ball.velocity = drag_vector * SHOT_POWER
+	cue_release_position = cue_ball.global_position
+	cue_release_rotation = release_direction.angle() if release_direction != Vector2.ZERO else cue_pivot.rotation
+	cue_recoil_start_pullback = release_pullback
+	cue_recoil_timer = CUE_RECOIL_DURATION
 	_print_shot_power_debug(drag_vector, release_position)
 	_start_shot_tracking()
 	status_text_changed.emit("Shot taken. Wait for the balls to settle before shooting again.")
@@ -1068,6 +1087,64 @@ func _get_drag_vector(mouse_position: Vector2) -> Vector2:
 func _get_cue_pullback(drag_vector: Vector2) -> float:
 	var power_ratio: float = clamp(drag_vector.length() / MAX_DRAG_DISTANCE, 0.0, 1.0)
 	return lerp(CUE_MIN_PULLBACK, CUE_MAX_PULLBACK, power_ratio)
+
+
+func _configure_cue_sprite() -> void:
+	cue_sprite.texture = CUE_TEXTURE
+	cue_sprite.centered = false
+	cue_sprite.region_enabled = true
+	cue_sprite.region_rect = CUE_TEXTURE_REGION
+	var cue_scale: float = CUE_SPRITE_LENGTH / CUE_TEXTURE_REGION.size.x
+	cue_sprite.scale = Vector2.ONE * cue_scale
+	cue_sprite.z_index = 12
+
+
+func _update_cue_visual(delta: float) -> void:
+	if not is_instance_valid(cue_ball) or not cue_ball.visible or game_over:
+		cue_pivot.visible = false
+		return
+
+	var should_show: bool = is_dragging or cue_recoil_timer > 0.0
+	if not should_show and not _can_shoot():
+		cue_pivot.visible = false
+		return
+
+	var anchor_position: Vector2 = cue_ball.global_position
+	var rotation_angle := 0.0
+	var target_pullback := CUE_MIN_PULLBACK
+	if is_dragging:
+		var drag_vector: Vector2 = _get_drag_vector(drag_mouse_position)
+		var aim_direction: Vector2 = drag_vector.normalized()
+		rotation_angle = aim_direction.angle() if aim_direction != Vector2.ZERO else cue_pivot.rotation
+		target_pullback = _get_cue_pullback(drag_vector)
+	elif cue_recoil_timer > 0.0:
+		var recoil_ratio: float = 1.0 - (cue_recoil_timer / CUE_RECOIL_DURATION)
+		anchor_position = cue_release_position
+		rotation_angle = cue_release_rotation
+		target_pullback = lerp(cue_recoil_start_pullback, -CUE_MAX_PULLBACK * CUE_RECOIL_RETURN_RATIO, recoil_ratio)
+		cue_recoil_timer = max(cue_recoil_timer - delta, 0.0)
+	else:
+		var mouse_direction: Vector2 = (cue_ball.global_position - get_global_mouse_position()).normalized()
+		rotation_angle = mouse_direction.angle() if mouse_direction != Vector2.ZERO else cue_pivot.rotation
+		target_pullback = 0.0
+		should_show = _can_shoot()
+
+	var idle_sway: float = sin(Time.get_ticks_msec() * 0.001 * CUE_IDLE_SWAY_SPEED) * CUE_IDLE_SWAY_AMOUNT
+	cue_visual_pullback = lerp(cue_visual_pullback, target_pullback, clamp(delta * CUE_PULLBACK_LERP_SPEED, 0.0, 1.0))
+	cue_pivot.global_position = anchor_position
+	cue_pivot.rotation = rotation_angle + idle_sway
+	_position_cue_sprite(cue_visual_pullback)
+	cue_pivot.visible = should_show
+
+
+func _position_cue_sprite(pullback: float) -> void:
+	var cue_scale: float = cue_sprite.scale.x
+	var cue_width: float = CUE_TEXTURE_REGION.size.y * cue_scale
+	var cue_length: float = CUE_TEXTURE_REGION.size.x * cue_scale
+	cue_sprite.position = Vector2(
+		-(CUE_GAP + pullback + cue_length),
+		-cue_width * 0.5
+	)
 
 
 func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) -> void:
