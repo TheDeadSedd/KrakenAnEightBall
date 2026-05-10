@@ -59,6 +59,10 @@ const EDITOR_DRAW_POCKET_CATCH_ZONES := true
 
 const BALL_SCENE := preload("res://scenes/Ball.tscn")
 const CUE_BALL_SCENE := preload("res://scenes/CueBall.tscn")
+const SHIP_FLOOR_TEXTURE := preload("res://assets/table_art/ship_floor.png")
+const TABLE_FRAME_TEXTURE := preload("res://assets/table_art/pool_table_frame.png")
+const KRAKEN_SILHOUETTE_TEXTURE := preload("res://assets/table_art/kraken_silhouette.png")
+const PIRATE_SHIP_SILHOUETTE_TEXTURE := preload("res://assets/table_art/pirate_ship_silhouette.png")
 
 # Presentation layout. The underlying table dimensions stay the same; the whole play space is centered in a larger 1920x1080 canvas.
 const PRESENTATION_OFFSET_X := 360.0
@@ -87,18 +91,9 @@ const PRESENTATION_MARGIN_LEFT := 120.0
 const PRESENTATION_MARGIN_RIGHT := 120.0
 const PRESENTATION_MARGIN_TOP := 80.0
 const PRESENTATION_MARGIN_BOTTOM := 120.0
-const TABLE_WOOD_DARK := Color("2f1a12")
-const TABLE_WOOD_MID := Color("70452d")
-const TABLE_WOOD_LIGHT := Color("a16d45")
-const TABLE_BRASS := Color("c79b4a")
-const TABLE_FELT_DARK := Color("103f38")
-const TABLE_FELT_LIGHT := Color("1d6557")
-const TABLE_POCKET_SHADOW := Color(0.03, 0.03, 0.04, 0.92)
-const TABLE_POCKET_RING := Color("5f4630")
+const TABLE_FRAME_VISIBLE_BOUNDS := Rect2(311, 130, 1294, 794)
+const KRAKEN_ART_ALPHA := 0.18
 const TABLE_GUIDE_GLOW := Color(0.78, 0.92, 0.84, 0.12)
-const TABLE_STAGE_DARK := Color("383838")
-const TABLE_STAGE_LIGHT := Color("505050")
-const TABLE_STAGE_LINE := Color(1.0, 1.0, 1.0, 0.05)
 
 # Pocket feel. Catch radius also includes part of the ball radius.
 const POCKET_RADIUS := 18.0
@@ -283,7 +278,6 @@ func _try_debug_spawn_wayfinder(event: InputEvent) -> bool:
 func _draw() -> void:
 	_draw_table_art()
 	_draw_collision_debug()
-	_draw_pocket_art()
 	_draw_bank_debug_markers()
 
 	_draw_editor_guides()
@@ -309,100 +303,20 @@ func _draw() -> void:
 
 func _draw_table_art() -> void:
 	var presentation_rect: Rect2 = get_presentation_rect()
-	draw_rect(presentation_rect, TABLE_STAGE_DARK, true)
-	draw_rect(presentation_rect.grow(-14.0), TABLE_STAGE_LIGHT, false, 3.0)
-	_draw_stage_lines(presentation_rect)
-	draw_rect(TABLE_OUTER_RECT.grow(10.0), Color(0, 0, 0, 0.22), true)
-	draw_rect(TABLE_OUTER_RECT, TABLE_WOOD_DARK, true)
-	draw_rect(TABLE_RAIL_RECT, TABLE_WOOD_MID, true)
-	draw_rect(PLAYFIELD_RECT, TABLE_FELT_DARK, true)
-	_draw_rail_planks()
-	_draw_felt_compass()
-	draw_rect(TABLE_RAIL_RECT.grow(-8.0), TABLE_WOOD_LIGHT.darkened(0.24), false, 4.0)
-	draw_rect(TABLE_OUTER_RECT, TABLE_WOOD_LIGHT.darkened(0.62), false, 4.0)
-	draw_rect(PLAYFIELD_RECT.grow(3.0), TABLE_BRASS.darkened(0.38), false, 2.0)
-	draw_rect(PLAYFIELD_RECT, TABLE_FELT_LIGHT, false, 2.0)
+	draw_texture_rect(SHIP_FLOOR_TEXTURE, presentation_rect, false)
+	draw_rect(presentation_rect, Color(0, 0, 0, 0.18), true)
+	_draw_kraken_felt_art()
+	draw_texture_rect(TABLE_FRAME_TEXTURE, _get_table_frame_art_rect(), false)
 
 
-func _draw_stage_lines(stage_rect: Rect2) -> void:
-	for line_x in [stage_rect.position.x + 92.0, stage_rect.position.x + 248.0, stage_rect.end.x - 248.0, stage_rect.end.x - 92.0]:
-		draw_line(
-			Vector2(line_x, stage_rect.position.y),
-			Vector2(line_x, stage_rect.end.y),
-			TABLE_STAGE_LINE,
-			2.0
-		)
-
-	for line_y in [stage_rect.position.y + 76.0, stage_rect.end.y - 92.0]:
-		draw_line(
-			Vector2(stage_rect.position.x, line_y),
-			Vector2(stage_rect.end.x, line_y),
-			TABLE_STAGE_LINE,
-			2.0
-		)
-
-
-func _draw_rail_planks() -> void:
-	for line_x in [TABLE_RAIL_RECT.position.x + 170.0, TABLE_RAIL_RECT.position.x + 530.0, TABLE_RAIL_RECT.position.x + 890.0]:
-		draw_line(
-			Vector2(line_x, TABLE_RAIL_RECT.position.y + 12.0),
-			Vector2(line_x, TABLE_RAIL_RECT.end.y - 12.0),
-			Color(1, 0.88, 0.72, 0.08),
-			2.0
-		)
-
-	for line_y in [TABLE_RAIL_RECT.position.y + 86.0, TABLE_RAIL_RECT.end.y - 86.0]:
-		draw_line(
-			Vector2(TABLE_RAIL_RECT.position.x + 12.0, line_y),
-			Vector2(TABLE_RAIL_RECT.end.x - 12.0, line_y),
-			Color(0.18, 0.09, 0.06, 0.22),
-			2.0
-		)
-
-	for bolt_position in _get_table_bolt_positions():
-		draw_circle(bolt_position, 5.0, TABLE_BRASS.darkened(0.28))
-		draw_circle(bolt_position + Vector2(-1.0, -1.0), 2.2, TABLE_BRASS.lightened(0.18))
-
-
-func _draw_felt_compass() -> void:
-	var center: Vector2 = PLAYFIELD_RECT.get_center()
-	draw_circle(center, 48.0, Color(0.05, 0.18, 0.15, 0.18))
-	draw_arc(center, 66.0, 0.0, TAU, 56, Color(0.74, 0.83, 0.72, 0.11), 2.0)
-	draw_arc(center, 36.0, 0.0, TAU, 42, Color(0.74, 0.83, 0.72, 0.08), 1.5)
-
-	for angle in [0.0, PI * 0.5, PI, PI * 1.5]:
-		var tip: Vector2 = Vector2.RIGHT.rotated(angle)
-		var side: Vector2 = tip.orthogonal()
-		var points := PackedVector2Array([
-			center + tip * 52.0,
-			center - tip * 8.0 + side * 8.0,
-			center + tip * 10.0,
-			center - tip * 8.0 - side * 8.0,
-		])
-		draw_colored_polygon(points, Color(0.86, 0.79, 0.56, 0.12))
-
-	for angle in [PI * 0.25, PI * 0.75, PI * 1.25, PI * 1.75]:
-		var tip: Vector2 = Vector2.RIGHT.rotated(angle)
-		draw_line(center, center + tip * 44.0, Color(0.84, 0.88, 0.8, 0.10), 2.0)
-
-
-func _draw_pocket_art() -> void:
-	for pocket_position in pocket_positions:
-		draw_circle(pocket_position, POCKET_RADIUS + 12.0, TABLE_POCKET_RING)
-		draw_circle(pocket_position, POCKET_RADIUS + 8.5, TABLE_BRASS.darkened(0.46))
-		draw_circle(pocket_position + Vector2(0, 1.5), POCKET_RADIUS + 5.0, TABLE_POCKET_SHADOW)
-		draw_arc(pocket_position, POCKET_RADIUS + 9.0, 0.0, TAU, 48, Color(1.0, 0.9, 0.66, 0.22), 1.8)
-
-
-func _get_table_bolt_positions() -> Array[Vector2]:
-	return [
-		Vector2(TABLE_RAIL_RECT.position.x + 70.0, TABLE_RAIL_RECT.position.y + 26.0),
-		Vector2(TABLE_RAIL_RECT.get_center().x, TABLE_RAIL_RECT.position.y + 22.0),
-		Vector2(TABLE_RAIL_RECT.end.x - 70.0, TABLE_RAIL_RECT.position.y + 26.0),
-		Vector2(TABLE_RAIL_RECT.position.x + 70.0, TABLE_RAIL_RECT.end.y - 26.0),
-		Vector2(TABLE_RAIL_RECT.get_center().x, TABLE_RAIL_RECT.end.y - 22.0),
-		Vector2(TABLE_RAIL_RECT.end.x - 70.0, TABLE_RAIL_RECT.end.y - 26.0),
-	]
+func _draw_kraken_felt_art() -> void:
+	var kraken_rect: Rect2 = _fit_texture_rect_inside(KRAKEN_SILHOUETTE_TEXTURE, PLAYFIELD_RECT.grow(-54.0))
+	draw_texture_rect(
+		KRAKEN_SILHOUETTE_TEXTURE,
+		kraken_rect,
+		false,
+		Color(0.88, 0.94, 0.92, KRAKEN_ART_ALPHA)
+	)
 
 
 func _draw_collision_debug() -> void:
@@ -502,6 +416,25 @@ func get_presentation_rect() -> Rect2:
 		(TABLE_RIGHT - TABLE_LEFT) + PRESENTATION_MARGIN_LEFT + PRESENTATION_MARGIN_RIGHT,
 		(TABLE_BOTTOM - TABLE_TOP) + PRESENTATION_MARGIN_TOP + PRESENTATION_MARGIN_BOTTOM
 	)
+
+
+func _get_table_frame_art_rect() -> Rect2:
+	var texture_size: Vector2 = TABLE_FRAME_TEXTURE.get_size()
+	var scale_x: float = TABLE_OUTER_RECT.size.x / TABLE_FRAME_VISIBLE_BOUNDS.size.x
+	var scale_y: float = TABLE_OUTER_RECT.size.y / TABLE_FRAME_VISIBLE_BOUNDS.size.y
+	return Rect2(
+		TABLE_OUTER_RECT.position.x - TABLE_FRAME_VISIBLE_BOUNDS.position.x * scale_x,
+		TABLE_OUTER_RECT.position.y - TABLE_FRAME_VISIBLE_BOUNDS.position.y * scale_y,
+		texture_size.x * scale_x,
+		texture_size.y * scale_y
+	)
+
+
+func _fit_texture_rect_inside(texture: Texture2D, container: Rect2) -> Rect2:
+	var texture_size: Vector2 = texture.get_size()
+	var scale: float = min(container.size.x / texture_size.x, container.size.y / texture_size.y)
+	var draw_size: Vector2 = texture_size * scale
+	return Rect2(container.get_center() - draw_size * 0.5, draw_size)
 
 
 func _spawn_starting_balls() -> void:
