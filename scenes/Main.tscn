@@ -2,6 +2,7 @@
 
 [ext_resource type="PackedScene" path="res://scenes/Table.tscn" id="1_table_scene"]
 [ext_resource type="Script" uid="uid://cpk1835bhdruv" path="res://scripts/Main.gd" id="2_main_script"]
+[ext_resource type="FontFile" uid="uid://beldvxxv2lses" path="res://assets/fonts/Gothic Pixels.ttf" id="3_ui_font"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -34,7 +35,19 @@ a = Vector2(988, 784)
 b = Vector2(995, 779)
 
 [sub_resource type="CircleShape2D" id="CircleShape2D_rvslj"]
-radius = 40.04997
+radius = 37.01351
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_performance_overlay"]
+bg_color = Color(0.015, 0.02, 0.025, 0.82)
+border_width_left = 1
+border_width_top = 1
+border_width_right = 1
+border_width_bottom = 1
+border_color = Color(0.68, 0.82, 0.78, 0.38)
+corner_radius_top_left = 8
+corner_radius_top_right = 8
+corner_radius_bottom_right = 8
+corner_radius_bottom_left = 8
 
 [node name="Main" type="Node2D" unique_id=666290206]
 script = ExtResource("2_main_script")
@@ -196,27 +209,33 @@ mouse_filter = 2
 
 [node name="TitleLabel" type="Label" parent="CanvasLayer/HUD" unique_id=492201580]
 layout_mode = 0
-offset_left = 390.0
-offset_top = 150.0
-offset_right = 826.0
-offset_bottom = 186.0
+offset_left = 291.0
+offset_top = 162.0
+offset_right = 727.0
+offset_bottom = 202.0
 theme_override_colors/font_color = Color(0.96, 0.88, 0.66, 1)
 theme_override_colors/font_shadow_color = Color(0.12, 0.06, 0.02, 0.7)
+theme_override_colors/font_outline_color = Color(0.16, 0.07, 0.02, 0.95)
 theme_override_constants/shadow_offset_x = 2
 theme_override_constants/shadow_offset_y = 2
-theme_override_font_sizes/font_size = 28
+theme_override_constants/outline_size = 4
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 32
 text = "Kraken An Eight Ball"
 
 [node name="StatusLabel" type="Label" parent="CanvasLayer/HUD" unique_id=1124129470]
 layout_mode = 0
-offset_left = 390.0
-offset_top = 192.0
-offset_right = 1126.0
-offset_bottom = 248.0
+offset_left = 294.0
+offset_top = 202.0
+offset_right = 1030.0
+offset_bottom = 258.0
 theme_override_colors/font_color = Color(0.88, 0.86, 0.76, 1)
 theme_override_colors/font_shadow_color = Color(0.08, 0.05, 0.03, 0.52)
+theme_override_colors/font_outline_color = Color(0.08, 0.04, 0.02, 0.88)
 theme_override_constants/shadow_offset_x = 2
 theme_override_constants/shadow_offset_y = 2
+theme_override_constants/outline_size = 2
+theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 18
 text = "Loading table..."
 autowrap_mode = 3
@@ -229,28 +248,21 @@ offset_right = 1210.0
 offset_bottom = 1046.0
 theme_override_colors/font_color = Color(1, 0.9, 0.62, 1)
 theme_override_colors/font_shadow_color = Color(0.07, 0.03, 0.01, 0.85)
+theme_override_colors/font_outline_color = Color(0.18, 0.08, 0.02, 0.94)
 theme_override_constants/shadow_offset_x = 2
 theme_override_constants/shadow_offset_y = 2
+theme_override_constants/outline_size = 3
+theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 24
 horizontal_alignment = 1
-
-[node name="PhysicsDebugButton" type="Button" parent="CanvasLayer/HUD" unique_id=170177021]
-visible = false
-layout_mode = 0
-offset_left = 1530.0
-offset_top = 150.0
-offset_right = 1780.0
-offset_bottom = 182.0
-theme_override_font_sizes/font_size = 15
-text = "Physics Debug"
 
 [node name="PhysicsDebugPanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1058206188]
 visible = false
 layout_mode = 0
-offset_left = 1430.0
-offset_top = 190.0
-offset_right = 1780.0
-offset_bottom = 404.0
+offset_left = 34.0
+offset_top = 648.0
+offset_right = 384.0
+offset_bottom = 862.0
 
 [node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PhysicsDebugPanel" unique_id=657645572]
 layout_mode = 2
@@ -263,7 +275,99 @@ theme_override_constants/margin_bottom = 8
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_colors/font_shadow_color = Color(0.05, 0.05, 0.05, 0.45)
+theme_override_colors/font_outline_color = Color(0.02, 0.03, 0.03, 0.82)
 theme_override_constants/shadow_offset_x = 1
 theme_override_constants/shadow_offset_y = 1
+theme_override_constants/outline_size = 1
+theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 13
 text = "Physics debug idle."
+
+[node name="PerformanceOverlayPanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1244057898]
+visible = false
+layout_mode = 0
+offset_left = 12.0
+offset_top = 238.0
+offset_right = 440.0
+offset_bottom = 660.0
+mouse_filter = 2
+theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
+
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PerformanceOverlayPanel" unique_id=994516981]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 16
+theme_override_constants/margin_top = 14
+theme_override_constants/margin_right = 16
+theme_override_constants/margin_bottom = 14
+
+[node name="PerformanceOverlayLabel" type="Label" parent="CanvasLayer/HUD/PerformanceOverlayPanel/Margin" unique_id=708950832]
+layout_mode = 2
+mouse_filter = 2
+theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_constants/outline_size = 1
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 16
+text = "PERFORMANCE"
+
+[node name="DebugMenuPanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1761070164]
+visible = false
+layout_mode = 0
+offset_left = 34.0
+offset_top = 34.0
+offset_right = 384.0
+offset_bottom = 214.0
+
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/DebugMenuPanel" unique_id=2087057257]
+layout_mode = 2
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
+
+[node name="VBox" type="VBoxContainer" parent="CanvasLayer/HUD/DebugMenuPanel/Margin" unique_id=1129945752]
+layout_mode = 2
+theme_override_constants/separation = 6
+
+[node name="DebugTitleLabel" type="Label" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=382576450]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.9, 0.62, 1)
+theme_override_colors/font_outline_color = Color(0.02, 0.03, 0.03, 0.82)
+theme_override_constants/outline_size = 2
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 18
+text = "Debug Menu (`)"
+
+[node name="ShotPathCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=954332238]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 14
+text = "Show Shot Path Comparison"
+
+[node name="PhysicsDebugCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=705055577]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 14
+text = "Show Physics Debug"
+
+[node name="PerformanceOverlayCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=1678215402]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 14
+text = "Show Performance Overlay"
+
+[node name="DebugHotkeyLabel" type="Label" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=1546782174]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.86, 0.9, 0.82, 1)
+theme_override_colors/font_outline_color = Color(0.02, 0.03, 0.03, 0.82)
+theme_override_constants/outline_size = 1
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 13
+text = "F: Spawn Wayfinder Ball\nG: Spawn Normal Ball"

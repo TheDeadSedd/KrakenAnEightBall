@@ -120,7 +120,7 @@ func apply_friction(delta: float) -> void:
 	if speed <= 0.0:
 		return
 
-	# The earlier low-friction tuning was fun and may fit a chaotic table modifier later.
+	# Layered drag keeps fast shots lively while helping slow balls settle.
 	var effective_friction: float = _get_effective_friction(speed)
 	effective_friction *= _get_spawn_landing_damping_multiplier(delta)
 	velocity = velocity.move_toward(Vector2.ZERO, effective_friction * delta)

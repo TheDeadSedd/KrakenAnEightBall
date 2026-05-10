@@ -11,6 +11,9 @@ class AimPrediction:
 	var ball: Ball = null
 	var target_direction := Vector2.ZERO
 	var path_points: Array[Vector2] = []
+	var rail_position := Vector2.ZERO
+	var rail_normal := Vector2.ZERO
+	var post_bank_direction := Vector2.ZERO
 
 class BankDebugMarker:
 	var position := Vector2.ZERO
@@ -23,10 +26,12 @@ class AimBallHit:
 	var ball: Ball = null
 	var distance := INF
 
-class AimRailHit:
-	var distance := INF
+class BallMotionState:
 	var position := Vector2.ZERO
-	var normal := Vector2.ZERO
+	var velocity := Vector2.ZERO
+	var rail_position := Vector2.ZERO
+	var rail_normal := Vector2.ZERO
+	var hit_rail := false
 
 class ResultCallout:
 	var label: Label
@@ -45,25 +50,29 @@ class GuidedWayfinderBall:
 	var debug_log_cooldown := 0.0
 	var start_speed := 0.0
 
-# Debug and editor helpers.
+# Debug and testing helpers.
+# Pre-alpha testing mode: cue-ball and 8-ball sinks reset instead of ending the run.
 const DEBUG_NO_GAME_OVER := true
+const DEBUG_AIM_PATH_COMPARISON_DEFAULT := false
 const DEBUG_BANK_PREDICTION := false
-const DEBUG_DRAW_RAIL_RECTS := false
+const DEBUG_DRAW_BOUNDARY_RECTS := false
 const DEBUG_PHYSICS_PANEL_ENABLED := true
 const DEBUG_SHOT_POWER := false
 const DEBUG_WAYFINDER := false
+# Testing shortcut: press F to drop a Wayfinder without waiting for random reward spawns.
 const DEBUG_SPAWN_WAYFINDER_ENABLED := true
 const DEBUG_SPAWN_WAYFINDER_KEY := KEY_F
-const EDITOR_DRAW_GUIDES := true
-const EDITOR_DRAW_POCKET_CATCH_ZONES := true
+# Testing shortcut: press G to drop a normal object ball without changing reward rules.
+const DEBUG_SPAWN_NORMAL_BALL_ENABLED := true
+const DEBUG_SPAWN_NORMAL_BALL_KEY := KEY_G
 
 const BALL_SCENE := preload("res://scenes/Ball.tscn")
 const CUE_BALL_SCENE := preload("res://scenes/CueBall.tscn")
 const SHIP_FLOOR_TEXTURE := preload("res://assets/table_art/ship_floor.png")
 const TABLE_FRAME_TEXTURE := preload("res://assets/table_art/pool_table_frame.png")
 const KRAKEN_SILHOUETTE_TEXTURE := preload("res://assets/table_art/kraken_silhouette.png")
-const PIRATE_SHIP_SILHOUETTE_TEXTURE := preload("res://assets/table_art/pirate_ship_silhouette.png")
 const CUE_TEXTURE := preload("res://assets/table_art/tentacle_pool_cue.png")
+const UI_FONT := preload("res://assets/fonts/Gothic Pixels.ttf")
 
 # Presentation layout. The underlying table dimensions stay the same; the whole play space is centered in a larger 1920x1080 canvas.
 const PRESENTATION_OFFSET_X := 360.0
@@ -87,7 +96,6 @@ const PRESENTATION_MARGIN_TOP := 80.0
 const PRESENTATION_MARGIN_BOTTOM := 120.0
 const TABLE_FRAME_VISIBLE_BOUNDS := Rect2(311, 130, 1294, 794)
 const KRAKEN_ART_ALPHA := 0.18
-const TABLE_GUIDE_GLOW := Color(0.78, 0.92, 0.84, 0.12)
 const POCKET_CATCH_BONUS := 8.0
 
 # Starting layout.
@@ -146,26 +154,33 @@ const CUE_IDLE_SWAY_SPEED := 2.2
 const CUE_PULLBACK_LERP_SPEED := 14.0
 const CUE_RECOIL_DURATION := 0.18
 const CUE_RECOIL_RETURN_RATIO := 0.18
+const CUE_GRAB_BACK_PADDING_X := 34.0
+const CUE_GRAB_FRONT_PADDING_X := 10.0
+const CUE_GRAB_PADDING_Y := 28.0
 const AIM_GUIDE_LENGTH := 180.0
 const AIM_PREDICTION_ENABLED := true
 const AIM_PREDICTION_MAX_DISTANCE := 900.0
 const AIM_TARGET_LINE_LENGTH := 180.0
 const AIM_LINE_WIDTH := 2.0
-const AIM_PREDICTION_MARGIN := 1.5
 const AIM_BANK_EPSILON := 0.5
+const AIM_SIMULATION_FRAME_DELTA := 1.0 / 60.0
+const AIM_SIMULATION_MAX_BOUNCES := 1
 
 # Arcade physics tuning.
 const BALL_COLLISION_RESTITUTION := 0.86
 const BALL_VELOCITY_TRANSFER := 0.90
 const BALL_COLLISION_SKIN := 1.5
 const RAIL_RESTITUTION := 0.78
-const RAIL_THICKNESS := 28.0
 const RESET_SEARCH_STEP := 22.0
 const RESET_SEARCH_RINGS := 8
 const PHYSICS_SUBSTEPS := 4
+const BALL_COLLISION_GRID_CELL_SIZE := 56.0
 const PHYSICS_DEBUG_SPEED_THRESHOLD := 5.0
 const PHYSICS_DEBUG_MAX_BALLS := 10
 const BANK_DEBUG_MARKER_LIFETIME := 1.0
+const AIM_PATH_DEBUG_LIFETIME := 3.0
+const AIM_PATH_DEBUG_MAX_POINTS := 240
+const AIM_PATH_DEBUG_POINT_SPACING := 5.0
 
 @onready var balls: Node2D = $Balls
 @onready var boundaries_root: Node = get_node_or_null("Boundaries")
@@ -202,11 +217,33 @@ var playfield_rect := Rect2()
 var pocket_positions: Array[Vector2] = []
 var pocket_radii: Array[float] = []
 var boundary_shapes: Array[CollisionShape2D] = []
-var rail_rects: Array[Rect2] = []
+var boundary_reference_rects: Array[Rect2] = []
 # Only redirected Wayfinder-target pairs use this brief ignore window.
 var wayfinder_redirect_collision_cooldowns: Dictionary = {}
 var guided_wayfinder_balls: Dictionary = {}
 var bank_debug_markers: Array[BankDebugMarker] = []
+var last_predicted_aim_path: Array[Vector2] = []
+var last_predicted_rail_position := Vector2.ZERO
+var last_predicted_rail_normal := Vector2.ZERO
+var last_predicted_post_bank_direction := Vector2.ZERO
+var actual_cue_path: Array[Vector2] = []
+var aim_path_debug_timer := 0.0
+var actual_cue_path_recording := false
+var debug_aim_path_comparison_enabled := DEBUG_AIM_PATH_COMPARISON_DEFAULT
+var perf_ball_pair_checks := 0
+var perf_broadphase_candidate_pairs := 0
+var perf_spatial_grid_cells := 0
+var perf_spatial_grid_max_cell_size := 0
+var perf_ball_collisions_resolved := 0
+var perf_rail_checks := 0
+var perf_rail_collisions_resolved := 0
+var perf_pocket_checks := 0
+var perf_pocket_captures := 0
+var perf_physics_process_ms := 0.0
+var perf_ball_collision_ms := 0.0
+var perf_rail_collision_ms := 0.0
+var perf_pocket_check_ms := 0.0
+var perf_aim_prediction_ms := 0.0
 
 
 func _ready() -> void:
@@ -229,17 +266,28 @@ func _physics_process(delta: float) -> void:
 	if game_over:
 		return
 
+	var physics_start_usec: int = Time.get_ticks_usec()
+	_reset_performance_frame_stats()
 	_update_wayfinder_redirect_cooldowns(delta)
 	_update_bank_debug_markers(delta)
+	_update_aim_path_comparison_debug(delta)
 
 	var step_delta: float = delta / float(PHYSICS_SUBSTEPS)
 	for _step in range(PHYSICS_SUBSTEPS):
 		_update_wayfinder_guidance(step_delta)
 		_move_balls(step_delta)
+		var phase_start_usec: int = Time.get_ticks_usec()
 		_resolve_ball_collisions()
+		perf_ball_collision_ms += _elapsed_ms_since(phase_start_usec)
+		phase_start_usec = Time.get_ticks_usec()
 		if _handle_pocket_checks():
+			perf_pocket_check_ms += _elapsed_ms_since(phase_start_usec)
 			break
+		perf_pocket_check_ms += _elapsed_ms_since(phase_start_usec)
+		phase_start_usec = Time.get_ticks_usec()
 		_resolve_rail_collisions()
+		perf_rail_collision_ms += _elapsed_ms_since(phase_start_usec)
+		_record_actual_cue_path_step()
 		_apply_ball_friction(step_delta)
 
 	_process_spawn_queue(delta)
@@ -247,15 +295,17 @@ func _physics_process(delta: float) -> void:
 	_try_finish_shot()
 	_update_cue_visual(delta)
 
-	if DEBUG_BANK_PREDICTION and (is_dragging or not bank_debug_markers.is_empty()):
+	if _should_redraw_aim_debug():
 		queue_redraw()
+
+	perf_physics_process_ms = _elapsed_ms_since(physics_start_usec)
 
 
 func _unhandled_input(event: InputEvent) -> void:
 	if game_over or not is_instance_valid(cue_ball):
 		return
 
-	if _try_debug_spawn_wayfinder(event):
+	if _try_debug_spawn_ball(event):
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -266,12 +316,17 @@ func _unhandled_input(event: InputEvent) -> void:
 	elif event is InputEventMouseMotion and is_dragging:
 		drag_mouse_position = event.position
 		queue_redraw()
+	elif event is InputEventScreenTouch:
+		if event.pressed:
+			_try_start_drag(event.position)
+		else:
+			_release_shot(event.position)
+	elif event is InputEventScreenDrag and is_dragging:
+		drag_mouse_position = event.position
+		queue_redraw()
 
 
-func _try_debug_spawn_wayfinder(event: InputEvent) -> bool:
-	if not DEBUG_SPAWN_WAYFINDER_ENABLED:
-		return false
-
+func _try_debug_spawn_ball(event: InputEvent) -> bool:
 	if not (event is InputEventKey):
 		return false
 
@@ -279,11 +334,15 @@ func _try_debug_spawn_wayfinder(event: InputEvent) -> bool:
 	if not key_event.pressed or key_event.echo:
 		return false
 
-	if key_event.keycode != DEBUG_SPAWN_WAYFINDER_KEY:
-		return false
+	if DEBUG_SPAWN_WAYFINDER_ENABLED and key_event.keycode == DEBUG_SPAWN_WAYFINDER_KEY:
+		_queue_debug_wayfinder_spawn()
+		return true
 
-	_queue_debug_wayfinder_spawn()
-	return true
+	if DEBUG_SPAWN_NORMAL_BALL_ENABLED and key_event.keycode == DEBUG_SPAWN_NORMAL_BALL_KEY:
+		_queue_debug_normal_ball_spawn()
+		return true
+
+	return false
 
 
 func _draw() -> void:
@@ -291,8 +350,7 @@ func _draw() -> void:
 	_draw_table_art()
 	_draw_collision_debug()
 	_draw_bank_debug_markers()
-
-	_draw_editor_guides()
+	_draw_aim_path_comparison_debug()
 
 	if not is_dragging or not _can_shoot():
 		return
@@ -301,7 +359,7 @@ func _draw() -> void:
 	var aim_direction: Vector2 = drag_vector.normalized()
 	var power_ratio: float = clamp(drag_vector.length() / MAX_DRAG_DISTANCE, 0.0, 1.0)
 	if AIM_PREDICTION_ENABLED:
-		_draw_aim_prediction(cue_ball.global_position, aim_direction, power_ratio)
+		_draw_aim_prediction(cue_ball.global_position, drag_vector * SHOT_POWER, power_ratio)
 	else:
 		var guide_length: float = min(AIM_GUIDE_LENGTH, drag_vector.length() * 1.2)
 		var guide_end: Vector2 = cue_ball.global_position + aim_direction * guide_length
@@ -327,16 +385,16 @@ func _draw_kraken_felt_art() -> void:
 
 
 func _draw_collision_debug() -> void:
-	if Engine.is_editor_hint() or not DEBUG_DRAW_RAIL_RECTS:
+	if Engine.is_editor_hint() or not DEBUG_DRAW_BOUNDARY_RECTS:
 		return
 
-	for rail_rect in rail_rects:
-		draw_rect(rail_rect, Color(1, 0.22, 0.12, 0.22), true)
-		draw_rect(rail_rect, Color(1, 0.35, 0.2, 0.9), false, 2.0)
+	for boundary_rect in boundary_reference_rects:
+		draw_rect(boundary_rect, Color(1, 0.22, 0.12, 0.22), true)
+		draw_rect(boundary_rect, Color(1, 0.35, 0.2, 0.9), false, 2.0)
 
 
 func _draw_bank_debug_markers() -> void:
-	if not DEBUG_BANK_PREDICTION:
+	if not _bank_debug_visuals_enabled():
 		return
 
 	for marker in bank_debug_markers:
@@ -351,8 +409,37 @@ func _draw_bank_debug_markers() -> void:
 		draw_line(marker.position, marker.position + marker.normal * 24.0, normal_color, 1.8)
 
 
-func _draw_editor_guides() -> void:
-	return
+func _draw_aim_path_comparison_debug() -> void:
+	if not debug_aim_path_comparison_enabled or aim_path_debug_timer <= 0.0:
+		return
+
+	var fade: float = clamp(aim_path_debug_timer / AIM_PATH_DEBUG_LIFETIME, 0.0, 1.0)
+	_draw_debug_path(last_predicted_aim_path, Color(0.24, 0.92, 1.0, 0.65 * fade), 2.0)
+	_draw_debug_path(actual_cue_path, Color(1.0, 0.38, 0.22, 0.82 * fade), 2.4)
+	_draw_predicted_rail_comparison_marker(fade)
+
+
+func _draw_debug_path(path_points: Array[Vector2], color: Color, width: float) -> void:
+	if path_points.size() < 2:
+		return
+
+	for point_index in range(path_points.size() - 1):
+		draw_line(path_points[point_index], path_points[point_index + 1], color, width)
+
+	for point in path_points:
+		draw_circle(point, 2.5, color)
+
+
+func _draw_predicted_rail_comparison_marker(fade: float) -> void:
+	if last_predicted_rail_normal == Vector2.ZERO:
+		return
+
+	var rail_color := Color(0.25, 0.95, 1.0, 0.9 * fade)
+	var normal_color := Color(1.0, 0.95, 0.28, 0.75 * fade)
+	var post_bank_color := Color(0.95, 0.42, 1.0, 0.75 * fade)
+	draw_circle(last_predicted_rail_position, 7.0, rail_color)
+	draw_line(last_predicted_rail_position, last_predicted_rail_position + last_predicted_rail_normal * 30.0, normal_color, 2.0)
+	draw_line(last_predicted_rail_position, last_predicted_rail_position + last_predicted_post_bank_direction * 44.0, post_bank_color, 2.2)
 
 
 func _cache_table_geometry() -> void:
@@ -361,7 +448,7 @@ func _cache_table_geometry() -> void:
 	pocket_positions.clear()
 	pocket_radii.clear()
 	boundary_shapes.clear()
-	rail_rects.clear()
+	boundary_reference_rects.clear()
 
 	_build_pocket_positions()
 	_build_rail_debug_rects()
@@ -404,14 +491,10 @@ func _build_rail_debug_rects() -> void:
 			continue
 		if collision_shape.shape is RectangleShape2D:
 			boundary_shapes.append(collision_shape)
-			_add_boundary_debug_rect(collision_shape)
+			_add_boundary_reference_rect(collision_shape)
 
 
-func _add_rail_rect(position: Vector2, size: Vector2) -> void:
-	rail_rects.append(Rect2(position, size))
-
-
-func _add_boundary_debug_rect(collision_shape: CollisionShape2D) -> void:
+func _add_boundary_reference_rect(collision_shape: CollisionShape2D) -> void:
 	var rectangle_shape: RectangleShape2D = collision_shape.shape as RectangleShape2D
 	if rectangle_shape == null:
 		return
@@ -427,7 +510,7 @@ func _add_boundary_debug_rect(collision_shape: CollisionShape2D) -> void:
 	var bounds := Rect2(corners[0], Vector2.ZERO)
 	for corner in corners:
 		bounds = bounds.expand(corner)
-	rail_rects.append(bounds)
+	boundary_reference_rects.append(bounds)
 
 
 func _cache_boundary_reference_rect() -> void:
@@ -440,8 +523,8 @@ func _get_boundary_inner_rect() -> Rect2:
 	if boundary_shapes.is_empty():
 		return Rect2()
 
-	var overall_bounds: Rect2 = rail_rects[0]
-	for boundary_rect in rail_rects:
+	var overall_bounds: Rect2 = boundary_reference_rects[0]
+	for boundary_rect in boundary_reference_rects:
 		overall_bounds = overall_bounds.merge(boundary_rect)
 
 	var center: Vector2 = overall_bounds.get_center()
@@ -450,7 +533,7 @@ func _get_boundary_inner_rect() -> Rect2:
 	var top_inner := -INF
 	var bottom_inner := INF
 
-	for boundary_rect in rail_rects:
+	for boundary_rect in boundary_reference_rects:
 		if boundary_rect.size.x >= boundary_rect.size.y:
 			if boundary_rect.get_center().y < center.y:
 				top_inner = max(top_inner, boundary_rect.end.y)
@@ -594,9 +677,15 @@ func _apply_ball_friction(delta: float) -> void:
 
 func _resolve_ball_collisions() -> void:
 	var active_balls: Array[Ball] = _get_active_balls()
-	for i in range(active_balls.size()):
-		for j in range(i + 1, active_balls.size()):
-			_resolve_ball_pair(active_balls[i], active_balls[j])
+	if active_balls.is_empty():
+		return
+
+	var spatial_grid: Dictionary = _build_ball_collision_grid(active_balls)
+	var checked_pairs := {}
+	for ball in active_balls:
+		if not ball.is_moving():
+			continue
+		_resolve_ball_against_neighbor_cells(ball, spatial_grid, checked_pairs)
 
 
 func _get_active_balls() -> Array[Ball]:
@@ -608,7 +697,63 @@ func _get_active_balls() -> Array[Ball]:
 	return active_balls
 
 
+func _build_ball_collision_grid(active_balls: Array[Ball]) -> Dictionary:
+	var spatial_grid := {}
+	for ball in active_balls:
+		var cell: Vector2i = _get_ball_collision_grid_cell(ball.global_position)
+		if not spatial_grid.has(cell):
+			spatial_grid[cell] = []
+		spatial_grid[cell].append(ball)
+		perf_spatial_grid_max_cell_size = maxi(perf_spatial_grid_max_cell_size, spatial_grid[cell].size())
+
+	perf_spatial_grid_cells = spatial_grid.size()
+	return spatial_grid
+
+
+func _resolve_ball_against_neighbor_cells(ball: Ball, spatial_grid: Dictionary, checked_pairs: Dictionary) -> void:
+	var center_cell: Vector2i = _get_ball_collision_grid_cell(ball.global_position)
+	for x_offset in range(-1, 2):
+		for y_offset in range(-1, 2):
+			var neighbor_cell := center_cell + Vector2i(x_offset, y_offset)
+			if not spatial_grid.has(neighbor_cell):
+				continue
+			_resolve_ball_against_cell(ball, spatial_grid[neighbor_cell], checked_pairs)
+
+
+func _resolve_ball_against_cell(ball: Ball, cell_balls: Array, checked_pairs: Dictionary) -> void:
+	for other_ball in cell_balls:
+		var target_ball := other_ball as Ball
+		if target_ball == null or target_ball == ball:
+			continue
+
+		var pair_key: String = _get_ball_pair_key(ball, target_ball)
+		if checked_pairs.has(pair_key):
+			continue
+
+		checked_pairs[pair_key] = true
+		perf_broadphase_candidate_pairs += 1
+		_resolve_ball_pair(ball, target_ball)
+
+
+func _get_ball_collision_grid_cell(position: Vector2) -> Vector2i:
+	return Vector2i(
+		floori(position.x / BALL_COLLISION_GRID_CELL_SIZE),
+		floori(position.y / BALL_COLLISION_GRID_CELL_SIZE)
+	)
+
+
+func _get_ball_pair_key(ball_a: Ball, ball_b: Ball) -> String:
+	var first_id: int = ball_a.get_instance_id()
+	var second_id: int = ball_b.get_instance_id()
+	if first_id > second_id:
+		var temp_id: int = first_id
+		first_id = second_id
+		second_id = temp_id
+	return "%s:%s" % [first_id, second_id]
+
+
 func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
+	perf_ball_pair_checks += 1
 	var offset: Vector2 = ball_b.global_position - ball_a.global_position
 	var distance: float = offset.length()
 	var real_combined_radius: float = ball_a.radius + ball_b.radius
@@ -621,7 +766,9 @@ func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
 	if real_overlap > 0.0:
 		_separate_overlapping_balls(ball_a, ball_b, normal, real_overlap)
 
-	_apply_ball_collision_response(ball_a, ball_b, normal)
+	if _apply_ball_collision_response(ball_a, ball_b, normal):
+		perf_ball_collisions_resolved += 1
+	_note_actual_cue_ball_hit(ball_a, ball_b)
 	_handle_wayfinder_cue_activation(ball_a, ball_b)
 	_try_begin_wayfinder_guidance(ball_a, ball_b)
 	_try_begin_wayfinder_guidance(ball_b, ball_a)
@@ -633,17 +780,30 @@ func _separate_overlapping_balls(ball_a: Ball, ball_b: Ball, normal: Vector2, ov
 	ball_b.global_position += correction
 
 
-func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2) -> void:
+func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2) -> bool:
 	var relative_velocity: Vector2 = ball_a.velocity - ball_b.velocity
 	var speed_along_normal: float = relative_velocity.dot(normal)
 	if speed_along_normal <= 0.0:
-		return
+		return false
 
 	var impulse_strength: float = (1.0 + BALL_COLLISION_RESTITUTION) * speed_along_normal * 0.5
 	impulse_strength *= BALL_VELOCITY_TRANSFER
 	var impulse: Vector2 = normal * impulse_strength
 	ball_a.velocity -= impulse
 	ball_b.velocity += impulse
+	return true
+
+
+func _note_actual_cue_ball_hit(ball_a: Ball, ball_b: Ball) -> void:
+	if not debug_aim_path_comparison_enabled or not actual_cue_path_recording:
+		return
+
+	if ball_a != cue_ball and ball_b != cue_ball:
+		return
+
+	actual_cue_path.append(cue_ball.global_position)
+	_stop_actual_cue_path_recording()
+	print("Bank debug | actual cue hit ball | pos=%s" % cue_ball.global_position)
 
 
 func _handle_wayfinder_cue_activation(ball_a: Ball, ball_b: Ball) -> void:
@@ -704,41 +864,61 @@ func _resolve_rail_collisions() -> void:
 	if boundary_shapes.is_empty():
 		return
 
-	for child in balls.get_children():
-		var ball := child as Ball
-		if ball == null or not ball.is_gameplay_active():
-			continue
-
+	for ball in _get_moving_active_balls():
 		for boundary_shape in boundary_shapes:
+			perf_rail_checks += 1
 			_resolve_ball_against_boundary_shape(ball, boundary_shape)
 
 
-func _resolve_ball_inside_playfield(ball: Ball) -> void:
-	return
-
-
 func _handle_pocket_checks() -> bool:
-	for child in balls.get_children():
-		var ball := child as Ball
-		if ball == null or not ball.is_gameplay_active():
-			continue
-
+	for ball in _get_moving_active_balls():
 		for pocket_index in range(pocket_positions.size()):
+			perf_pocket_checks += 1
 			var pocket_position: Vector2 = pocket_positions[pocket_index]
 			var catch_radius: float = _get_pocket_catch_radius(pocket_radii[pocket_index], ball.radius)
 			if ball.global_position.distance_to(pocket_position) <= catch_radius:
+				perf_pocket_captures += 1
 				_handle_pocketed_ball(ball)
 				return true
 
 	return false
 
 
+func _get_moving_active_balls() -> Array[Ball]:
+	var moving_balls: Array[Ball] = []
+	for child in balls.get_children():
+		var ball := child as Ball
+		if ball != null and ball.is_gameplay_active() and ball.is_moving():
+			moving_balls.append(ball)
+	return moving_balls
+
+
 func _get_pocket_catch_radius(pocket_radius: float, ball_radius: float) -> float:
 	return pocket_radius + ball_radius * 0.5 + POCKET_CATCH_BONUS
 
 
+func _reset_performance_frame_stats() -> void:
+	perf_ball_pair_checks = 0
+	perf_broadphase_candidate_pairs = 0
+	perf_spatial_grid_cells = 0
+	perf_spatial_grid_max_cell_size = 0
+	perf_ball_collisions_resolved = 0
+	perf_rail_checks = 0
+	perf_rail_collisions_resolved = 0
+	perf_pocket_checks = 0
+	perf_pocket_captures = 0
+	perf_physics_process_ms = 0.0
+	perf_ball_collision_ms = 0.0
+	perf_rail_collision_ms = 0.0
+	perf_pocket_check_ms = 0.0
+
+
+func _elapsed_ms_since(start_usec: int) -> float:
+	return float(Time.get_ticks_usec() - start_usec) / 1000.0
+
+
 func _update_bank_debug_markers(delta: float) -> void:
-	if not DEBUG_BANK_PREDICTION:
+	if not _bank_debug_visuals_enabled():
 		bank_debug_markers.clear()
 		return
 
@@ -751,13 +931,42 @@ func _update_bank_debug_markers(delta: float) -> void:
 	bank_debug_markers = kept_markers
 
 
+func _update_aim_path_comparison_debug(delta: float) -> void:
+	if not debug_aim_path_comparison_enabled:
+		_stop_actual_cue_path_recording()
+		last_predicted_aim_path.clear()
+		actual_cue_path.clear()
+		last_predicted_rail_position = Vector2.ZERO
+		last_predicted_rail_normal = Vector2.ZERO
+		last_predicted_post_bank_direction = Vector2.ZERO
+		aim_path_debug_timer = 0.0
+		return
+
+	if aim_path_debug_timer > 0.0 and not actual_cue_path_recording:
+		aim_path_debug_timer = max(aim_path_debug_timer - delta, 0.0)
+
+
+func _should_redraw_aim_debug() -> bool:
+	if DEBUG_BANK_PREDICTION and (is_dragging or not bank_debug_markers.is_empty()):
+		return true
+
+	if debug_aim_path_comparison_enabled and (actual_cue_path_recording or aim_path_debug_timer > 0.0):
+		return true
+
+	return false
+
+
+func _bank_debug_visuals_enabled() -> bool:
+	return DEBUG_BANK_PREDICTION or debug_aim_path_comparison_enabled
+
+
 func _record_actual_bank_debug(
 	ball: Ball,
 	hit_position: Vector2,
 	incoming_velocity: Vector2,
 	normal: Vector2
 ) -> void:
-	if not DEBUG_BANK_PREDICTION or ball != cue_ball or not shot_active or normal == Vector2.ZERO:
+	if not _bank_debug_visuals_enabled() or ball != cue_ball or not shot_active or normal == Vector2.ZERO:
 		return
 
 	var marker: BankDebugMarker = BankDebugMarker.new()
@@ -769,41 +978,93 @@ func _record_actual_bank_debug(
 	bank_debug_markers.append(marker)
 	queue_redraw()
 
+	_print_actual_bank_debug(hit_position, marker.incoming_direction, marker.outgoing_direction, normal)
+
+
+func _print_actual_bank_debug(
+	hit_position: Vector2,
+	incoming_direction: Vector2,
+	outgoing_direction: Vector2,
+	normal: Vector2
+) -> void:
+	if not _bank_debug_visuals_enabled():
+		return
+
 	print(
 		"Bank debug | actual rail hit | pos=%s | incoming=%s | outgoing=%s | normal=%s" % [
 			hit_position,
-			marker.incoming_direction,
-			marker.outgoing_direction,
+			incoming_direction,
+			outgoing_direction,
 			normal,
 		]
 	)
 
 
+func _start_aim_path_comparison_debug(prediction: AimPrediction) -> void:
+	if not debug_aim_path_comparison_enabled:
+		return
+
+	last_predicted_aim_path = prediction.path_points.duplicate()
+	last_predicted_rail_position = prediction.rail_position
+	last_predicted_rail_normal = prediction.rail_normal
+	last_predicted_post_bank_direction = prediction.post_bank_direction
+	actual_cue_path = [cue_ball.global_position]
+	actual_cue_path_recording = true
+	aim_path_debug_timer = AIM_PATH_DEBUG_LIFETIME
+	_print_predicted_bank_debug(prediction)
+
+
+func _record_actual_cue_path_step() -> void:
+	if not debug_aim_path_comparison_enabled or not actual_cue_path_recording:
+		return
+
+	if not is_instance_valid(cue_ball) or not cue_ball.is_gameplay_active():
+		_stop_actual_cue_path_recording()
+		return
+
+	if actual_cue_path.is_empty():
+		actual_cue_path.append(cue_ball.global_position)
+		return
+
+	var last_point: Vector2 = actual_cue_path[actual_cue_path.size() - 1]
+	if last_point.distance_to(cue_ball.global_position) >= AIM_PATH_DEBUG_POINT_SPACING:
+		actual_cue_path.append(cue_ball.global_position)
+
+	if actual_cue_path.size() >= AIM_PATH_DEBUG_MAX_POINTS or cue_ball.velocity.length() <= PHYSICS_DEBUG_SPEED_THRESHOLD:
+		_stop_actual_cue_path_recording()
+
+
+func _stop_actual_cue_path_recording() -> void:
+	actual_cue_path_recording = false
+
+
+func _print_predicted_bank_debug(prediction: AimPrediction) -> void:
+	if not _bank_debug_visuals_enabled():
+		return
+
+	print(
+		"Bank debug | predicted path | rail_pos=%s | rail_normal=%s | post_bank_dir=%s | points=%s" % [
+			prediction.rail_position,
+			prediction.rail_normal,
+			prediction.post_bank_direction,
+			prediction.path_points.size(),
+		]
+	)
+
+
 func _resolve_ball_against_boundary_shape(ball: Ball, collision_shape: CollisionShape2D) -> void:
-	var rectangle_shape: RectangleShape2D = collision_shape.shape as RectangleShape2D
-	if rectangle_shape == null:
-		return
-
 	var incoming_velocity: Vector2 = ball.velocity
-	var shape_transform: Transform2D = collision_shape.global_transform
-	var local_ball_position: Vector2 = shape_transform.affine_inverse() * ball.global_position
-	var half_size: Vector2 = rectangle_shape.size * 0.5
-	var closest_local: Vector2 = local_ball_position.clamp(-half_size, half_size)
-	var delta_local: Vector2 = local_ball_position - closest_local
-	var distance: float = delta_local.length()
-	if distance >= ball.radius:
-		return
+	var step_result: BallMotionState = BallMotionState.new()
+	step_result.position = ball.global_position
+	step_result.velocity = ball.velocity
+	_resolve_boundary_collision_for_state(step_result, collision_shape, ball.radius)
+	ball.global_position = step_result.position
+	ball.velocity = step_result.velocity
 
-	var normal_local: Vector2 = _get_boundary_collision_normal_local(local_ball_position, closest_local, half_size, distance)
-	var push_distance: float = ball.radius - distance + 0.01
-	var normal_world: Vector2 = shape_transform.basis_xform(normal_local).normalized()
-	ball.global_position += normal_world * push_distance
-
-	var normal_speed: float = ball.velocity.dot(normal_world)
-	if normal_speed < 0.0:
-		ball.velocity -= normal_world * (1.0 + RAIL_RESTITUTION) * normal_speed
+	if step_result.hit_rail:
+		perf_rail_collisions_resolved += 1
 		_note_cue_rail_touch(ball)
-		_record_actual_bank_debug(ball, ball.global_position, incoming_velocity, normal_world)
+		_record_actual_bank_debug(ball, ball.global_position, incoming_velocity, step_result.rail_normal)
 
 
 func _get_boundary_collision_normal_local(
@@ -1045,7 +1306,7 @@ func _try_start_drag(mouse_position: Vector2) -> void:
 	if not _can_shoot():
 		return
 
-	if cue_ball.global_position.distance_to(mouse_position) > cue_ball.radius * 1.8:
+	if not _is_position_in_cue_grab_zone(mouse_position):
 		return
 
 	is_dragging = true
@@ -1068,6 +1329,8 @@ func _release_shot(_mouse_position: Vector2) -> void:
 		queue_redraw()
 		return
 
+	if release_direction != Vector2.ZERO:
+		_start_aim_path_comparison_debug(_get_first_aim_collision(cue_ball.global_position, drag_vector * SHOT_POWER))
 	cue_ball.velocity = drag_vector * SHOT_POWER
 	cue_release_position = cue_ball.global_position
 	cue_release_rotation = release_direction.angle() if release_direction != Vector2.ZERO else cue_pivot.rotation
@@ -1087,6 +1350,36 @@ func _get_drag_vector(mouse_position: Vector2) -> Vector2:
 func _get_cue_pullback(drag_vector: Vector2) -> float:
 	var power_ratio: float = clamp(drag_vector.length() / MAX_DRAG_DISTANCE, 0.0, 1.0)
 	return lerp(CUE_MIN_PULLBACK, CUE_MAX_PULLBACK, power_ratio)
+
+
+func _is_position_in_cue_grab_zone(world_position: Vector2) -> bool:
+	if cue_pivot.visible:
+		var visible_cue_position: Vector2 = cue_pivot.global_transform.affine_inverse() * world_position
+		if _get_cue_grab_rect(cue_visual_pullback).has_point(visible_cue_position):
+			return true
+
+	var drag_vector: Vector2 = _get_drag_vector(world_position)
+	var aim_direction: Vector2 = drag_vector.normalized()
+	if aim_direction == Vector2.ZERO:
+		return false
+
+	var cue_transform := Transform2D(aim_direction.angle(), cue_ball.global_position)
+	var local_position: Vector2 = cue_transform.affine_inverse() * world_position
+	var pullback: float = _get_cue_pullback(drag_vector)
+	var cue_rect: Rect2 = _get_cue_grab_rect(pullback)
+	return cue_rect.has_point(local_position)
+
+
+func _get_cue_grab_rect(pullback: float) -> Rect2:
+	var cue_scale: float = cue_sprite.scale.x
+	var cue_width: float = CUE_TEXTURE_REGION.size.y * cue_scale
+	var cue_length: float = CUE_TEXTURE_REGION.size.x * cue_scale
+	return Rect2(
+		-(CUE_GAP + pullback + cue_length) - CUE_GRAB_BACK_PADDING_X,
+		-cue_width * 0.5 - CUE_GRAB_PADDING_Y,
+		cue_length + CUE_GRAB_BACK_PADDING_X + CUE_GRAB_FRONT_PADDING_X,
+		cue_width + CUE_GRAB_PADDING_Y * 2.0
+	)
 
 
 func _configure_cue_sprite() -> void:
@@ -1160,8 +1453,10 @@ func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) ->
 	)
 
 
-func _draw_aim_prediction(origin: Vector2, direction: Vector2, power_ratio: float) -> void:
-	var prediction: AimPrediction = _get_first_aim_collision(origin, direction)
+func _draw_aim_prediction(origin: Vector2, initial_velocity: Vector2, power_ratio: float) -> void:
+	var aim_start_usec: int = Time.get_ticks_usec()
+	var prediction: AimPrediction = _get_first_aim_collision(origin, initial_velocity)
+	perf_aim_prediction_ms = _elapsed_ms_since(aim_start_usec)
 	var aim_color: Color = _get_aim_power_color(power_ratio)
 
 	for point_index in range(prediction.path_points.size() - 1):
@@ -1189,15 +1484,13 @@ func _draw_aim_prediction(origin: Vector2, direction: Vector2, power_ratio: floa
 
 
 func _draw_predicted_bank_debug(prediction: AimPrediction) -> void:
-	if not DEBUG_BANK_PREDICTION or prediction.path_points.size() < 3:
+	if not DEBUG_BANK_PREDICTION or prediction.rail_normal == Vector2.ZERO:
 		return
 
-	var rail_point: Vector2 = prediction.path_points[1]
-	var reflected_direction: Vector2 = (prediction.path_points[2] - prediction.path_points[1]).normalized()
 	var predicted_color := Color(0.4, 0.95, 1.0, 0.85)
 	var reflected_color := Color(0.92, 0.5, 1.0, 0.75)
-	draw_circle(rail_point, 6.0, predicted_color)
-	draw_line(rail_point, rail_point + reflected_direction * 42.0, reflected_color, 2.2)
+	draw_circle(prediction.rail_position, 6.0, predicted_color)
+	draw_line(prediction.rail_position, prediction.rail_position + prediction.post_bank_direction * 42.0, reflected_color, 2.2)
 
 
 func _get_aim_power_color(power_ratio: float) -> Color:
@@ -1208,48 +1501,131 @@ func _get_aim_power_color(power_ratio: float) -> Color:
 	return Color("df5a4d")
 
 
-func _get_first_aim_collision(origin: Vector2, direction: Vector2) -> AimPrediction:
+func _get_first_aim_collision(origin: Vector2, initial_velocity: Vector2) -> AimPrediction:
 	var prediction: AimPrediction = AimPrediction.new()
 	prediction.path_points = [origin]
-
-	var ball_hit: AimBallHit = _get_first_aim_ball_hit(origin, direction)
-	var rail_hit: AimRailHit = _get_aim_rail_hit(origin, direction)
-	var rail_distance: float = rail_hit.distance
-	var stop_distance: float = min(AIM_PREDICTION_MAX_DISTANCE, rail_distance)
-
-	if ball_hit.ball != null and ball_hit.distance <= stop_distance:
-		return _make_ball_prediction(origin, direction, ball_hit.ball, ball_hit.distance)
-
-	if rail_hit.distance > AIM_PREDICTION_MAX_DISTANCE or rail_hit.normal == Vector2.ZERO:
-		prediction.position = origin + direction * AIM_PREDICTION_MAX_DISTANCE
-		prediction.path_points.append(prediction.position)
+	if initial_velocity == Vector2.ZERO:
 		return prediction
 
-	prediction.path_points.append(rail_hit.position)
-	var reflected_direction: Vector2 = direction.bounce(rail_hit.normal).normalized()
-	var bounce_origin: Vector2 = rail_hit.position + reflected_direction * AIM_BANK_EPSILON
-	var remaining_distance: float = max(AIM_PREDICTION_MAX_DISTANCE - rail_hit.distance, 0.0)
-	var bank_ball_hit: AimBallHit = _get_first_aim_ball_hit(bounce_origin, reflected_direction)
-	var bank_rail_hit: AimRailHit = _get_aim_rail_hit(bounce_origin, reflected_direction)
-	var bank_stop_distance: float = min(remaining_distance, bank_rail_hit.distance)
+	var simulated_position: Vector2 = origin
+	var simulated_velocity: Vector2 = initial_velocity
+	var traveled_distance := 0.0
+	var bounce_count := 0
+	var step_delta: float = AIM_SIMULATION_FRAME_DELTA / float(PHYSICS_SUBSTEPS)
 
-	if bank_ball_hit.ball != null and bank_ball_hit.distance <= bank_stop_distance:
-		var bank_impact_position: Vector2 = bounce_origin + reflected_direction * bank_ball_hit.distance
-		prediction.collision_type = "ball"
-		prediction.position = bank_impact_position
-		prediction.path_points.append(bank_impact_position)
-		prediction.ball = bank_ball_hit.ball
-		var target_direction: Vector2 = bank_ball_hit.ball.global_position - bank_impact_position
-		prediction.target_direction = target_direction.normalized() if target_direction.length() > 0.0 else reflected_direction
-		return prediction
+	while traveled_distance < AIM_PREDICTION_MAX_DISTANCE and simulated_velocity.length() > cue_ball.stop_threshold:
+		var previous_position: Vector2 = simulated_position
+		var movement_end: Vector2 = simulated_position + simulated_velocity * step_delta
+		var ball_hit: AimBallHit = _get_first_aim_ball_hit_at_position(movement_end)
+		if ball_hit.ball != null:
+			var hit_direction: Vector2 = simulated_velocity.normalized()
+			return _make_ball_prediction_from_position(prediction, hit_direction, ball_hit.ball, movement_end)
 
-	prediction.collision_type = "rail"
-	prediction.position = bounce_origin + reflected_direction * bank_stop_distance
-	prediction.path_points.append(prediction.position)
+		var step_result: BallMotionState = _simulate_aim_cue_step(movement_end, simulated_velocity, step_delta)
+		simulated_position = step_result.position
+		simulated_velocity = step_result.velocity
+		_append_prediction_path_point(prediction, simulated_position)
+		traveled_distance += previous_position.distance_to(simulated_position)
+
+		if step_result.hit_rail:
+			if bounce_count == 0:
+				_set_prediction_rail_debug(prediction, step_result)
+			bounce_count += 1
+			if bounce_count > AIM_SIMULATION_MAX_BOUNCES:
+				break
+
+	prediction.collision_type = "rail" if bounce_count > 0 else "none"
+	prediction.position = simulated_position
+	_append_prediction_path_point(prediction, simulated_position)
 	return prediction
 
 
-func _get_first_aim_ball_hit(origin: Vector2, direction: Vector2) -> AimBallHit:
+func _simulate_aim_cue_step(moved_position: Vector2, velocity: Vector2, delta: float) -> BallMotionState:
+	var step_result: BallMotionState = BallMotionState.new()
+	step_result.position = moved_position
+	step_result.velocity = velocity
+
+	for boundary_shape in boundary_shapes:
+		_resolve_boundary_collision_for_state(step_result, boundary_shape, cue_ball.radius)
+
+	step_result.velocity = _apply_prediction_friction(step_result.velocity, delta)
+	return step_result
+
+
+func _resolve_boundary_collision_for_state(
+	step_result: BallMotionState,
+	collision_shape: CollisionShape2D,
+	ball_radius: float
+) -> void:
+	var rectangle_shape: RectangleShape2D = collision_shape.shape as RectangleShape2D
+	if rectangle_shape == null:
+		return
+
+	var shape_transform: Transform2D = collision_shape.global_transform
+	var local_position: Vector2 = shape_transform.affine_inverse() * step_result.position
+	var half_size: Vector2 = rectangle_shape.size * 0.5
+	var closest_local: Vector2 = local_position.clamp(-half_size, half_size)
+	var distance: float = local_position.distance_to(closest_local)
+	if distance >= ball_radius:
+		return
+
+	_apply_boundary_response_to_state(
+		step_result,
+		shape_transform,
+		local_position,
+		closest_local,
+		half_size,
+		distance,
+		ball_radius
+	)
+
+
+func _apply_boundary_response_to_state(
+	step_result: BallMotionState,
+	shape_transform: Transform2D,
+	local_position: Vector2,
+	closest_local: Vector2,
+	half_size: Vector2,
+	distance: float,
+	ball_radius: float
+) -> void:
+	var normal_local: Vector2 = _get_boundary_collision_normal_local(local_position, closest_local, half_size, distance)
+	var normal_world: Vector2 = shape_transform.basis_xform(normal_local).normalized()
+	step_result.position += normal_world * (ball_radius - distance + 0.01)
+
+	var normal_speed: float = step_result.velocity.dot(normal_world)
+	if normal_speed >= 0.0:
+		return
+
+	step_result.velocity -= normal_world * (1.0 + RAIL_RESTITUTION) * normal_speed
+	if not step_result.hit_rail:
+		step_result.hit_rail = true
+		step_result.rail_position = step_result.position
+		step_result.rail_normal = normal_world
+
+
+func _apply_prediction_friction(velocity: Vector2, delta: float) -> Vector2:
+	var speed: float = velocity.length()
+	if speed <= 0.0:
+		return Vector2.ZERO
+
+	var effective_friction: float = cue_ball._get_effective_friction(speed)
+	var updated_velocity: Vector2 = velocity.move_toward(Vector2.ZERO, effective_friction * delta)
+	return Vector2.ZERO if updated_velocity.length() < cue_ball.stop_threshold else updated_velocity
+
+
+func _append_prediction_path_point(prediction: AimPrediction, point: Vector2) -> void:
+	if prediction.path_points.is_empty() or prediction.path_points[prediction.path_points.size() - 1].distance_to(point) >= 2.0:
+		prediction.path_points.append(point)
+
+
+func _set_prediction_rail_debug(prediction: AimPrediction, step_result: BallMotionState) -> void:
+	prediction.rail_position = step_result.rail_position
+	prediction.rail_normal = step_result.rail_normal
+	prediction.post_bank_direction = step_result.velocity.normalized()
+
+
+func _get_first_aim_ball_hit_at_position(cue_position: Vector2) -> AimBallHit:
 	var nearest_hit: AimBallHit = AimBallHit.new()
 
 	for child in balls.get_children():
@@ -1257,90 +1633,32 @@ func _get_first_aim_ball_hit(origin: Vector2, direction: Vector2) -> AimBallHit:
 		if target_ball == null or target_ball == cue_ball or not target_ball.is_gameplay_active():
 			continue
 
-		var hit_distance: float = _get_aim_ball_distance(origin, direction, target_ball)
-		if hit_distance < nearest_hit.distance:
+		var hit_distance: float = cue_position.distance_to(target_ball.global_position)
+		var combined_radius: float = cue_ball.radius + target_ball.radius + BALL_COLLISION_SKIN
+		if hit_distance < combined_radius and hit_distance < nearest_hit.distance:
 			nearest_hit.ball = target_ball
 			nearest_hit.distance = hit_distance
 
 	return nearest_hit
 
 
-func _get_aim_ball_distance(origin: Vector2, direction: Vector2, target_ball: Ball) -> float:
-	var combined_radius: float = cue_ball.radius + target_ball.radius + BALL_COLLISION_SKIN
-	var prediction_radius: float = max(combined_radius - AIM_PREDICTION_MARGIN, 0.0)
-	var to_target: Vector2 = target_ball.global_position - origin
-	var projection: float = to_target.dot(direction)
-	if projection <= 0.0:
-		return INF
-
-	var closest_point: Vector2 = origin + direction * projection
-	var distance_to_ray: float = target_ball.global_position.distance_to(closest_point)
-	if distance_to_ray > prediction_radius:
-		return INF
-
-	var backtrack: float = sqrt(prediction_radius * prediction_radius - distance_to_ray * distance_to_ray)
-	var hit_distance: float = projection - backtrack
-	if hit_distance < 0.0:
-		return 0.0
-
-	return hit_distance
-
-
-func _get_aim_rail_hit(origin: Vector2, direction: Vector2) -> AimRailHit:
-	var bounds: Rect2 = _get_aim_center_bounds()
-	var nearest_hit: AimRailHit = AimRailHit.new()
-
-	if direction.x > 0.0:
-		_try_set_aim_rail_hit(nearest_hit, (bounds.end.x - origin.x) / direction.x, origin, direction, Vector2.LEFT)
-	elif direction.x < 0.0:
-		_try_set_aim_rail_hit(nearest_hit, (bounds.position.x - origin.x) / direction.x, origin, direction, Vector2.RIGHT)
-
-	if direction.y > 0.0:
-		_try_set_aim_rail_hit(nearest_hit, (bounds.end.y - origin.y) / direction.y, origin, direction, Vector2.UP)
-	elif direction.y < 0.0:
-		_try_set_aim_rail_hit(nearest_hit, (bounds.position.y - origin.y) / direction.y, origin, direction, Vector2.DOWN)
-
-	return nearest_hit
-
-
-func _get_aim_center_bounds() -> Rect2:
-	return Rect2(
-		playfield_rect.position.x + cue_ball.radius,
-		playfield_rect.position.y + cue_ball.radius,
-		playfield_rect.size.x - cue_ball.radius * 2.0,
-		playfield_rect.size.y - cue_ball.radius * 2.0
-	)
-
-
-func _try_set_aim_rail_hit(
-	rail_hit: AimRailHit,
-	candidate_distance: float,
-	origin: Vector2,
+func _make_ball_prediction_from_position(
+	prediction: AimPrediction,
 	direction: Vector2,
-	normal: Vector2
-) -> void:
-	if candidate_distance < 0.0 or candidate_distance >= rail_hit.distance:
-		return
-
-	rail_hit.distance = candidate_distance
-	rail_hit.position = origin + direction * candidate_distance
-	rail_hit.normal = normal
-
-
-func _make_ball_prediction(origin: Vector2, direction: Vector2, target_ball: Ball, distance: float) -> AimPrediction:
-	var cue_center_at_impact: Vector2 = origin + direction * distance
+	target_ball: Ball,
+	cue_center_at_impact: Vector2
+) -> AimPrediction:
 	var target_direction: Vector2 = target_ball.global_position - cue_center_at_impact
 	if target_direction.length() > 0.0:
 		target_direction = target_direction.normalized()
 	else:
 		target_direction = direction
 
-	var prediction: AimPrediction = AimPrediction.new()
 	prediction.collision_type = "ball"
 	prediction.position = cue_center_at_impact
 	prediction.ball = target_ball
 	prediction.target_direction = target_direction
-	prediction.path_points = [origin, cue_center_at_impact]
+	prediction.path_points.append(cue_center_at_impact)
 	return prediction
 
 
@@ -1360,6 +1678,8 @@ func _can_shoot() -> bool:
 
 
 func _handle_pocketed_ball(ball: Ball) -> void:
+	_note_actual_cue_pocketed(ball)
+
 	if ball == cue_ball:
 		if DEBUG_NO_GAME_OVER:
 			_reset_ball(ball, CUE_START, "Cue ball reset for testing.")
@@ -1380,6 +1700,15 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 	ball.queue_free()
 	_note_object_ball_pocketed()
 	status_text_changed.emit("Ball %s sunk." % ball.ball_number)
+
+
+func _note_actual_cue_pocketed(ball: Ball) -> void:
+	if not debug_aim_path_comparison_enabled or ball != cue_ball or not actual_cue_path_recording:
+		return
+
+	actual_cue_path.append(cue_ball.global_position)
+	_stop_actual_cue_path_recording()
+	print("Bank debug | actual cue pocketed | pos=%s" % cue_ball.global_position)
 
 
 func _start_shot_tracking() -> void:
@@ -1416,6 +1745,7 @@ func _try_finish_shot() -> void:
 		return
 
 	shot_active = false
+	_stop_actual_cue_path_recording()
 
 
 func get_physics_debug_text() -> String:
@@ -1440,6 +1770,57 @@ func get_physics_debug_text() -> String:
 		lines.append(_get_physics_debug_line(ball))
 
 	return "\n".join(lines)
+
+
+func get_performance_debug_text() -> String:
+	var counts: Dictionary = _get_performance_ball_counts()
+	var lines := [
+		"PERFORMANCE",
+		"FPS: %s" % Engine.get_frames_per_second(),
+		"Balls: %s total / %s moving / %s stopped" % [counts["total"], counts["moving"], counts["stopped"]],
+		"Wayfinders: %s active / %s guided" % [counts["active_wayfinders"], guided_wayfinder_balls.size()],
+		"Substeps: %s" % PHYSICS_SUBSTEPS,
+		"Grid cells: %s / max cell: %s" % [perf_spatial_grid_cells, perf_spatial_grid_max_cell_size],
+		"Broad-phase candidates: %s" % perf_broadphase_candidate_pairs,
+		"Ball pairs checked: %s" % perf_ball_pair_checks,
+		"Ball collisions: %s" % perf_ball_collisions_resolved,
+		"Rail checks: %s" % perf_rail_checks,
+		"Rail collisions: %s" % perf_rail_collisions_resolved,
+		"Pocket checks: %s" % perf_pocket_checks,
+		"Pocket captures: %s" % perf_pocket_captures,
+		"Aim prediction: %s" % _debug_bool_text(AIM_PREDICTION_ENABLED),
+		"Shot comparison: %s" % _debug_bool_text(debug_aim_path_comparison_enabled),
+		"Physics ms: %.2f" % perf_physics_process_ms,
+		"Ball collision ms: %.2f" % perf_ball_collision_ms,
+		"Rail ms: %.2f" % perf_rail_collision_ms,
+		"Pocket ms: %.2f" % perf_pocket_check_ms,
+		"Aim prediction ms: %.2f" % perf_aim_prediction_ms,
+	]
+	return "\n".join(lines)
+
+
+func _get_performance_ball_counts() -> Dictionary:
+	var counts := {
+		"total": 0,
+		"moving": 0,
+		"stopped": 0,
+		"active_wayfinders": 0,
+	}
+
+	for child in balls.get_children():
+		var ball := child as Ball
+		if ball == null or not ball.visible:
+			continue
+		counts["total"] += 1
+		counts["moving"] += 1 if ball.is_moving() else 0
+		counts["active_wayfinders"] += 1 if ball.is_wayfinder and ball.wayfinder_active else 0
+
+	counts["stopped"] = max(counts["total"] - counts["moving"], 0)
+	return counts
+
+
+func _debug_bool_text(enabled: bool) -> String:
+	return "enabled" if enabled else "disabled"
 
 
 func _sort_balls_by_speed_desc(ball_a: Ball, ball_b: Ball) -> bool:
@@ -1481,6 +1862,25 @@ func _get_ball_drag_band_name(ball: Ball) -> String:
 	return "crawl"
 
 
+func set_shot_path_debug_enabled(enabled: bool) -> void:
+	debug_aim_path_comparison_enabled = enabled
+	if not enabled:
+		_stop_actual_cue_path_recording()
+		aim_path_debug_timer = 0.0
+		queue_redraw()
+
+
+func is_shot_path_debug_enabled() -> bool:
+	return debug_aim_path_comparison_enabled
+
+
+func get_debug_spawn_hotkey_text() -> String:
+	return "%s: Spawn Wayfinder Ball\n%s: Spawn Normal Ball" % [
+		OS.get_keycode_string(DEBUG_SPAWN_WAYFINDER_KEY),
+		OS.get_keycode_string(DEBUG_SPAWN_NORMAL_BALL_KEY),
+	]
+
+
 func _queue_ball_sunk_message() -> void:
 	if shot_pocketed_object_balls == 1:
 		_queue_result_message("1 BALL SUNK")
@@ -1513,6 +1913,14 @@ func _queue_debug_wayfinder_spawn() -> void:
 	var request: SpawnBallRequest = SpawnBallRequest.new()
 	request.ball_number = _get_next_spawn_ball_number()
 	request.is_wayfinder = true
+	pending_spawn_requests.append(request)
+	_queue_spawn_reward_message(request)
+
+
+func _queue_debug_normal_ball_spawn() -> void:
+	var request: SpawnBallRequest = SpawnBallRequest.new()
+	request.ball_number = _get_next_spawn_ball_number()
+	request.is_wayfinder = false
 	pending_spawn_requests.append(request)
 	_queue_spawn_reward_message(request)
 
@@ -1566,6 +1974,7 @@ func _make_result_callout_label(message: String) -> Label:
 	label.add_theme_constant_override("shadow_offset_x", 3)
 	label.add_theme_constant_override("shadow_offset_y", 3)
 	label.add_theme_constant_override("outline_size", 6)
+	label.add_theme_font_override("font", UI_FONT)
 	label.add_theme_font_size_override("font_size", 34)
 	return label
 
