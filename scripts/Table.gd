@@ -21,16 +21,6 @@ class ResultCallout:
 	var drift_tween: Tween
 	var slot_tween: Tween
 
-class SpawnBallRequest:
-	var ball_number := 1
-	var is_wayfinder := false
-
-class GuidedWayfinderBall:
-	var ball: Ball
-	var pocket_position := Vector2.ZERO
-	var remaining_time := 0.0
-	var debug_log_cooldown := 0.0
-	var start_speed := 0.0
 #endregion
 
 #region Constants / Config
@@ -42,16 +32,6 @@ const DEBUG_NO_GAME_OVER := true
 const DEBUG_DRAW_BOUNDARY_RECTS := false
 const DEBUG_PHYSICS_PANEL_ENABLED := true
 const DEBUG_SHOT_POWER := false
-const DEBUG_WAYFINDER := false
-# Testing shortcut: press F to drop a Wayfinder without waiting for random reward spawns.
-const DEBUG_SPAWN_WAYFINDER_ENABLED := true
-const DEBUG_SPAWN_WAYFINDER_KEY := KEY_F
-# Testing shortcut: press G to drop a normal object ball without changing reward rules.
-const DEBUG_SPAWN_NORMAL_BALL_ENABLED := true
-const DEBUG_SPAWN_NORMAL_BALL_KEY := KEY_G
-
-const BALL_SCENE := preload("res://scenes/Ball.tscn")
-const CUE_BALL_SCENE := preload("res://scenes/CueBall.tscn")
 const SHIP_FLOOR_TEXTURE := preload("res://assets/table_art/ship_floor.png")
 const TABLE_FRAME_TEXTURE := preload("res://assets/table_art/pool_table_frame.png")
 const KRAKEN_SILHOUETTE_TEXTURE := preload("res://assets/table_art/kraken_silhouette.png")
@@ -81,34 +61,8 @@ const TABLE_FRAME_VISIBLE_BOUNDS := Rect2(311, 130, 1294, 794)
 const KRAKEN_ART_ALPHA := 0.18
 const POCKET_CATCH_BONUS := 8.0
 
-# Starting layout.
-const CUE_START := Vector2(PRESENTATION_OFFSET_X + 340.0, PRESENTATION_OFFSET_Y + 360.0)
-const RACK_ORIGIN := Vector2(PRESENTATION_OFFSET_X + 790.0, PRESENTATION_OFFSET_Y + 360.0)
-const RACK_ROWS := 5
-const RACK_SPACING_MULTIPLIER := 2.12
-
 # Escalation loop. Stylish shots immediately queue new ball drops.
-const BALLS_PER_REWARD_DROP := 3
 const MULTI_POCKET_BONUS_THRESHOLD := 2
-
-# Wayfinder anomaly. Reward spawns can occasionally create one of these redirect balls.
-const WAYFINDER_SPAWN_CHANCE := 0.12
-# After a redirect hit, briefly ignore only that same pair so they can separate cleanly.
-const WAYFINDER_REDIRECT_COLLISION_COOLDOWN := 0.10
-# Guided balls only look for pockets meaningfully ahead of their current travel.
-const WAYFINDER_GUIDE_CONE_DOT_MIN := 0.35
-const WAYFINDER_GUIDE_MAX_TURN_ANGLE_DEGREES := 50.0
-const WAYFINDER_GUIDE_DURATION := 0.45
-const WAYFINDER_GUIDE_TURN_STRENGTH := 4.0
-const WAYFINDER_GUIDE_MIN_SPEED := 90.0
-const WAYFINDER_GUIDE_SPEED_RETENTION_PER_SECOND := 0.82
-const SPAWN_SEARCH_CENTER := Vector2(PRESENTATION_OFFSET_X + 600.0, PRESENTATION_OFFSET_Y + 360.0)
-const SPAWN_SEARCH_STEP := 34.0
-const SPAWN_SEARCH_RINGS := 10
-const SPAWN_DROP_STAGGER := 0.14
-const SPAWN_RANDOM_RADIUS_MIN := 40.0
-const SPAWN_RANDOM_RADIUS_MAX := 180.0
-const SPAWN_BALL_NUMBERS := [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]
 
 # Shot result callouts. These are temporary arcade feedback, not scoring.
 const RESULT_MESSAGES_ENABLED := true
@@ -134,8 +88,6 @@ const BALL_COLLISION_RESTITUTION := 0.86
 const BALL_VELOCITY_TRANSFER := 0.90
 const BALL_COLLISION_SKIN := 1.5
 const RAIL_RESTITUTION := 0.78
-const RESET_SEARCH_STEP := 22.0
-const RESET_SEARCH_RINGS := 8
 const PHYSICS_SUBSTEPS := 4
 const BALL_COLLISION_GRID_CELL_SIZE := 56.0
 const PHYSICS_DEBUG_SPEED_THRESHOLD := 5.0
@@ -149,12 +101,14 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var boundaries_root: Node = get_node_or_null("Boundaries")
 @onready var pockets_root: Node = get_node_or_null("Pockets")
 @onready var aim_preview: AimPreview = $AimPreview
+@onready var spawn_system: SpawnSystem = $SpawnSystem
+@onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
 @onready var cue_controller: CueController = $CuePivot
 #endregion
 
 #region Runtime State
-# Table.gd currently owns all run state. These clusters mark natural future
-# owners: DebugOverlay, CueController, PocketSystem, WayfinderSystem, SpawnSystem.
+# Table.gd still owns core run state; extracted systems own their local state.
+# Remaining clusters mark natural future owners like PocketSystem and BallPhysics.
 var active_result_callouts: Array[ResultCallout] = []
 var pending_callout_messages: Array[String] = []
 var callout_spawn_cooldown := 0.0
@@ -173,19 +127,13 @@ var shot_cue_touched_rail := false
 var shot_had_bank_pocket := false
 var shot_multi_pocket_bonus_awarded := false
 var shot_bank_bonus_awarded := false
-var pocketed_object_ball_spawn_progress := 0
-var pending_spawn_requests: Array[SpawnBallRequest] = []
-var spawn_drop_cooldown := 0.0
-var next_spawn_ball_index := 0
+var shot_bank_eligible_ball_ids: Dictionary = {}
 var table_frame_art_rect := Rect2()
 var playfield_rect := Rect2()
 var pocket_positions: Array[Vector2] = []
 var pocket_radii: Array[float] = []
 var boundary_shapes: Array[CollisionShape2D] = []
 var boundary_reference_rects: Array[Rect2] = []
-# Only redirected Wayfinder-target pairs use this brief ignore window.
-var wayfinder_redirect_collision_cooldowns: Dictionary = {}
-var guided_wayfinder_balls: Dictionary = {}
 var perf_ball_pair_checks := 0
 var perf_broadphase_candidate_pairs := 0
 var perf_spatial_grid_cells := 0
@@ -208,13 +156,18 @@ var perf_pocket_check_ms := 0.0
 func _ready() -> void:
 	_cache_table_geometry()
 	aim_preview.setup(self)
+	spawn_system.setup(self)
+	wayfinder_system.setup(self)
 	cue_controller.setup()
 	if Engine.is_editor_hint():
 		cue_controller.update_cue(cue_ball, false, is_dragging, Vector2.ZERO, MAX_DRAG_DISTANCE, game_over, 0.0)
 		queue_redraw()
 		return
 
-	_spawn_starting_balls()
+	var starting_balls = spawn_system.spawn_starting_balls()
+	cue_ball = starting_balls.cue_ball
+	eight_ball = starting_balls.eight_ball
+	eight_start = starting_balls.eight_start
 	status_text_changed.emit("Drag backward from the cue ball and release to shoot.")
 	queue_redraw()
 
@@ -228,12 +181,12 @@ func _physics_process(delta: float) -> void:
 
 	var physics_start_usec: int = Time.get_ticks_usec()
 	_reset_performance_frame_stats()
-	_update_wayfinder_redirect_cooldowns(delta)
+	wayfinder_system.update_redirect_cooldowns(delta)
 	aim_preview.update_debug(delta, is_dragging)
 
 	var step_delta: float = delta / float(PHYSICS_SUBSTEPS)
 	for _step in range(PHYSICS_SUBSTEPS):
-		_update_wayfinder_guidance(step_delta)
+		wayfinder_system.update_guidance(step_delta)
 		_move_balls(step_delta)
 		var phase_start_usec: int = Time.get_ticks_usec()
 		_resolve_ball_collisions()
@@ -249,7 +202,7 @@ func _physics_process(delta: float) -> void:
 		aim_preview.record_actual_path_step()
 		_apply_ball_friction(step_delta)
 
-	_process_spawn_queue(delta)
+	spawn_system.process_spawn_queue(delta)
 	_process_callout_queue(delta)
 	_try_finish_shot()
 	cue_controller.update_cue(cue_ball, _can_shoot(), is_dragging, _get_current_shot_drag_vector(), MAX_DRAG_DISTANCE, game_over, delta)
@@ -289,22 +242,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _try_debug_spawn_ball(event: InputEvent) -> bool:
-	if not (event is InputEventKey):
-		return false
-
-	var key_event: InputEventKey = event
-	if not key_event.pressed or key_event.echo:
-		return false
-
-	if DEBUG_SPAWN_WAYFINDER_ENABLED and key_event.keycode == DEBUG_SPAWN_WAYFINDER_KEY:
-		_queue_debug_wayfinder_spawn()
-		return true
-
-	if DEBUG_SPAWN_NORMAL_BALL_ENABLED and key_event.keycode == DEBUG_SPAWN_NORMAL_BALL_KEY:
-		_queue_debug_normal_ball_spawn()
-		return true
-
-	return false
+	return spawn_system.try_handle_debug_spawn_input(event)
 #endregion
 
 
@@ -490,89 +428,6 @@ func _fit_texture_rect_inside(texture: Texture2D, container: Rect2) -> Rect2:
 #endregion
 
 
-#region Starting Layout / Ball Factory
-# Creates the cue ball and deterministic rack. Future extraction: RackSetup or SpawnSystem.
-func _spawn_starting_balls() -> void:
-	cue_ball = CUE_BALL_SCENE.instantiate() as Ball
-	balls.add_child(cue_ball)
-	cue_ball.global_position = CUE_START
-
-	var rack_numbers := _get_starting_rack_numbers()
-	var rack_spacing: float = cue_ball.radius * RACK_SPACING_MULTIPLIER
-	var index := 0
-
-	for row in range(RACK_ROWS):
-		for slot in range(row + 1):
-			var number: int = rack_numbers[index]
-			var position: Vector2 = _get_rack_position(row, slot, rack_spacing)
-			index += 1
-
-			var ball := _create_ball(_ball_type_from_number(number), number, _ball_color(number), position)
-			if number == 8:
-				eight_ball = ball
-				eight_start = position
-
-
-func _get_starting_rack_numbers() -> Array[int]:
-	return [
-		1,
-		2, 3,
-		4, 8, 5,
-		6, 7, 9, 10,
-		11, 12, 13, 14, 15,
-	]
-
-
-func _get_rack_position(row: int, slot: int, spacing: float) -> Vector2:
-	var x_offset: float = float(row) * spacing
-	var y_offset: float = (float(slot) - float(row) * 0.5) * spacing
-	return RACK_ORIGIN + Vector2(x_offset, y_offset)
-
-
-func _create_ball(ball_type: int, number: int, color: Color, position: Vector2) -> Ball:
-	var ball := BALL_SCENE.instantiate() as Ball
-	balls.add_child(ball)
-	ball.global_position = position
-	ball.setup(ball_type, number, color)
-	return ball
-
-
-func _create_wayfinder_ball(number: int, color: Color, position: Vector2) -> Ball:
-	var ball := BALL_SCENE.instantiate() as Ball
-	balls.add_child(ball)
-	ball.global_position = position
-	ball.setup(Ball.BallType.OBJECT, number, color, true)
-	return ball
-
-
-func _ball_type_from_number(number: int) -> int:
-	if number == 8:
-		return Ball.BallType.EIGHT
-	return Ball.BallType.OBJECT
-
-
-func _ball_color(number: int) -> Color:
-	var colors := {
-		1: Color("f0c84b"),
-		2: Color("2e62c9"),
-		3: Color("d6453d"),
-		4: Color("7a48ad"),
-		5: Color("ef8b2c"),
-		6: Color("2c9b5d"),
-		7: Color("8b2f2c"),
-		8: Color("151515"),
-		9: Color("f5df68"),
-		10: Color("4f8cff"),
-		11: Color("f06458"),
-		12: Color("9a6bd1"),
-		13: Color("f2a14a"),
-		14: Color("46bd78"),
-		15: Color("b84842"),
-	}
-	return colors.get(number, Color("d7b347"))
-#endregion
-
-
 #region Ball Physics / Collision
 # Owns arcade movement, friction calls, and collision response.
 # Future extraction candidate: BallPhysics.
@@ -687,10 +542,9 @@ func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
 
 	if _apply_ball_collision_response(ball_a, ball_b, normal):
 		perf_ball_collisions_resolved += 1
+		_note_cue_object_contact_for_bank(ball_a, ball_b)
 	_note_actual_cue_ball_hit(ball_a, ball_b)
-	_handle_wayfinder_cue_activation(ball_a, ball_b)
-	_try_begin_wayfinder_guidance(ball_a, ball_b)
-	_try_begin_wayfinder_guidance(ball_b, ball_a)
+	wayfinder_system.handle_collision(ball_a, ball_b)
 
 
 func _separate_overlapping_balls(ball_a: Ball, ball_b: Ball, normal: Vector2, overlap: float) -> void:
@@ -718,64 +572,6 @@ func _note_actual_cue_ball_hit(ball_a: Ball, ball_b: Ball) -> void:
 		return
 
 	aim_preview.note_actual_cue_ball_hit()
-#endregion
-
-
-#region Wayfinder
-# Owns activation, guidance targeting, and redirect cooldowns.
-# Future extraction candidate: WayfinderSystem.
-func _handle_wayfinder_cue_activation(ball_a: Ball, ball_b: Ball) -> void:
-	_try_activate_wayfinder_from_cue_hit(ball_a, ball_b)
-	_try_activate_wayfinder_from_cue_hit(ball_b, ball_a)
-
-
-func _try_activate_wayfinder_from_cue_hit(ball_a: Ball, ball_b: Ball) -> void:
-	if ball_a != cue_ball or not ball_b.is_wayfinder:
-		return
-
-	ball_b.activate_wayfinder(
-		"cue hit | cue dir=%s | wayfinder dir=%s" % [
-			ball_a.velocity.normalized(),
-			ball_b.velocity.normalized(),
-		]
-	)
-
-
-func _is_active_wayfinder_guidance_collision(striker: Ball, target: Ball) -> bool:
-	return striker.is_wayfinder and striker.wayfinder_active and _is_wayfinder_redirect_target(target)
-
-
-func _try_begin_wayfinder_guidance(striker: Ball, target: Ball) -> void:
-	if not _is_active_wayfinder_guidance_collision(striker, target):
-		return
-
-	if _is_wayfinder_redirect_pair_ignored(striker, target):
-		return
-
-	# Guidance starts only after the normal collision has already set the target's travel.
-	if target.velocity.length() < WAYFINDER_GUIDE_MIN_SPEED:
-		_print_wayfinder_debug(
-			"Wayfinder #%s no guide | target #%s | speed %.2f below minimum" % [
-				striker.ball_number,
-				target.ball_number,
-				target.velocity.length(),
-			]
-		)
-		return
-
-	var chosen_pocket: Vector2 = _find_wayfinder_guided_pocket(target)
-	if chosen_pocket == Vector2.ZERO:
-		_print_wayfinder_debug(
-			"Wayfinder #%s no guide | target #%s | no reachable forward pocket" % [
-				striker.ball_number,
-				target.ball_number,
-			]
-		)
-		return
-
-	_begin_wayfinder_guidance(target, chosen_pocket)
-	_set_wayfinder_redirect_pair_cooldown(striker, target)
-	_print_wayfinder_guidance_start_debug(striker, target, chosen_pocket)
 #endregion
 
 
@@ -945,217 +741,6 @@ func delta_local_direction(local_ball_position: Vector2, closest_local: Vector2)
 #endregion
 
 
-#region Wayfinder Guidance
-# Continued Wayfinder helpers kept together for future WayfinderSystem extraction.
-func _is_wayfinder_redirect_target(ball: Ball) -> bool:
-	if ball == cue_ball or ball == eight_ball:
-		return false
-
-	if ball.ball_type != Ball.BallType.OBJECT:
-		return false
-
-	return not ball.is_wayfinder
-
-
-func _find_wayfinder_guided_pocket(target: Ball) -> Vector2:
-	var velocity_direction: Vector2 = target.velocity.normalized()
-	if velocity_direction == Vector2.ZERO:
-		return Vector2.ZERO
-
-	var chosen_pocket := Vector2.ZERO
-	var chosen_distance := INF
-	_print_wayfinder_debug(
-		"Wayfinder guide search | target #%s | velocity=%s" % [target.ball_number, velocity_direction]
-	)
-	var max_turn_dot: float = cos(deg_to_rad(WAYFINDER_GUIDE_MAX_TURN_ANGLE_DEGREES))
-
-	for pocket_position in pocket_positions:
-		var to_pocket: Vector2 = (pocket_position - target.global_position).normalized()
-		var alignment: float = to_pocket.dot(velocity_direction)
-		var turn_angle_degrees: float = rad_to_deg(acos(clamp(alignment, -1.0, 1.0)))
-		var rejection_reason := ""
-		if alignment < WAYFINDER_GUIDE_CONE_DOT_MIN:
-			rejection_reason = "outside cone"
-		elif alignment < max_turn_dot:
-			rejection_reason = "turn too sharp"
-
-		var accepted: bool = rejection_reason.is_empty()
-		_log_wayfinder_pocket_evaluation(
-			pocket_position,
-			alignment,
-			turn_angle_degrees,
-			accepted,
-			rejection_reason
-		)
-		if not accepted:
-			continue
-
-		var distance: float = target.global_position.distance_squared_to(pocket_position)
-		if distance < chosen_distance:
-			chosen_distance = distance
-			chosen_pocket = pocket_position
-
-	if chosen_pocket != Vector2.ZERO:
-		_print_wayfinder_debug("guide chosen | pocket=%s | fallback=false" % chosen_pocket)
-
-	return chosen_pocket
-
-
-func _log_wayfinder_pocket_evaluation(
-	pocket_position: Vector2,
-	alignment: float,
-	turn_angle_degrees: float,
-	accepted: bool,
-	rejection_reason: String
-) -> void:
-	var decision := "accepted" if accepted else "rejected (%s)" % rejection_reason
-	_print_wayfinder_debug(
-		"pocket=%s | dot=%.3f | angle=%.1f | %s" % [
-			pocket_position,
-			alignment,
-			turn_angle_degrees,
-			decision,
-		]
-	)
-
-
-func _update_wayfinder_redirect_cooldowns(delta: float) -> void:
-	var expired_keys: Array[String] = []
-
-	for pair_key in wayfinder_redirect_collision_cooldowns.keys():
-		var remaining_time: float = float(wayfinder_redirect_collision_cooldowns[pair_key]) - delta
-		if remaining_time <= 0.0:
-			expired_keys.append(pair_key)
-		else:
-			wayfinder_redirect_collision_cooldowns[pair_key] = remaining_time
-
-	for pair_key in expired_keys:
-		wayfinder_redirect_collision_cooldowns.erase(pair_key)
-
-
-func _update_wayfinder_guidance(delta: float) -> void:
-	var expired_ids: Array[int] = []
-
-	for ball_id in guided_wayfinder_balls.keys():
-		var state: GuidedWayfinderBall = guided_wayfinder_balls[ball_id] as GuidedWayfinderBall
-		if state == null or not is_instance_valid(state.ball) or not state.ball.is_gameplay_active():
-			expired_ids.append(ball_id)
-			continue
-
-		if not _apply_wayfinder_guidance_step(state, delta):
-			expired_ids.append(ball_id)
-
-	for ball_id in expired_ids:
-		guided_wayfinder_balls.erase(ball_id)
-
-
-func _apply_wayfinder_guidance_step(state: GuidedWayfinderBall, delta: float) -> bool:
-	var speed_before: float = state.ball.velocity.length()
-	state.remaining_time -= delta
-	state.debug_log_cooldown = max(state.debug_log_cooldown - delta, 0.0)
-
-	if state.remaining_time <= 0.0 or speed_before < WAYFINDER_GUIDE_MIN_SPEED:
-		_print_wayfinder_debug(
-			"guide ended | target #%s | remaining=%.2f | speed=%.2f" % [
-				state.ball.ball_number,
-				max(state.remaining_time, 0.0),
-				speed_before,
-			]
-		)
-		return false
-
-	var desired_direction: Vector2 = (state.pocket_position - state.ball.global_position).normalized()
-	if desired_direction == Vector2.ZERO:
-		_print_wayfinder_debug("guide ended | target #%s | reached pocket vector" % state.ball.ball_number)
-		return false
-
-	var current_turn_strength: float = WAYFINDER_GUIDE_TURN_STRENGTH
-
-	# Preserve speed and gently rotate the ball toward its chosen forward pocket.
-	var new_direction: Vector2 = state.ball.velocity.normalized().lerp(
-		desired_direction,
-		clamp(current_turn_strength * delta, 0.0, 1.0)
-	).normalized()
-	var speed_multiplier: float = pow(WAYFINDER_GUIDE_SPEED_RETENTION_PER_SECOND, delta)
-	var guided_speed: float = min(speed_before * speed_multiplier, state.start_speed)
-	state.ball.velocity = new_direction * guided_speed
-
-	if state.debug_log_cooldown <= 0.0:
-		_print_wayfinder_debug(
-			"guiding #%s | pocket=%s | remaining=%.2f | speed %.2f -> %.2f | cap=%.2f" % [
-				state.ball.ball_number,
-				state.pocket_position,
-				state.remaining_time,
-				speed_before,
-				guided_speed,
-				state.start_speed,
-			]
-		)
-		state.debug_log_cooldown = 0.10
-
-	return true
-
-
-func _set_wayfinder_redirect_pair_cooldown(wayfinder_ball: Ball, redirected_ball: Ball) -> void:
-	var pair_key: String = _get_wayfinder_redirect_pair_key(wayfinder_ball, redirected_ball)
-	wayfinder_redirect_collision_cooldowns[pair_key] = WAYFINDER_REDIRECT_COLLISION_COOLDOWN
-
-
-func _is_wayfinder_redirect_pair_ignored(ball_a: Ball, ball_b: Ball) -> bool:
-	var pair_key: String = _get_wayfinder_redirect_pair_key(ball_a, ball_b)
-	return wayfinder_redirect_collision_cooldowns.has(pair_key)
-
-
-func _get_wayfinder_redirect_pair_key(ball_a: Ball, ball_b: Ball) -> String:
-	var first_id: int = ball_a.get_instance_id()
-	var second_id: int = ball_b.get_instance_id()
-	if first_id > second_id:
-		var temp_id: int = first_id
-		first_id = second_id
-		second_id = temp_id
-
-	return "%s:%s" % [first_id, second_id]
-
-
-func _begin_wayfinder_guidance(target: Ball, pocket_position: Vector2) -> void:
-	var state: GuidedWayfinderBall = GuidedWayfinderBall.new()
-	state.ball = target
-	state.pocket_position = pocket_position
-	state.remaining_time = WAYFINDER_GUIDE_DURATION
-	state.start_speed = target.velocity.length()
-	guided_wayfinder_balls[target.get_instance_id()] = state
-
-
-func _print_wayfinder_debug(message: String) -> void:
-	if not DEBUG_WAYFINDER:
-		return
-
-	print("Wayfinder | %s" % message)
-
-
-func _print_wayfinder_guidance_start_debug(
-	wayfinder: Ball,
-	target: Ball,
-	pocket_position: Vector2
-) -> void:
-	var velocity_direction: Vector2 = target.velocity.normalized()
-	var speed: float = target.velocity.length()
-	if not DEBUG_WAYFINDER:
-		return
-
-	print(
-		"Wayfinder | guide | wayfinder #%s -> target #%s | pocket=%s | velocity=%s | speed=%.2f | duration=%.2f" % [
-			wayfinder.ball_number,
-			target.ball_number,
-			pocket_position,
-			velocity_direction,
-			speed,
-			WAYFINDER_GUIDE_DURATION,
-		]
-	)
-#endregion
-
-
 #region Cue Input / Shot Release
 # Table owns shot state and velocity. CueController owns sprite visuals and cue hit testing.
 func _try_start_drag(mouse_position: Vector2) -> void:
@@ -1263,12 +848,12 @@ func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) ->
 
 #region Shot State / Pocket Consequences
 # Owns shot lifecycle, pocket outcomes, and reward triggers after pocket captures.
-# Future extraction candidates: PocketSystem plus SpawnSystem reward rules.
+# Future extraction candidate: PocketSystem. Spawn rewards delegate to SpawnSystem.
 func _can_shoot() -> bool:
 	if game_over or not is_instance_valid(cue_ball) or not cue_ball.visible:
 		return false
 
-	if not pending_spawn_requests.is_empty():
+	if spawn_system.has_pending_spawns():
 		return false
 
 	for child in balls.get_children():
@@ -1284,7 +869,7 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 
 	if ball == cue_ball:
 		if DEBUG_NO_GAME_OVER:
-			_reset_ball(ball, CUE_START, "Cue ball reset for testing.")
+			_reset_ball(ball, spawn_system.get_cue_start(), "Cue ball reset for testing.")
 			return
 		ball.sink()
 		_finish_game("Cue ball sunk. Game over.")
@@ -1300,7 +885,7 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 
 	ball.sink()
 	ball.queue_free()
-	_note_object_ball_pocketed()
+	_note_object_ball_pocketed(ball)
 	status_text_changed.emit("Ball %s sunk." % ball.ball_number)
 
 
@@ -1315,6 +900,7 @@ func _start_shot_tracking() -> void:
 	shot_had_bank_pocket = false
 	shot_multi_pocket_bonus_awarded = false
 	shot_bank_bonus_awarded = false
+	shot_bank_eligible_ball_ids.clear()
 
 
 func _note_cue_rail_touch(ball: Ball) -> void:
@@ -1322,14 +908,39 @@ func _note_cue_rail_touch(ball: Ball) -> void:
 		shot_cue_touched_rail = true
 
 
-func _note_object_ball_pocketed() -> void:
+func _note_cue_object_contact_for_bank(ball_a: Ball, ball_b: Ball) -> void:
+	if not shot_active or not shot_cue_touched_rail:
+		return
+
+	var object_ball: Ball = _get_cue_contacted_object_ball(ball_a, ball_b)
+	if object_ball == null:
+		return
+
+	# A ball is bank-eligible only if the cue had already touched a rail
+	# before this cue-to-object contact.
+	shot_bank_eligible_ball_ids[object_ball.get_instance_id()] = true
+
+
+func _get_cue_contacted_object_ball(ball_a: Ball, ball_b: Ball) -> Ball:
+	if ball_a == cue_ball:
+		return ball_b if _is_scoring_object_ball(ball_b) else null
+	if ball_b == cue_ball:
+		return ball_a if _is_scoring_object_ball(ball_a) else null
+	return null
+
+
+func _is_scoring_object_ball(ball: Ball) -> bool:
+	return ball != null and ball.ball_type == Ball.BallType.OBJECT
+
+
+func _note_object_ball_pocketed(ball: Ball) -> void:
 	if not shot_active:
 		return
 
 	shot_pocketed_object_balls += 1
 	_queue_ball_sunk_message()
 
-	if shot_cue_touched_rail:
+	if shot_bank_eligible_ball_ids.has(ball.get_instance_id()):
 		shot_had_bank_pocket = true
 		_try_award_bank_bonus()
 
@@ -1372,7 +983,7 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"moving_balls": counts["moving"],
 		"stopped_balls": counts["stopped"],
 		"active_wayfinders": counts["active_wayfinders"],
-		"guided_wayfinder_targets": guided_wayfinder_balls.size(),
+		"guided_wayfinder_targets": wayfinder_system.get_guided_target_count(),
 		"physics_substeps": PHYSICS_SUBSTEPS,
 		"spatial_grid_cells": perf_spatial_grid_cells,
 		"spatial_grid_max_cell_size": perf_spatial_grid_max_cell_size,
@@ -1420,7 +1031,7 @@ func _get_ball_debug_snapshot(ball: Ball) -> Dictionary:
 		"is_eight_ball": ball == eight_ball,
 		"is_wayfinder": ball.is_wayfinder,
 		"wayfinder_active": ball.is_wayfinder and ball.wayfinder_active,
-		"guided": guided_wayfinder_balls.has(ball.get_instance_id()),
+		"guided": wayfinder_system.is_ball_guided(ball),
 		"gameplay_enabled": ball.gameplay_enabled,
 		"speed": ball.velocity.length(),
 		"medium_speed_drag_start": ball.medium_speed_drag_start,
@@ -1438,10 +1049,7 @@ func is_shot_path_debug_enabled() -> bool:
 
 
 func get_debug_spawn_hotkey_data() -> Dictionary:
-	return {
-		"wayfinder_spawn_key": DEBUG_SPAWN_WAYFINDER_KEY,
-		"normal_spawn_key": DEBUG_SPAWN_NORMAL_BALL_KEY,
-	}
+	return spawn_system.get_debug_spawn_hotkey_data()
 #endregion
 
 
@@ -1455,8 +1063,8 @@ func _queue_ball_sunk_message() -> void:
 		_queue_result_message("%s BALLS SUNK" % shot_pocketed_object_balls)
 
 
-func _queue_spawn_reward_message(request: SpawnBallRequest) -> void:
-	if request.is_wayfinder:
+func queue_spawn_reward_message(is_wayfinder: bool) -> void:
+	if is_wayfinder:
 		_queue_result_message("WAYFINDER BALL DROPPED")
 	else:
 		_queue_result_message("+1 BALL DROPPED")
@@ -1467,29 +1075,6 @@ func _queue_result_message(message: String) -> void:
 		return
 
 	pending_callout_messages.append(message)
-
-
-func _make_spawn_ball_request() -> SpawnBallRequest:
-	var request: SpawnBallRequest = SpawnBallRequest.new()
-	request.ball_number = _get_next_spawn_ball_number()
-	request.is_wayfinder = randf() <= WAYFINDER_SPAWN_CHANCE
-	return request
-
-
-func _queue_debug_wayfinder_spawn() -> void:
-	var request: SpawnBallRequest = SpawnBallRequest.new()
-	request.ball_number = _get_next_spawn_ball_number()
-	request.is_wayfinder = true
-	pending_spawn_requests.append(request)
-	_queue_spawn_reward_message(request)
-
-
-func _queue_debug_normal_ball_spawn() -> void:
-	var request: SpawnBallRequest = SpawnBallRequest.new()
-	request.ball_number = _get_next_spawn_ball_number()
-	request.is_wayfinder = false
-	pending_spawn_requests.append(request)
-	_queue_spawn_reward_message(request)
 
 
 func _process_callout_queue(delta: float) -> void:
@@ -1609,10 +1194,10 @@ func _remove_result_callout(callout: ResultCallout) -> void:
 #endregion
 
 
-#region Helpers / Utilities
-# Small shared checks that do not yet justify a separate system file.
+#region Shot Helpers
+# Small shot-state checks that do not yet justify a separate system file.
 func _all_balls_stopped() -> bool:
-	if not pending_spawn_requests.is_empty():
+	if spawn_system.has_pending_spawns():
 		return false
 
 	for child in balls.get_children():
@@ -1624,16 +1209,10 @@ func _all_balls_stopped() -> bool:
 #endregion
 
 
-#region Spawning / Drop Flow
-# Owns reward accounting, safe spawn search, and the animated ball-drop queue.
-# Future extraction candidate: SpawnSystem.
+#region Spawn Reward Rules
+# Shot rules decide when rewards are earned; SpawnSystem owns queueing and drops.
 func _award_base_spawn_progress() -> void:
-	pocketed_object_ball_spawn_progress += 1
-	if pocketed_object_ball_spawn_progress < BALLS_PER_REWARD_DROP:
-		return
-
-	pocketed_object_ball_spawn_progress = 0
-	_queue_spawn_reward(1)
+	spawn_system.award_base_spawn_progress()
 
 
 func _try_award_multi_pocket_bonus() -> void:
@@ -1644,7 +1223,7 @@ func _try_award_multi_pocket_bonus() -> void:
 		return
 
 	shot_multi_pocket_bonus_awarded = true
-	_queue_spawn_reward(1)
+	spawn_system.queue_spawn_reward(1)
 
 
 func _try_award_bank_bonus() -> void:
@@ -1653,117 +1232,15 @@ func _try_award_bank_bonus() -> void:
 
 	shot_bank_bonus_awarded = true
 	_queue_result_message("BANK SHOT")
-	_queue_spawn_reward(1)
-
-
-func _queue_spawn_reward(spawn_count: int) -> void:
-	for _spawn_index in range(spawn_count):
-		var request: SpawnBallRequest = _make_spawn_ball_request()
-		pending_spawn_requests.append(request)
-		_queue_spawn_reward_message(request)
-
-
-func _process_spawn_queue(delta: float) -> void:
-	if pending_spawn_requests.is_empty():
-		spawn_drop_cooldown = 0.0
-		return
-
-	spawn_drop_cooldown = max(spawn_drop_cooldown - delta, 0.0)
-	if spawn_drop_cooldown > 0.0:
-		return
-
-	var request: SpawnBallRequest = pending_spawn_requests.pop_front() as SpawnBallRequest
-	_spawn_next_reward_ball(request)
-	spawn_drop_cooldown = SPAWN_DROP_STAGGER
-
-
-func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
-	var spawn_position: Vector2 = _find_safe_spawn_position(cue_ball.radius)
-	var ball: Ball
-	if request.is_wayfinder:
-		ball = _create_wayfinder_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
-	else:
-		ball = _create_ball(Ball.BallType.OBJECT, request.ball_number, _ball_color(request.ball_number), spawn_position)
-	ball.begin_spawn_drop(spawn_position)
-
-
-func _get_next_spawn_ball_number() -> int:
-	var ball_number: int = int(SPAWN_BALL_NUMBERS[next_spawn_ball_index])
-	next_spawn_ball_index = (next_spawn_ball_index + 1) % SPAWN_BALL_NUMBERS.size()
-	return ball_number
-
-
-func _find_safe_spawn_position(ball_radius: float) -> Vector2:
-	var search_center: Vector2 = _get_random_spawn_search_center()
-	if _is_safe_ball_position(search_center, ball_radius):
-		return search_center
-
-	for ring in range(1, SPAWN_SEARCH_RINGS + 1):
-		var radius: float = SPAWN_SEARCH_STEP * ring
-		var sample_count: int = max(8, ring * 8)
-		for sample_index in range(sample_count):
-			var angle: float = TAU * float(sample_index) / float(sample_count)
-			var candidate: Vector2 = search_center + Vector2.RIGHT.rotated(angle) * radius
-			if _is_safe_ball_position(candidate, ball_radius):
-				return candidate
-
-	return playfield_rect.get_center()
-
-
-func _get_random_spawn_search_center() -> Vector2:
-	var radius: float = randf_range(SPAWN_RANDOM_RADIUS_MIN, SPAWN_RANDOM_RADIUS_MAX)
-	var direction: Vector2 = Vector2.RIGHT.rotated(randf_range(0.0, TAU))
-	var candidate: Vector2 = SPAWN_SEARCH_CENTER + direction * radius
-	return candidate.clamp(playfield_rect.position, playfield_rect.end)
-
-
-func _is_safe_ball_position(candidate: Vector2, ball_radius: float, ignored_ball: Ball = null) -> bool:
-	if not playfield_rect.grow(-ball_radius).has_point(candidate):
-		return false
-
-	for pocket_index in range(pocket_positions.size()):
-		var pocket_position: Vector2 = pocket_positions[pocket_index]
-		var pocket_radius: float = pocket_radii[pocket_index]
-		if candidate.distance_to(pocket_position) < pocket_radius + ball_radius + 8.0:
-			return false
-
-	for child in balls.get_children():
-		var other_ball := child as Ball
-		if other_ball == null or other_ball == ignored_ball or not other_ball.visible:
-			continue
-		if candidate.distance_to(other_ball.get_safe_position()) < ball_radius + other_ball.radius + 4.0:
-			return false
-
-	return true
+	spawn_system.queue_spawn_reward(1)
 #endregion
 
 
-#region Helpers / Utilities
+#region Game State Helpers
 # Reset and game-end helpers remain here until PocketSystem/GameState are split.
 func _reset_ball(ball: Ball, origin: Vector2, message: String) -> void:
-	var safe_position: Vector2 = _find_nearest_safe_reset_position(ball, origin)
-	ball.respawn_at(safe_position)
+	spawn_system.reset_ball(ball, origin)
 	status_text_changed.emit(message)
-
-
-func _find_nearest_safe_reset_position(ball: Ball, origin: Vector2) -> Vector2:
-	if _is_safe_reset_position(ball, origin):
-		return origin
-
-	for ring in range(1, RESET_SEARCH_RINGS + 1):
-		var radius: float = RESET_SEARCH_STEP * ring
-		var sample_count: int = max(8, ring * 8)
-		for sample_index in range(sample_count):
-			var angle: float = TAU * float(sample_index) / float(sample_count)
-			var candidate: Vector2 = origin + Vector2.RIGHT.rotated(angle) * radius
-			if _is_safe_reset_position(ball, candidate):
-				return candidate
-
-	return origin
-
-
-func _is_safe_reset_position(ball: Ball, candidate: Vector2) -> bool:
-	return _is_safe_ball_position(candidate, ball.radius, ball)
 
 
 func _finish_game(message: String) -> void:
