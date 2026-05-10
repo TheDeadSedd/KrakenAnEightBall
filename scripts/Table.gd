@@ -5,6 +5,9 @@ class_name BilliardsTable
 signal status_text_changed(text: String)
 signal game_finished(text: String)
 
+#region Data Containers
+# Lightweight data carriers owned by Table.gd for now. When systems split,
+# these should move with future owners like AimPreview, SpawnSystem, or DebugOverlay.
 class AimPrediction:
 	var collision_type := "none"
 	var position := Vector2.ZERO
@@ -49,7 +52,11 @@ class GuidedWayfinderBall:
 	var remaining_time := 0.0
 	var debug_log_cooldown := 0.0
 	var start_speed := 0.0
+#endregion
 
+#region Constants / Config
+# Central tuning for the current prototype. Future extractions should copy only
+# their own values into CueController, AimPreview, BallPhysics, SpawnSystem, etc.
 # Debug and testing helpers.
 # Pre-alpha testing mode: cue-ball and 8-ball sinks reset instead of ending the run.
 const DEBUG_NO_GAME_OVER := true
@@ -181,13 +188,21 @@ const BANK_DEBUG_MARKER_LIFETIME := 1.0
 const AIM_PATH_DEBUG_LIFETIME := 3.0
 const AIM_PATH_DEBUG_MAX_POINTS := 240
 const AIM_PATH_DEBUG_POINT_SPACING := 5.0
+#endregion
 
+#region Cached Node References
+# Scene-authored nodes stay the source of truth for geometry and cue art.
+# Future extraction: TableGeometry can own boundaries_root/pockets_root.
 @onready var balls: Node2D = $Balls
 @onready var boundaries_root: Node = get_node_or_null("Boundaries")
 @onready var pockets_root: Node = get_node_or_null("Pockets")
 @onready var cue_pivot: Node2D = $CuePivot
 @onready var cue_sprite: Sprite2D = $CuePivot/CueSprite
+#endregion
 
+#region Runtime State
+# Table.gd currently owns all run state. These clusters mark natural future
+# owners: DebugOverlay, CueController, PocketSystem, WayfinderSystem, SpawnSystem.
 var active_result_callouts: Array[ResultCallout] = []
 var pending_callout_messages: Array[String] = []
 var callout_spawn_cooldown := 0.0
@@ -244,8 +259,12 @@ var perf_ball_collision_ms := 0.0
 var perf_rail_collision_ms := 0.0
 var perf_pocket_check_ms := 0.0
 var perf_aim_prediction_ms := 0.0
+#endregion
 
 
+#region Setup / Main Loop
+# Owns startup, per-frame orchestration, and update order.
+# Future extraction: this can become a thin coordinator after systems split.
 func _ready() -> void:
 	_cache_table_geometry()
 	_configure_cue_sprite()
@@ -299,8 +318,11 @@ func _physics_process(delta: float) -> void:
 		queue_redraw()
 
 	perf_physics_process_ms = _elapsed_ms_since(physics_start_usec)
+#endregion
 
 
+#region Input Dispatch
+# Routes raw mouse/touch/debug keys. Cue-specific behavior stays in Cue Controller below.
 func _unhandled_input(event: InputEvent) -> void:
 	if game_over or not is_instance_valid(cue_ball):
 		return
@@ -343,8 +365,11 @@ func _try_debug_spawn_ball(event: InputEvent) -> bool:
 		return true
 
 	return false
+#endregion
 
 
+#region Drawing / Art Presentation
+# Draws ship/table art and debug paths. Future extraction: TableArt + DebugOverlay.
 func _draw() -> void:
 	_ensure_table_geometry_cached()
 	_draw_table_art()
@@ -440,8 +465,12 @@ func _draw_predicted_rail_comparison_marker(fade: float) -> void:
 	draw_circle(last_predicted_rail_position, 7.0, rail_color)
 	draw_line(last_predicted_rail_position, last_predicted_rail_position + last_predicted_rail_normal * 30.0, normal_color, 2.0)
 	draw_line(last_predicted_rail_position, last_predicted_rail_position + last_predicted_post_bank_direction * 44.0, post_bank_color, 2.2)
+#endregion
 
 
+#region Table Geometry / Pockets Cache
+# Reads scene-authored boundaries and pockets. Future extraction: TableGeometry
+# plus PocketSystem for pocket center/radius ownership.
 func _cache_table_geometry() -> void:
 	table_frame_art_rect = _calculate_table_frame_art_rect()
 	playfield_rect = SPAWN_REFERENCE_RECT
@@ -579,8 +608,11 @@ func _fit_texture_rect_inside(texture: Texture2D, container: Rect2) -> Rect2:
 	var scale: float = min(container.size.x / texture_size.x, container.size.y / texture_size.y)
 	var draw_size: Vector2 = texture_size * scale
 	return Rect2(container.get_center() - draw_size * 0.5, draw_size)
+#endregion
 
 
+#region Starting Layout / Ball Factory
+# Creates the cue ball and deterministic rack. Future extraction: RackSetup or SpawnSystem.
 func _spawn_starting_balls() -> void:
 	cue_ball = CUE_BALL_SCENE.instantiate() as Ball
 	balls.add_child(cue_ball)
@@ -659,8 +691,12 @@ func _ball_color(number: int) -> Color:
 		15: Color("b84842"),
 	}
 	return colors.get(number, Color("d7b347"))
+#endregion
 
 
+#region Ball Physics / Collision
+# Owns arcade movement, friction calls, and collision response.
+# Future extraction candidate: BallPhysics.
 func _move_balls(delta: float) -> void:
 	for child in balls.get_children():
 		var ball := child as Ball
@@ -697,6 +733,9 @@ func _get_active_balls() -> Array[Ball]:
 	return active_balls
 
 
+#region Spatial Grid / Broad-Phase
+# Buckets active balls so BallPhysics only resolves nearby moving pairs.
+# Future extraction candidate: BallPhysics broad-phase helper.
 func _build_ball_collision_grid(active_balls: Array[Ball]) -> Dictionary:
 	var spatial_grid := {}
 	for ball in active_balls:
@@ -750,6 +789,7 @@ func _get_ball_pair_key(ball_a: Ball, ball_b: Ball) -> String:
 		first_id = second_id
 		second_id = temp_id
 	return "%s:%s" % [first_id, second_id]
+#endregion
 
 
 func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
@@ -804,8 +844,12 @@ func _note_actual_cue_ball_hit(ball_a: Ball, ball_b: Ball) -> void:
 	actual_cue_path.append(cue_ball.global_position)
 	_stop_actual_cue_path_recording()
 	print("Bank debug | actual cue hit ball | pos=%s" % cue_ball.global_position)
+#endregion
 
 
+#region Wayfinder
+# Owns activation, guidance targeting, and redirect cooldowns.
+# Future extraction candidate: WayfinderSystem.
 func _handle_wayfinder_cue_activation(ball_a: Ball, ball_b: Ball) -> void:
 	_try_activate_wayfinder_from_cue_hit(ball_a, ball_b)
 	_try_activate_wayfinder_from_cue_hit(ball_b, ball_a)
@@ -858,8 +902,12 @@ func _try_begin_wayfinder_guidance(striker: Ball, target: Ball) -> void:
 	_begin_wayfinder_guidance(target, chosen_pocket)
 	_set_wayfinder_redirect_pair_cooldown(striker, target)
 	_print_wayfinder_guidance_start_debug(striker, target, chosen_pocket)
+#endregion
 
 
+#region Boundaries / Rails
+# Resolves scene-authored rail collision for moving balls.
+# Future extraction candidate: TableGeometry or RailCollision.
 func _resolve_rail_collisions() -> void:
 	if boundary_shapes.is_empty():
 		return
@@ -868,8 +916,12 @@ func _resolve_rail_collisions() -> void:
 		for boundary_shape in boundary_shapes:
 			perf_rail_checks += 1
 			_resolve_ball_against_boundary_shape(ball, boundary_shape)
+#endregion
 
 
+#region Pockets / Pocket Capture
+# Scene-authored pocket circles decide when balls sink.
+# Future extraction candidate: PocketSystem.
 func _handle_pocket_checks() -> bool:
 	for ball in _get_moving_active_balls():
 		for pocket_index in range(pocket_positions.size()):
@@ -895,8 +947,12 @@ func _get_moving_active_balls() -> Array[Ball]:
 
 func _get_pocket_catch_radius(pocket_radius: float, ball_radius: float) -> float:
 	return pocket_radius + ball_radius * 0.5 + POCKET_CATCH_BONUS
+#endregion
 
 
+#region Debug Data Generation
+# Maintains counters and shot-path comparison data consumed by DebugOverlay.gd.
+# No debug UI ownership should live in Table.gd after this extraction.
 func _reset_performance_frame_stats() -> void:
 	perf_ball_pair_checks = 0
 	perf_broadphase_candidate_pairs = 0
@@ -1050,8 +1106,11 @@ func _print_predicted_bank_debug(prediction: AimPrediction) -> void:
 			prediction.path_points.size(),
 		]
 	)
+#endregion
 
 
+#region Boundary Collision Helpers
+# Shared by real movement and aim-preview dry runs so banks use the same authored rails.
 func _resolve_ball_against_boundary_shape(ball: Ball, collision_shape: CollisionShape2D) -> void:
 	var incoming_velocity: Vector2 = ball.velocity
 	var step_result: BallMotionState = BallMotionState.new()
@@ -1092,8 +1151,11 @@ func _get_boundary_collision_normal_local(
 
 func delta_local_direction(local_ball_position: Vector2, closest_local: Vector2) -> Vector2:
 	return (local_ball_position - closest_local).normalized()
+#endregion
 
 
+#region Wayfinder Guidance
+# Continued Wayfinder helpers kept together for future WayfinderSystem extraction.
 func _is_wayfinder_redirect_target(ball: Ball) -> bool:
 	if ball == cue_ball or ball == eight_ball:
 		return false
@@ -1300,8 +1362,12 @@ func _print_wayfinder_guidance_start_debug(
 			WAYFINDER_GUIDE_DURATION,
 		]
 	)
+#endregion
 
 
+#region Cue Controller
+# Owns drag start/release, cue sprite placement, and visual pullback.
+# Future extraction candidate: CueController.
 func _try_start_drag(mouse_position: Vector2) -> void:
 	if not _can_shoot():
 		return
@@ -1451,8 +1517,12 @@ func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) ->
 			release_position,
 		]
 	)
+#endregion
 
 
+#region Aim Prediction
+# Dry-runs the cue ball path against the same scene-authored rail shapes used by gameplay.
+# Future extraction candidate: AimPreview.
 func _draw_aim_prediction(origin: Vector2, initial_velocity: Vector2, power_ratio: float) -> void:
 	var aim_start_usec: int = Time.get_ticks_usec()
 	var prediction: AimPrediction = _get_first_aim_collision(origin, initial_velocity)
@@ -1660,8 +1730,12 @@ func _make_ball_prediction_from_position(
 	prediction.target_direction = target_direction
 	prediction.path_points.append(cue_center_at_impact)
 	return prediction
+#endregion
 
 
+#region Shot State / Pocket Consequences
+# Owns shot lifecycle, pocket outcomes, and reward triggers after pocket captures.
+# Future extraction candidates: PocketSystem plus SpawnSystem reward rules.
 func _can_shoot() -> bool:
 	if game_over or not is_instance_valid(cue_ball) or not cue_ball.visible:
 		return false
@@ -1746,57 +1820,54 @@ func _try_finish_shot() -> void:
 
 	shot_active = false
 	_stop_actual_cue_path_recording()
+#endregion
 
 
-func get_physics_debug_text() -> String:
-	if not DEBUG_PHYSICS_PANEL_ENABLED:
-		return "Physics debug disabled."
-
-	var moving_balls: Array[Ball] = []
+#region Debug Data API
+# Public data surface used by DebugOverlay.gd. Table still owns the counters;
+# DebugOverlay owns visibility, panel movement, and text formatting.
+func get_physics_debug_snapshot() -> Dictionary:
+	var moving_balls: Array[Dictionary] = []
 	for child in balls.get_children():
 		var ball := child as Ball
 		if ball == null or ball.velocity.length() < PHYSICS_DEBUG_SPEED_THRESHOLD:
 			continue
-		moving_balls.append(ball)
+		moving_balls.append(_get_ball_debug_snapshot(ball))
 
-	if moving_balls.is_empty():
-		return "No balls above %.1f speed." % PHYSICS_DEBUG_SPEED_THRESHOLD
-
-	moving_balls.sort_custom(_sort_balls_by_speed_desc)
-	var lines: Array[String] = []
-	var max_count: int = mini(PHYSICS_DEBUG_MAX_BALLS, moving_balls.size())
-	for index in range(max_count):
-		var ball: Ball = moving_balls[index]
-		lines.append(_get_physics_debug_line(ball))
-
-	return "\n".join(lines)
+	return {
+		"enabled": DEBUG_PHYSICS_PANEL_ENABLED,
+		"speed_threshold": PHYSICS_DEBUG_SPEED_THRESHOLD,
+		"max_balls": PHYSICS_DEBUG_MAX_BALLS,
+		"moving_balls": moving_balls,
+	}
 
 
-func get_performance_debug_text() -> String:
+func get_performance_debug_snapshot() -> Dictionary:
 	var counts: Dictionary = _get_performance_ball_counts()
-	var lines := [
-		"PERFORMANCE",
-		"FPS: %s" % Engine.get_frames_per_second(),
-		"Balls: %s total / %s moving / %s stopped" % [counts["total"], counts["moving"], counts["stopped"]],
-		"Wayfinders: %s active / %s guided" % [counts["active_wayfinders"], guided_wayfinder_balls.size()],
-		"Substeps: %s" % PHYSICS_SUBSTEPS,
-		"Grid cells: %s / max cell: %s" % [perf_spatial_grid_cells, perf_spatial_grid_max_cell_size],
-		"Broad-phase candidates: %s" % perf_broadphase_candidate_pairs,
-		"Ball pairs checked: %s" % perf_ball_pair_checks,
-		"Ball collisions: %s" % perf_ball_collisions_resolved,
-		"Rail checks: %s" % perf_rail_checks,
-		"Rail collisions: %s" % perf_rail_collisions_resolved,
-		"Pocket checks: %s" % perf_pocket_checks,
-		"Pocket captures: %s" % perf_pocket_captures,
-		"Aim prediction: %s" % _debug_bool_text(AIM_PREDICTION_ENABLED),
-		"Shot comparison: %s" % _debug_bool_text(debug_aim_path_comparison_enabled),
-		"Physics ms: %.2f" % perf_physics_process_ms,
-		"Ball collision ms: %.2f" % perf_ball_collision_ms,
-		"Rail ms: %.2f" % perf_rail_collision_ms,
-		"Pocket ms: %.2f" % perf_pocket_check_ms,
-		"Aim prediction ms: %.2f" % perf_aim_prediction_ms,
-	]
-	return "\n".join(lines)
+	return {
+		"total_balls": counts["total"],
+		"moving_balls": counts["moving"],
+		"stopped_balls": counts["stopped"],
+		"active_wayfinders": counts["active_wayfinders"],
+		"guided_wayfinder_targets": guided_wayfinder_balls.size(),
+		"physics_substeps": PHYSICS_SUBSTEPS,
+		"spatial_grid_cells": perf_spatial_grid_cells,
+		"spatial_grid_max_cell_size": perf_spatial_grid_max_cell_size,
+		"broadphase_candidate_pairs": perf_broadphase_candidate_pairs,
+		"ball_pair_checks": perf_ball_pair_checks,
+		"ball_collisions_resolved": perf_ball_collisions_resolved,
+		"rail_checks": perf_rail_checks,
+		"rail_collisions_resolved": perf_rail_collisions_resolved,
+		"pocket_checks": perf_pocket_checks,
+		"pocket_captures": perf_pocket_captures,
+		"aim_prediction_enabled": AIM_PREDICTION_ENABLED,
+		"shot_comparison_enabled": debug_aim_path_comparison_enabled,
+		"physics_process_ms": perf_physics_process_ms,
+		"ball_collision_ms": perf_ball_collision_ms,
+		"rail_collision_ms": perf_rail_collision_ms,
+		"pocket_check_ms": perf_pocket_check_ms,
+		"aim_prediction_ms": perf_aim_prediction_ms,
+	}
 
 
 func _get_performance_ball_counts() -> Dictionary:
@@ -1819,47 +1890,20 @@ func _get_performance_ball_counts() -> Dictionary:
 	return counts
 
 
-func _debug_bool_text(enabled: bool) -> String:
-	return "enabled" if enabled else "disabled"
-
-
-func _sort_balls_by_speed_desc(ball_a: Ball, ball_b: Ball) -> bool:
-	return ball_a.velocity.length() > ball_b.velocity.length()
-
-
-func _get_physics_debug_line(ball: Ball) -> String:
-	var parts: Array[String] = []
-	parts.append(_get_ball_debug_name(ball))
-	parts.append("speed %.1f" % ball.velocity.length())
-	parts.append(_get_ball_drag_band_name(ball))
-	if ball.is_wayfinder and ball.wayfinder_active:
-		parts.append("active")
-	if guided_wayfinder_balls.has(ball.get_instance_id()):
-		parts.append("guided")
-	if not ball.gameplay_enabled:
-		parts.append("paused")
-	return " | ".join(parts)
-
-
-func _get_ball_debug_name(ball: Ball) -> String:
-	if ball == cue_ball:
-		return "Cue Ball"
-	if ball == eight_ball:
-		return "8 Ball"
-	if ball.is_wayfinder:
-		return "Wayfinder Ball"
-	return "Ball %s" % ball.ball_number
-
-
-func _get_ball_drag_band_name(ball: Ball) -> String:
-	var speed: float = ball.velocity.length()
-	if speed >= ball.medium_speed_drag_start:
-		return "high"
-	if speed >= ball.low_speed_drag_start:
-		return "medium"
-	if speed >= ball.crawl_speed_drag_start:
-		return "low"
-	return "crawl"
+func _get_ball_debug_snapshot(ball: Ball) -> Dictionary:
+	return {
+		"ball_number": ball.ball_number,
+		"is_cue_ball": ball == cue_ball,
+		"is_eight_ball": ball == eight_ball,
+		"is_wayfinder": ball.is_wayfinder,
+		"wayfinder_active": ball.is_wayfinder and ball.wayfinder_active,
+		"guided": guided_wayfinder_balls.has(ball.get_instance_id()),
+		"gameplay_enabled": ball.gameplay_enabled,
+		"speed": ball.velocity.length(),
+		"medium_speed_drag_start": ball.medium_speed_drag_start,
+		"low_speed_drag_start": ball.low_speed_drag_start,
+		"crawl_speed_drag_start": ball.crawl_speed_drag_start,
+	}
 
 
 func set_shot_path_debug_enabled(enabled: bool) -> void:
@@ -1874,13 +1918,17 @@ func is_shot_path_debug_enabled() -> bool:
 	return debug_aim_path_comparison_enabled
 
 
-func get_debug_spawn_hotkey_text() -> String:
-	return "%s: Spawn Wayfinder Ball\n%s: Spawn Normal Ball" % [
-		OS.get_keycode_string(DEBUG_SPAWN_WAYFINDER_KEY),
-		OS.get_keycode_string(DEBUG_SPAWN_NORMAL_BALL_KEY),
-	]
+func get_debug_spawn_hotkey_data() -> Dictionary:
+	return {
+		"wayfinder_spawn_key": DEBUG_SPAWN_WAYFINDER_KEY,
+		"normal_spawn_key": DEBUG_SPAWN_NORMAL_BALL_KEY,
+	}
+#endregion
 
 
+#region Callouts / Notifications
+# Owns arcade event callouts only; reward spawning is separated below.
+# Future extraction candidate: HUD/CalloutSystem.
 func _queue_ball_sunk_message() -> void:
 	if shot_pocketed_object_balls == 1:
 		_queue_result_message("1 BALL SUNK")
@@ -2039,8 +2087,11 @@ func _remove_result_callout(callout: ResultCallout) -> void:
 	if is_instance_valid(callout.label):
 		callout.label.queue_free()
 	_update_callout_stack_positions()
+#endregion
 
 
+#region Helpers / Utilities
+# Small shared checks that do not yet justify a separate system file.
 func _all_balls_stopped() -> bool:
 	if not pending_spawn_requests.is_empty():
 		return false
@@ -2051,8 +2102,12 @@ func _all_balls_stopped() -> bool:
 			return false
 
 	return true
+#endregion
 
 
+#region Spawning / Drop Flow
+# Owns reward accounting, safe spawn search, and the animated ball-drop queue.
+# Future extraction candidate: SpawnSystem.
 func _award_base_spawn_progress() -> void:
 	pocketed_object_ball_spawn_progress += 1
 	if pocketed_object_ball_spawn_progress < BALLS_PER_REWARD_DROP:
@@ -2161,8 +2216,11 @@ func _is_safe_ball_position(candidate: Vector2, ball_radius: float, ignored_ball
 			return false
 
 	return true
+#endregion
 
 
+#region Helpers / Utilities
+# Reset and game-end helpers remain here until PocketSystem/GameState are split.
 func _reset_ball(ball: Ball, origin: Vector2, message: String) -> void:
 	var safe_position: Vector2 = _find_nearest_safe_reset_position(ball, origin)
 	ball.respawn_at(safe_position)
@@ -2201,3 +2259,4 @@ func _finish_game(message: String) -> void:
 	status_text_changed.emit("Press F5 in the editor to play another round.")
 	game_finished.emit(message)
 	queue_redraw()
+#endregion
