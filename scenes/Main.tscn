@@ -11,6 +11,7 @@ script = ExtResource("2_main_script")
 [node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=980633167]
 
 [node name="HUD" type="Control" parent="CanvasLayer" unique_id=841761493]
+visible = false
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -21,31 +22,74 @@ mouse_filter = 2
 
 [node name="TitleLabel" type="Label" parent="CanvasLayer/HUD" unique_id=492201580]
 layout_mode = 0
-offset_left = 24.0
-offset_top = 18.0
-offset_right = 460.0
-offset_bottom = 54.0
-theme_override_colors/font_color = Color(0.93, 0.92, 0.84, 1)
+offset_left = 390.0
+offset_top = 150.0
+offset_right = 826.0
+offset_bottom = 186.0
+theme_override_colors/font_color = Color(0.96, 0.88, 0.66, 1)
+theme_override_colors/font_shadow_color = Color(0.12, 0.06, 0.02, 0.7)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
 theme_override_font_sizes/font_size = 28
 text = "Kraken An Eight Ball"
 
 [node name="StatusLabel" type="Label" parent="CanvasLayer/HUD" unique_id=1124129470]
 layout_mode = 0
-offset_left = 24.0
-offset_top = 60.0
-offset_right = 760.0
-offset_bottom = 116.0
-theme_override_colors/font_color = Color(0.93, 0.92, 0.84, 1)
+offset_left = 390.0
+offset_top = 192.0
+offset_right = 1126.0
+offset_bottom = 248.0
+theme_override_colors/font_color = Color(0.88, 0.86, 0.76, 1)
+theme_override_colors/font_shadow_color = Color(0.08, 0.05, 0.03, 0.52)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
 theme_override_font_sizes/font_size = 18
 text = "Loading table..."
 autowrap_mode = 3
 
 [node name="ResultLabel" type="Label" parent="CanvasLayer/HUD" unique_id=556767554]
 layout_mode = 0
-offset_left = 350.0
-offset_top = 660.0
-offset_right = 850.0
-offset_bottom = 704.0
-theme_override_colors/font_color = Color(1, 0.88, 0.55, 1)
+offset_left = 710.0
+offset_top = 1002.0
+offset_right = 1210.0
+offset_bottom = 1046.0
+theme_override_colors/font_color = Color(1, 0.9, 0.62, 1)
+theme_override_colors/font_shadow_color = Color(0.07, 0.03, 0.01, 0.85)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
 theme_override_font_sizes/font_size = 24
 horizontal_alignment = 1
+
+[node name="PhysicsDebugButton" type="Button" parent="CanvasLayer/HUD" unique_id=170177021]
+visible = false
+layout_mode = 0
+offset_left = 1530.0
+offset_top = 150.0
+offset_right = 1780.0
+offset_bottom = 182.0
+theme_override_font_sizes/font_size = 15
+text = "Physics Debug"
+
+[node name="PhysicsDebugPanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1058206188]
+visible = false
+layout_mode = 0
+offset_left = 1430.0
+offset_top = 190.0
+offset_right = 1780.0
+offset_bottom = 404.0
+
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PhysicsDebugPanel" unique_id=657645572]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="PhysicsDebugLabel" type="Label" parent="CanvasLayer/HUD/PhysicsDebugPanel/Margin" unique_id=962260974]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
+theme_override_colors/font_shadow_color = Color(0.05, 0.05, 0.05, 0.45)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_font_sizes/font_size = 13
+text = "Physics debug idle."
