@@ -3,7 +3,7 @@ extends Node2D
 class_name AimPreview
 
 # Owns cue aim prediction, bank preview drawing, and shot-path debug overlays.
-# Table.gd still owns real balls, boundaries, and gameplay state.
+# Table.gd owns real balls/gameplay state; BoundarySystem owns boundary queries.
 const DEBUG_AIM_PATH_COMPARISON_DEFAULT := false
 const DEBUG_BANK_PREDICTION := false
 const AIM_GUIDE_LENGTH := 180.0
@@ -335,86 +335,16 @@ func _simulate_aim_cue_step(moved_position: Vector2, velocity: Vector2, delta: f
 	step_result.position = moved_position
 	step_result.velocity = velocity
 
-	for boundary_shape in table.boundary_shapes:
-		_resolve_boundary_collision_for_state(step_result, boundary_shape, table.cue_ball.radius)
+	for boundary_shape in table.boundary_system.get_boundary_shapes():
+		table.boundary_system.resolve_motion_state_against_shape(
+			step_result,
+			boundary_shape,
+			table.cue_ball.radius,
+			table.RAIL_RESTITUTION
+		)
 
 	step_result.velocity = _apply_prediction_friction(step_result.velocity, delta)
 	return step_result
-
-
-func _resolve_boundary_collision_for_state(
-	step_result: BallMotionState,
-	collision_shape: CollisionShape2D,
-	ball_radius: float
-) -> void:
-	var rectangle_shape: RectangleShape2D = collision_shape.shape as RectangleShape2D
-	if rectangle_shape == null:
-		return
-
-	var shape_transform: Transform2D = collision_shape.global_transform
-	var local_position: Vector2 = shape_transform.affine_inverse() * step_result.position
-	var half_size: Vector2 = rectangle_shape.size * 0.5
-	var closest_local: Vector2 = local_position.clamp(-half_size, half_size)
-	var distance: float = local_position.distance_to(closest_local)
-	if distance >= ball_radius:
-		return
-
-	_apply_boundary_response_to_state(
-		step_result,
-		shape_transform,
-		local_position,
-		closest_local,
-		half_size,
-		distance,
-		ball_radius
-	)
-
-
-func _apply_boundary_response_to_state(
-	step_result: BallMotionState,
-	shape_transform: Transform2D,
-	local_position: Vector2,
-	closest_local: Vector2,
-	half_size: Vector2,
-	distance: float,
-	ball_radius: float
-) -> void:
-	var normal_local: Vector2 = _get_boundary_collision_normal_local(local_position, closest_local, half_size, distance)
-	var normal_world: Vector2 = shape_transform.basis_xform(normal_local).normalized()
-	step_result.position += normal_world * (ball_radius - distance + 0.01)
-
-	var normal_speed: float = step_result.velocity.dot(normal_world)
-	if normal_speed >= 0.0:
-		return
-
-	step_result.velocity -= normal_world * (1.0 + table.RAIL_RESTITUTION) * normal_speed
-	if not step_result.hit_rail:
-		step_result.hit_rail = true
-		step_result.rail_position = step_result.position
-		step_result.rail_normal = normal_world
-
-
-func _get_boundary_collision_normal_local(
-	local_ball_position: Vector2,
-	closest_local: Vector2,
-	half_size: Vector2,
-	distance: float
-) -> Vector2:
-	if distance > 0.0:
-		return (local_ball_position - closest_local).normalized()
-
-	var distance_to_left: float = abs(local_ball_position.x + half_size.x)
-	var distance_to_right: float = abs(half_size.x - local_ball_position.x)
-	var distance_to_top: float = abs(local_ball_position.y + half_size.y)
-	var distance_to_bottom: float = abs(half_size.y - local_ball_position.y)
-	var nearest_face: float = min(distance_to_left, distance_to_right, distance_to_top, distance_to_bottom)
-	if nearest_face == distance_to_left:
-		return Vector2.LEFT
-	if nearest_face == distance_to_right:
-		return Vector2.RIGHT
-	if nearest_face == distance_to_top:
-		return Vector2.UP
-	return Vector2.DOWN
 
 
 func _apply_prediction_friction(velocity: Vector2, delta: float) -> Vector2:

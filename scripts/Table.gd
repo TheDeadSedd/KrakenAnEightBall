@@ -6,15 +6,6 @@ signal status_text_changed(text: String)
 signal game_finished(text: String)
 
 #region Data Containers
-# Lightweight data carriers owned by Table.gd for now.
-# Extraction note: AimPreview now owns prediction/debug path containers.
-class BallMotionState:
-	var position := Vector2.ZERO
-	var velocity := Vector2.ZERO
-	var rail_position := Vector2.ZERO
-	var rail_normal := Vector2.ZERO
-	var hit_rail := false
-
 class ResultCallout:
 	var label: Label
 	var stack_index := 0
@@ -95,10 +86,9 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 
 #region Cached Node References
 # Scene-authored nodes stay the source of truth for geometry and cue art.
-# Future extraction: TableGeometry can own boundaries_root.
 @onready var balls: Node2D = $Balls
-@onready var boundaries_root: Node = get_node_or_null("Boundaries")
 @onready var pocket_system: PocketSystem = $PocketSystem
+@onready var boundary_system: BoundarySystem = $BoundarySystem
 @onready var aim_preview: AimPreview = $AimPreview
 @onready var spawn_system: SpawnSystem = $SpawnSystem
 @onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
@@ -129,15 +119,11 @@ var shot_bank_bonus_awarded := false
 var shot_bank_eligible_ball_ids: Dictionary = {}
 var table_frame_art_rect := Rect2()
 var playfield_rect := Rect2()
-var boundary_shapes: Array[CollisionShape2D] = []
-var boundary_reference_rects: Array[Rect2] = []
 var perf_ball_pair_checks := 0
 var perf_broadphase_candidate_pairs := 0
 var perf_spatial_grid_cells := 0
 var perf_spatial_grid_max_cell_size := 0
 var perf_ball_collisions_resolved := 0
-var perf_rail_checks := 0
-var perf_rail_collisions_resolved := 0
 var perf_physics_process_ms := 0.0
 var perf_ball_collision_ms := 0.0
 var perf_rail_collision_ms := 0.0
@@ -150,6 +136,7 @@ var perf_pocket_check_ms := 0.0
 # Future extraction: this can become a thin coordinator after systems split.
 func _ready() -> void:
 	pocket_system.setup(self)
+	boundary_system.setup(self)
 	aim_preview.setup(self)
 	spawn_system.setup(self)
 	wayfinder_system.setup(self)
@@ -273,7 +260,7 @@ func _draw_collision_debug() -> void:
 	if Engine.is_editor_hint() or not DEBUG_DRAW_BOUNDARY_RECTS:
 		return
 
-	for boundary_rect in boundary_reference_rects:
+	for boundary_rect in boundary_system.get_boundary_reference_rects():
 		draw_rect(boundary_rect, Color(1, 0.22, 0.12, 0.22), true)
 		draw_rect(boundary_rect, Color(1, 0.35, 0.2, 0.9), false, 2.0)
 
@@ -282,93 +269,21 @@ func _draw_collision_debug() -> void:
 
 
 #region Table Geometry Cache
-# Reads scene-authored boundaries. PocketSystem owns pocket center/radius caching.
+# Caches presentation art bounds and asks extracted geometry systems to refresh.
 func _cache_table_geometry() -> void:
 	table_frame_art_rect = _calculate_table_frame_art_rect()
 	playfield_rect = SPAWN_REFERENCE_RECT
-	boundary_shapes.clear()
-	boundary_reference_rects.clear()
 
 	pocket_system.cache_pockets()
-	_build_rail_debug_rects()
-	_cache_boundary_reference_rect()
+	boundary_system.cache_boundaries()
+	var boundary_rect: Rect2 = boundary_system.get_inner_rect()
+	if boundary_rect.size != Vector2.ZERO:
+		playfield_rect = boundary_rect
 
 
 func _ensure_table_geometry_cached() -> void:
 	if table_frame_art_rect.size == Vector2.ZERO or playfield_rect.size == Vector2.ZERO:
 		_cache_table_geometry()
-
-
-func _build_rail_debug_rects() -> void:
-	if boundaries_root == null:
-		return
-
-	for shape_node in boundaries_root.find_children("*", "CollisionShape2D", true, false):
-		var collision_shape := shape_node as CollisionShape2D
-		if collision_shape == null:
-			continue
-		if collision_shape.shape is RectangleShape2D:
-			boundary_shapes.append(collision_shape)
-			_add_boundary_reference_rect(collision_shape)
-
-
-func _add_boundary_reference_rect(collision_shape: CollisionShape2D) -> void:
-	var rectangle_shape: RectangleShape2D = collision_shape.shape as RectangleShape2D
-	if rectangle_shape == null:
-		return
-
-	var half_size: Vector2 = rectangle_shape.size * 0.5
-	var transform_2d: Transform2D = collision_shape.global_transform
-	var corners := [
-		transform_2d * Vector2(-half_size.x, -half_size.y),
-		transform_2d * Vector2(half_size.x, -half_size.y),
-		transform_2d * Vector2(half_size.x, half_size.y),
-		transform_2d * Vector2(-half_size.x, half_size.y),
-	]
-	var bounds := Rect2(corners[0], Vector2.ZERO)
-	for corner in corners:
-		bounds = bounds.expand(corner)
-	boundary_reference_rects.append(bounds)
-
-
-func _cache_boundary_reference_rect() -> void:
-	var boundary_rect: Rect2 = _get_boundary_inner_rect()
-	if boundary_rect.size != Vector2.ZERO:
-		playfield_rect = boundary_rect
-
-
-func _get_boundary_inner_rect() -> Rect2:
-	if boundary_shapes.is_empty():
-		return Rect2()
-
-	var overall_bounds: Rect2 = boundary_reference_rects[0]
-	for boundary_rect in boundary_reference_rects:
-		overall_bounds = overall_bounds.merge(boundary_rect)
-
-	var center: Vector2 = overall_bounds.get_center()
-	var left_inner := -INF
-	var right_inner := INF
-	var top_inner := -INF
-	var bottom_inner := INF
-
-	for boundary_rect in boundary_reference_rects:
-		if boundary_rect.size.x >= boundary_rect.size.y:
-			if boundary_rect.get_center().y < center.y:
-				top_inner = max(top_inner, boundary_rect.end.y)
-			else:
-				bottom_inner = min(bottom_inner, boundary_rect.position.y)
-		else:
-			if boundary_rect.get_center().x < center.x:
-				left_inner = max(left_inner, boundary_rect.end.x)
-			else:
-				right_inner = min(right_inner, boundary_rect.position.x)
-
-	if left_inner == -INF or right_inner == INF or top_inner == -INF or bottom_inner == INF:
-		return Rect2()
-	if right_inner <= left_inner or bottom_inner <= top_inner:
-		return Rect2()
-
-	return Rect2(left_inner, top_inner, right_inner - left_inner, bottom_inner - top_inner)
 
 
 func get_presentation_rect() -> Rect2:
@@ -548,16 +463,22 @@ func _note_actual_cue_ball_hit(ball_a: Ball, ball_b: Ball) -> void:
 
 
 #region Boundaries / Rails
-# Resolves scene-authored rail collision for moving balls.
-# Future extraction candidate: TableGeometry or RailCollision.
+# Resolves moving balls against BoundarySystem's scene-authored rail cache.
 func _resolve_rail_collisions() -> void:
-	if boundary_shapes.is_empty():
+	if not boundary_system.has_boundaries():
 		return
 
 	for ball in _get_moving_active_balls():
-		for boundary_shape in boundary_shapes:
-			perf_rail_checks += 1
-			_resolve_ball_against_boundary_shape(ball, boundary_shape)
+		var hit_events: Array = boundary_system.resolve_ball_against_boundaries(ball, RAIL_RESTITUTION)
+		for hit_event in hit_events:
+			_note_cue_rail_touch(ball)
+			aim_preview.record_actual_bank_debug(
+				ball,
+				hit_event.position,
+				hit_event.incoming_velocity,
+				hit_event.normal,
+				shot_active
+			)
 #endregion
 
 
@@ -593,8 +514,7 @@ func _reset_performance_frame_stats() -> void:
 	perf_spatial_grid_cells = 0
 	perf_spatial_grid_max_cell_size = 0
 	perf_ball_collisions_resolved = 0
-	perf_rail_checks = 0
-	perf_rail_collisions_resolved = 0
+	boundary_system.reset_frame_stats()
 	pocket_system.reset_frame_stats()
 	perf_physics_process_ms = 0.0
 	perf_ball_collision_ms = 0.0
@@ -604,103 +524,6 @@ func _reset_performance_frame_stats() -> void:
 
 func _elapsed_ms_since(start_usec: int) -> float:
 	return float(Time.get_ticks_usec() - start_usec) / 1000.0
-#endregion
-
-
-#region Boundary Collision Helpers
-# Real ball-vs-boundary collision. AimPreview mirrors this response for dry-run banks.
-func _resolve_ball_against_boundary_shape(ball: Ball, collision_shape: CollisionShape2D) -> void:
-	var incoming_velocity: Vector2 = ball.velocity
-	var step_result: BallMotionState = BallMotionState.new()
-	step_result.position = ball.global_position
-	step_result.velocity = ball.velocity
-	_resolve_boundary_collision_for_state(step_result, collision_shape, ball.radius)
-	ball.global_position = step_result.position
-	ball.velocity = step_result.velocity
-
-	if step_result.hit_rail:
-		perf_rail_collisions_resolved += 1
-		_note_cue_rail_touch(ball)
-		aim_preview.record_actual_bank_debug(ball, ball.global_position, incoming_velocity, step_result.rail_normal, shot_active)
-
-
-func _resolve_boundary_collision_for_state(
-	step_result: BallMotionState,
-	collision_shape: CollisionShape2D,
-	ball_radius: float
-) -> void:
-	var rectangle_shape: RectangleShape2D = collision_shape.shape as RectangleShape2D
-	if rectangle_shape == null:
-		return
-
-	var shape_transform: Transform2D = collision_shape.global_transform
-	var local_position: Vector2 = shape_transform.affine_inverse() * step_result.position
-	var half_size: Vector2 = rectangle_shape.size * 0.5
-	var closest_local: Vector2 = local_position.clamp(-half_size, half_size)
-	var distance: float = local_position.distance_to(closest_local)
-	if distance >= ball_radius:
-		return
-
-	_apply_boundary_response_to_state(
-		step_result,
-		shape_transform,
-		local_position,
-		closest_local,
-		half_size,
-		distance,
-		ball_radius
-	)
-
-
-func _apply_boundary_response_to_state(
-	step_result: BallMotionState,
-	shape_transform: Transform2D,
-	local_position: Vector2,
-	closest_local: Vector2,
-	half_size: Vector2,
-	distance: float,
-	ball_radius: float
-) -> void:
-	var normal_local: Vector2 = _get_boundary_collision_normal_local(local_position, closest_local, half_size, distance)
-	var normal_world: Vector2 = shape_transform.basis_xform(normal_local).normalized()
-	step_result.position += normal_world * (ball_radius - distance + 0.01)
-
-	var normal_speed: float = step_result.velocity.dot(normal_world)
-	if normal_speed >= 0.0:
-		return
-
-	step_result.velocity -= normal_world * (1.0 + RAIL_RESTITUTION) * normal_speed
-	if not step_result.hit_rail:
-		step_result.hit_rail = true
-		step_result.rail_position = step_result.position
-		step_result.rail_normal = normal_world
-
-
-func _get_boundary_collision_normal_local(
-	local_ball_position: Vector2,
-	closest_local: Vector2,
-	half_size: Vector2,
-	distance: float
-) -> Vector2:
-	if distance > 0.0:
-		return delta_local_direction(local_ball_position, closest_local)
-
-	var distance_to_left: float = abs(local_ball_position.x + half_size.x)
-	var distance_to_right: float = abs(half_size.x - local_ball_position.x)
-	var distance_to_top: float = abs(local_ball_position.y + half_size.y)
-	var distance_to_bottom: float = abs(half_size.y - local_ball_position.y)
-	var nearest_face: float = min(distance_to_left, distance_to_right, distance_to_top, distance_to_bottom)
-	if nearest_face == distance_to_left:
-		return Vector2.LEFT
-	if nearest_face == distance_to_right:
-		return Vector2.RIGHT
-	if nearest_face == distance_to_top:
-		return Vector2.UP
-	return Vector2.DOWN
-
-
-func delta_local_direction(local_ball_position: Vector2, closest_local: Vector2) -> Vector2:
-	return (local_ball_position - closest_local).normalized()
 #endregion
 
 
@@ -953,8 +776,8 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"broadphase_candidate_pairs": perf_broadphase_candidate_pairs,
 		"ball_pair_checks": perf_ball_pair_checks,
 		"ball_collisions_resolved": perf_ball_collisions_resolved,
-		"rail_checks": perf_rail_checks,
-		"rail_collisions_resolved": perf_rail_collisions_resolved,
+		"rail_checks": boundary_system.get_checks_this_frame(),
+		"rail_collisions_resolved": boundary_system.get_collisions_this_frame(),
 		"pocket_checks": pocket_system.get_checks_this_frame(),
 		"pocket_captures": pocket_system.get_captures_this_frame(),
 		"aim_prediction_enabled": aim_preview.is_prediction_enabled(),
