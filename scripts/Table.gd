@@ -68,24 +68,17 @@ const PIRATE_SHIP_SILHOUETTE_TEXTURE := preload("res://assets/table_art/pirate_s
 const PRESENTATION_OFFSET_X := 360.0
 const PRESENTATION_OFFSET_Y := 180.0
 
-# Table bounds. Drawing, rail collision, pockets, and reset checks all use these.
+# Table bounds. Drawing uses the full table rect; spawn helpers fall back to a simple reference rect if scene geometry is missing.
 const TABLE_LEFT := PRESENTATION_OFFSET_X + 40.0
 const TABLE_TOP := PRESENTATION_OFFSET_Y + 40.0
 const TABLE_RIGHT := PRESENTATION_OFFSET_X + 1160.0
 const TABLE_BOTTOM := PRESENTATION_OFFSET_Y + 680.0
-const TABLE_RAIL_LEFT := PRESENTATION_OFFSET_X + 66.0
-const TABLE_RAIL_TOP := PRESENTATION_OFFSET_Y + 66.0
-const PLAYFIELD_LEFT := PRESENTATION_OFFSET_X + 94.0
-const PLAYFIELD_TOP := PRESENTATION_OFFSET_Y + 94.0
-const PLAYFIELD_RIGHT := PRESENTATION_OFFSET_X + 1106.0
-const PLAYFIELD_BOTTOM := PRESENTATION_OFFSET_Y + 626.0
 const TABLE_OUTER_RECT := Rect2(TABLE_LEFT, TABLE_TOP, TABLE_RIGHT - TABLE_LEFT, TABLE_BOTTOM - TABLE_TOP)
-const TABLE_RAIL_RECT := Rect2(TABLE_RAIL_LEFT, TABLE_RAIL_TOP, 1068, 588)
-const PLAYFIELD_RECT := Rect2(
-	PLAYFIELD_LEFT,
-	PLAYFIELD_TOP,
-	PLAYFIELD_RIGHT - PLAYFIELD_LEFT,
-	PLAYFIELD_BOTTOM - PLAYFIELD_TOP
+const SPAWN_REFERENCE_RECT := Rect2(
+	PRESENTATION_OFFSET_X + 94.0,
+	PRESENTATION_OFFSET_Y + 94.0,
+	1106.0 - 94.0,
+	626.0 - 94.0
 )
 const PRESENTATION_MARGIN_LEFT := 120.0
 const PRESENTATION_MARGIN_RIGHT := 120.0
@@ -94,9 +87,6 @@ const PRESENTATION_MARGIN_BOTTOM := 120.0
 const TABLE_FRAME_VISIBLE_BOUNDS := Rect2(311, 130, 1294, 794)
 const KRAKEN_ART_ALPHA := 0.18
 const TABLE_GUIDE_GLOW := Color(0.78, 0.92, 0.84, 0.12)
-
-# Pocket feel. Catch radius also includes part of the ball radius.
-const POCKET_RADIUS := 18.0
 const POCKET_CATCH_BONUS := 8.0
 
 # Starting layout.
@@ -172,7 +162,8 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 const BANK_DEBUG_MARKER_LIFETIME := 1.0
 
 @onready var balls: Node2D = $Balls
-@onready var pockets: Node2D = $Pockets
+@onready var boundaries_root: Node = get_node_or_null("Boundaries")
+@onready var pockets_root: Node = get_node_or_null("Pockets")
 
 var active_result_callouts: Array[ResultCallout] = []
 var pending_callout_messages: Array[String] = []
@@ -193,7 +184,11 @@ var pocketed_object_ball_spawn_progress := 0
 var pending_spawn_requests: Array[SpawnBallRequest] = []
 var spawn_drop_cooldown := 0.0
 var next_spawn_ball_index := 0
+var table_frame_art_rect := Rect2()
+var playfield_rect := Rect2()
 var pocket_positions: Array[Vector2] = []
+var pocket_radii: Array[float] = []
+var boundary_shapes: Array[CollisionShape2D] = []
 var rail_rects: Array[Rect2] = []
 # Only redirected Wayfinder-target pairs use this brief ignore window.
 var wayfinder_redirect_collision_cooldowns: Dictionary = {}
@@ -276,6 +271,7 @@ func _try_debug_spawn_wayfinder(event: InputEvent) -> bool:
 
 
 func _draw() -> void:
+	_ensure_table_geometry_cached()
 	_draw_table_art()
 	_draw_collision_debug()
 	_draw_bank_debug_markers()
@@ -306,11 +302,11 @@ func _draw_table_art() -> void:
 	draw_texture_rect(SHIP_FLOOR_TEXTURE, presentation_rect, false)
 	draw_rect(presentation_rect, Color(0, 0, 0, 0.18), true)
 	_draw_kraken_felt_art()
-	draw_texture_rect(TABLE_FRAME_TEXTURE, _get_table_frame_art_rect(), false)
+	draw_texture_rect(TABLE_FRAME_TEXTURE, table_frame_art_rect, false)
 
 
 func _draw_kraken_felt_art() -> void:
-	var kraken_rect: Rect2 = _fit_texture_rect_inside(KRAKEN_SILHOUETTE_TEXTURE, PLAYFIELD_RECT.grow(-54.0))
+	var kraken_rect: Rect2 = _fit_texture_rect_inside(KRAKEN_SILHOUETTE_TEXTURE, playfield_rect.grow(-54.0))
 	draw_texture_rect(
 		KRAKEN_SILHOUETTE_TEXTURE,
 		kraken_rect,
@@ -345,68 +341,122 @@ func _draw_bank_debug_markers() -> void:
 
 
 func _draw_editor_guides() -> void:
-	if not Engine.is_editor_hint() or not EDITOR_DRAW_GUIDES:
-		return
-
-	draw_rect(PLAYFIELD_RECT, Color(0.2, 0.7, 1.0, 0.95), false, 2.0)
-
-	for rail_rect in rail_rects:
-		draw_rect(rail_rect, Color(1.0, 0.25, 0.1, 0.16), true)
-		draw_rect(rail_rect, Color(1.0, 0.25, 0.1, 0.8), false, 1.5)
-
-	for pocket_position in pocket_positions:
-		draw_circle(pocket_position, 4.0, Color(1.0, 0.95, 0.25, 0.95))
-		if EDITOR_DRAW_POCKET_CATCH_ZONES:
-			draw_arc(
-				pocket_position,
-				_get_pocket_catch_radius(14.0),
-				0.0,
-				TAU,
-				48,
-				Color(1.0, 0.95, 0.25, 0.85),
-				2.0
-			)
+	return
 
 
 func _cache_table_geometry() -> void:
+	table_frame_art_rect = _calculate_table_frame_art_rect()
+	playfield_rect = SPAWN_REFERENCE_RECT
 	pocket_positions.clear()
+	pocket_radii.clear()
+	boundary_shapes.clear()
 	rail_rects.clear()
 
 	_build_pocket_positions()
 	_build_rail_debug_rects()
+	_cache_boundary_reference_rect()
+
+
+func _ensure_table_geometry_cached() -> void:
+	if table_frame_art_rect.size == Vector2.ZERO or playfield_rect.size == Vector2.ZERO:
+		_cache_table_geometry()
 
 
 func _build_pocket_positions() -> void:
-	var center_x: float = PLAYFIELD_RECT.get_center().x
-	pocket_positions.append(PLAYFIELD_RECT.position)
-	pocket_positions.append(Vector2(center_x, PLAYFIELD_RECT.position.y - 2.0))
-	pocket_positions.append(Vector2(PLAYFIELD_RECT.end.x, PLAYFIELD_RECT.position.y))
-	pocket_positions.append(Vector2(PLAYFIELD_RECT.position.x, PLAYFIELD_RECT.end.y))
-	pocket_positions.append(Vector2(center_x, PLAYFIELD_RECT.end.y + 2.0))
-	pocket_positions.append(PLAYFIELD_RECT.end)
+	if pockets_root == null:
+		return
+
+	for child in pockets_root.get_children():
+		var pocket_node := child as Node2D
+		if pocket_node == null:
+			continue
+
+		var collision_shape: CollisionShape2D = pocket_node.get_node_or_null("CollisionShape2D")
+		if collision_shape == null:
+			continue
+
+		var circle_shape: CircleShape2D = collision_shape.shape as CircleShape2D
+		if circle_shape == null:
+			continue
+
+		pocket_positions.append(collision_shape.global_position)
+		pocket_radii.append(circle_shape.radius)
 
 
 func _build_rail_debug_rects() -> void:
-	_add_rail_rect(
-		Vector2(PLAYFIELD_RECT.position.x, PLAYFIELD_RECT.position.y - RAIL_THICKNESS),
-		Vector2(PLAYFIELD_RECT.size.x, RAIL_THICKNESS)
-	)
-	_add_rail_rect(
-		Vector2(PLAYFIELD_RECT.position.x, PLAYFIELD_RECT.end.y),
-		Vector2(PLAYFIELD_RECT.size.x, RAIL_THICKNESS)
-	)
-	_add_rail_rect(
-		Vector2(PLAYFIELD_RECT.position.x - RAIL_THICKNESS, PLAYFIELD_RECT.position.y),
-		Vector2(RAIL_THICKNESS, PLAYFIELD_RECT.size.y)
-	)
-	_add_rail_rect(
-		Vector2(PLAYFIELD_RECT.end.x, PLAYFIELD_RECT.position.y),
-		Vector2(RAIL_THICKNESS, PLAYFIELD_RECT.size.y)
-	)
+	if boundaries_root == null:
+		return
+
+	for shape_node in boundaries_root.find_children("*", "CollisionShape2D", true, false):
+		var collision_shape := shape_node as CollisionShape2D
+		if collision_shape == null:
+			continue
+		if collision_shape.shape is RectangleShape2D:
+			boundary_shapes.append(collision_shape)
+			_add_boundary_debug_rect(collision_shape)
 
 
 func _add_rail_rect(position: Vector2, size: Vector2) -> void:
 	rail_rects.append(Rect2(position, size))
+
+
+func _add_boundary_debug_rect(collision_shape: CollisionShape2D) -> void:
+	var rectangle_shape: RectangleShape2D = collision_shape.shape as RectangleShape2D
+	if rectangle_shape == null:
+		return
+
+	var half_size: Vector2 = rectangle_shape.size * 0.5
+	var transform_2d: Transform2D = collision_shape.global_transform
+	var corners := [
+		transform_2d * Vector2(-half_size.x, -half_size.y),
+		transform_2d * Vector2(half_size.x, -half_size.y),
+		transform_2d * Vector2(half_size.x, half_size.y),
+		transform_2d * Vector2(-half_size.x, half_size.y),
+	]
+	var bounds := Rect2(corners[0], Vector2.ZERO)
+	for corner in corners:
+		bounds = bounds.expand(corner)
+	rail_rects.append(bounds)
+
+
+func _cache_boundary_reference_rect() -> void:
+	var boundary_rect: Rect2 = _get_boundary_inner_rect()
+	if boundary_rect.size != Vector2.ZERO:
+		playfield_rect = boundary_rect
+
+
+func _get_boundary_inner_rect() -> Rect2:
+	if boundary_shapes.is_empty():
+		return Rect2()
+
+	var overall_bounds: Rect2 = rail_rects[0]
+	for boundary_rect in rail_rects:
+		overall_bounds = overall_bounds.merge(boundary_rect)
+
+	var center: Vector2 = overall_bounds.get_center()
+	var left_inner := -INF
+	var right_inner := INF
+	var top_inner := -INF
+	var bottom_inner := INF
+
+	for boundary_rect in rail_rects:
+		if boundary_rect.size.x >= boundary_rect.size.y:
+			if boundary_rect.get_center().y < center.y:
+				top_inner = max(top_inner, boundary_rect.end.y)
+			else:
+				bottom_inner = min(bottom_inner, boundary_rect.position.y)
+		else:
+			if boundary_rect.get_center().x < center.x:
+				left_inner = max(left_inner, boundary_rect.end.x)
+			else:
+				right_inner = min(right_inner, boundary_rect.position.x)
+
+	if left_inner == -INF or right_inner == INF or top_inner == -INF or bottom_inner == INF:
+		return Rect2()
+	if right_inner <= left_inner or bottom_inner <= top_inner:
+		return Rect2()
+
+	return Rect2(left_inner, top_inner, right_inner - left_inner, bottom_inner - top_inner)
 
 
 func get_presentation_rect() -> Rect2:
@@ -418,7 +468,7 @@ func get_presentation_rect() -> Rect2:
 	)
 
 
-func _get_table_frame_art_rect() -> Rect2:
+func _calculate_table_frame_art_rect() -> Rect2:
 	var texture_size: Vector2 = TABLE_FRAME_TEXTURE.get_size()
 	var scale_x: float = TABLE_OUTER_RECT.size.x / TABLE_FRAME_VISIBLE_BOUNDS.size.x
 	var scale_y: float = TABLE_OUTER_RECT.size.y / TABLE_FRAME_VISIBLE_BOUNDS.size.y
@@ -640,44 +690,20 @@ func _try_begin_wayfinder_guidance(striker: Ball, target: Ball) -> void:
 
 
 func _resolve_rail_collisions() -> void:
+	if boundary_shapes.is_empty():
+		return
+
 	for child in balls.get_children():
 		var ball := child as Ball
 		if ball == null or not ball.is_gameplay_active():
 			continue
 
-		_resolve_ball_inside_playfield(ball)
+		for boundary_shape in boundary_shapes:
+			_resolve_ball_against_boundary_shape(ball, boundary_shape)
 
 
 func _resolve_ball_inside_playfield(ball: Ball) -> void:
-	var bounds: Rect2 = PLAYFIELD_RECT.grow(-ball.radius)
-	var position: Vector2 = ball.global_position
-	var incoming_velocity: Vector2 = ball.velocity
-	var collision_normal := Vector2.ZERO
-
-	if position.x < bounds.position.x:
-		position.x = bounds.position.x
-		ball.velocity.x = abs(ball.velocity.x) * RAIL_RESTITUTION
-		collision_normal = Vector2.RIGHT
-		_note_cue_rail_touch(ball)
-	elif position.x > bounds.end.x:
-		position.x = bounds.end.x
-		ball.velocity.x = -abs(ball.velocity.x) * RAIL_RESTITUTION
-		collision_normal = Vector2.LEFT
-		_note_cue_rail_touch(ball)
-
-	if position.y < bounds.position.y:
-		position.y = bounds.position.y
-		ball.velocity.y = abs(ball.velocity.y) * RAIL_RESTITUTION
-		collision_normal = Vector2.DOWN
-		_note_cue_rail_touch(ball)
-	elif position.y > bounds.end.y:
-		position.y = bounds.end.y
-		ball.velocity.y = -abs(ball.velocity.y) * RAIL_RESTITUTION
-		collision_normal = Vector2.UP
-		_note_cue_rail_touch(ball)
-
-	ball.global_position = position
-	_record_actual_bank_debug(ball, position, incoming_velocity, collision_normal)
+	return
 
 
 func _handle_pocket_checks() -> bool:
@@ -686,8 +712,9 @@ func _handle_pocket_checks() -> bool:
 		if ball == null or not ball.is_gameplay_active():
 			continue
 
-		for pocket_position in pocket_positions:
-			var catch_radius: float = _get_pocket_catch_radius(ball.radius)
+		for pocket_index in range(pocket_positions.size()):
+			var pocket_position: Vector2 = pocket_positions[pocket_index]
+			var catch_radius: float = _get_pocket_catch_radius(pocket_radii[pocket_index], ball.radius)
 			if ball.global_position.distance_to(pocket_position) <= catch_radius:
 				_handle_pocketed_ball(ball)
 				return true
@@ -695,8 +722,8 @@ func _handle_pocket_checks() -> bool:
 	return false
 
 
-func _get_pocket_catch_radius(ball_radius: float) -> float:
-	return POCKET_RADIUS + ball_radius * 0.5 + POCKET_CATCH_BONUS
+func _get_pocket_catch_radius(pocket_radius: float, ball_radius: float) -> float:
+	return pocket_radius + ball_radius * 0.5 + POCKET_CATCH_BONUS
 
 
 func _update_bank_debug_markers(delta: float) -> void:
@@ -739,6 +766,60 @@ func _record_actual_bank_debug(
 			normal,
 		]
 	)
+
+
+func _resolve_ball_against_boundary_shape(ball: Ball, collision_shape: CollisionShape2D) -> void:
+	var rectangle_shape: RectangleShape2D = collision_shape.shape as RectangleShape2D
+	if rectangle_shape == null:
+		return
+
+	var incoming_velocity: Vector2 = ball.velocity
+	var shape_transform: Transform2D = collision_shape.global_transform
+	var local_ball_position: Vector2 = shape_transform.affine_inverse() * ball.global_position
+	var half_size: Vector2 = rectangle_shape.size * 0.5
+	var closest_local: Vector2 = local_ball_position.clamp(-half_size, half_size)
+	var delta_local: Vector2 = local_ball_position - closest_local
+	var distance: float = delta_local.length()
+	if distance >= ball.radius:
+		return
+
+	var normal_local: Vector2 = _get_boundary_collision_normal_local(local_ball_position, closest_local, half_size, distance)
+	var push_distance: float = ball.radius - distance + 0.01
+	var normal_world: Vector2 = shape_transform.basis_xform(normal_local).normalized()
+	ball.global_position += normal_world * push_distance
+
+	var normal_speed: float = ball.velocity.dot(normal_world)
+	if normal_speed < 0.0:
+		ball.velocity -= normal_world * (1.0 + RAIL_RESTITUTION) * normal_speed
+		_note_cue_rail_touch(ball)
+		_record_actual_bank_debug(ball, ball.global_position, incoming_velocity, normal_world)
+
+
+func _get_boundary_collision_normal_local(
+	local_ball_position: Vector2,
+	closest_local: Vector2,
+	half_size: Vector2,
+	distance: float
+) -> Vector2:
+	if distance > 0.0:
+		return delta_local_direction(local_ball_position, closest_local)
+
+	var distance_to_left: float = abs(local_ball_position.x + half_size.x)
+	var distance_to_right: float = abs(half_size.x - local_ball_position.x)
+	var distance_to_top: float = abs(local_ball_position.y + half_size.y)
+	var distance_to_bottom: float = abs(half_size.y - local_ball_position.y)
+	var nearest_face: float = min(distance_to_left, distance_to_right, distance_to_top, distance_to_bottom)
+	if nearest_face == distance_to_left:
+		return Vector2.LEFT
+	if nearest_face == distance_to_right:
+		return Vector2.RIGHT
+	if nearest_face == distance_to_top:
+		return Vector2.UP
+	return Vector2.DOWN
+
+
+func delta_local_direction(local_ball_position: Vector2, closest_local: Vector2) -> Vector2:
+	return (local_ball_position - closest_local).normalized()
 
 
 func _is_wayfinder_redirect_target(ball: Ball) -> bool:
@@ -1147,10 +1228,10 @@ func _get_aim_rail_hit(origin: Vector2, direction: Vector2) -> AimRailHit:
 
 func _get_aim_center_bounds() -> Rect2:
 	return Rect2(
-		PLAYFIELD_LEFT + cue_ball.radius,
-		PLAYFIELD_TOP + cue_ball.radius,
-		(PLAYFIELD_RIGHT - cue_ball.radius) - (PLAYFIELD_LEFT + cue_ball.radius),
-		(PLAYFIELD_BOTTOM - cue_ball.radius) - (PLAYFIELD_TOP + cue_ball.radius)
+		playfield_rect.position.x + cue_ball.radius,
+		playfield_rect.position.y + cue_ball.radius,
+		playfield_rect.size.x - cue_ball.radius * 2.0,
+		playfield_rect.size.y - cue_ball.radius * 2.0
 	)
 
 
@@ -1566,22 +1647,24 @@ func _find_safe_spawn_position(ball_radius: float) -> Vector2:
 			if _is_safe_ball_position(candidate, ball_radius):
 				return candidate
 
-	return PLAYFIELD_RECT.get_center()
+	return playfield_rect.get_center()
 
 
 func _get_random_spawn_search_center() -> Vector2:
 	var radius: float = randf_range(SPAWN_RANDOM_RADIUS_MIN, SPAWN_RANDOM_RADIUS_MAX)
 	var direction: Vector2 = Vector2.RIGHT.rotated(randf_range(0.0, TAU))
 	var candidate: Vector2 = SPAWN_SEARCH_CENTER + direction * radius
-	return candidate.clamp(PLAYFIELD_RECT.position, PLAYFIELD_RECT.end)
+	return candidate.clamp(playfield_rect.position, playfield_rect.end)
 
 
 func _is_safe_ball_position(candidate: Vector2, ball_radius: float, ignored_ball: Ball = null) -> bool:
-	if not PLAYFIELD_RECT.grow(-ball_radius).has_point(candidate):
+	if not playfield_rect.grow(-ball_radius).has_point(candidate):
 		return false
 
-	for pocket_position in pocket_positions:
-		if candidate.distance_to(pocket_position) < POCKET_RADIUS + ball_radius + 8.0:
+	for pocket_index in range(pocket_positions.size()):
+		var pocket_position: Vector2 = pocket_positions[pocket_index]
+		var pocket_radius: float = pocket_radii[pocket_index]
+		if candidate.distance_to(pocket_position) < pocket_radius + ball_radius + 8.0:
 			return false
 
 	for child in balls.get_children():

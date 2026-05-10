@@ -3,10 +3,184 @@
 [ext_resource type="PackedScene" path="res://scenes/Table.tscn" id="1_table_scene"]
 [ext_resource type="Script" uid="uid://cpk1835bhdruv" path="res://scripts/Main.gd" id="2_main_script"]
 
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
+size = Vector2(398.57813, 22)
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_0bbpv"]
+size = Vector2(20, 412.25)
+
+[sub_resource type="SegmentShape2D" id="SegmentShape2D_rarhs"]
+a = Vector2(511, 275)
+b = Vector2(530, 293)
+
+[sub_resource type="SegmentShape2D" id="SegmentShape2D_vcsgt"]
+a = Vector2(1410, 274)
+b = Vector2(1392, 292)
+
+[sub_resource type="SegmentShape2D" id="SegmentShape2D_c01mt"]
+a = Vector2(922, 293)
+b = Vector2(929, 288)
+
+[sub_resource type="SegmentShape2D" id="SegmentShape2D_nxtc6"]
+a = Vector2(988, 288)
+b = Vector2(996, 292)
+
+[sub_resource type="SegmentShape2D" id="SegmentShape2D_jlsqs"]
+a = Vector2(930, 785)
+b = Vector2(923, 780)
+
+[sub_resource type="SegmentShape2D" id="SegmentShape2D_q8u5g"]
+a = Vector2(988, 784)
+b = Vector2(995, 779)
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_rvslj"]
+radius = 40.04997
+
 [node name="Main" type="Node2D" unique_id=666290206]
 script = ExtResource("2_main_script")
 
 [node name="Table" parent="." unique_id=1446886136 instance=ExtResource("1_table_scene")]
+
+[node name="Boundaries" type="Node2D" parent="Table" unique_id=2023568208]
+
+[node name="TopRail1" type="StaticBody2D" parent="Table/Boundaries" unique_id=1820286007]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/TopRail1" unique_id=1605528623]
+position = Vector2(726, 284)
+shape = SubResource("RectangleShape2D_rvslj")
+
+[node name="TopRail2" type="StaticBody2D" parent="Table/Boundaries" unique_id=1367833344]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/TopRail2" unique_id=972808878]
+position = Vector2(1194, 285)
+shape = SubResource("RectangleShape2D_rvslj")
+
+[node name="BottomRail1" type="StaticBody2D" parent="Table/Boundaries" unique_id=1003526]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/BottomRail1" unique_id=286164883]
+position = Vector2(725.1875, 789)
+shape = SubResource("RectangleShape2D_rvslj")
+
+[node name="BottomRail2" type="StaticBody2D" parent="Table/Boundaries" unique_id=1537571630]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/BottomRail2" unique_id=1993711681]
+position = Vector2(1192.7109, 789)
+shape = SubResource("RectangleShape2D_rvslj")
+
+[node name="LeftRail" type="StaticBody2D" parent="Table/Boundaries" unique_id=28053028]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/LeftRail" unique_id=2000517252]
+position = Vector2(479, 536.125)
+shape = SubResource("RectangleShape2D_0bbpv")
+
+[node name="RightRail" type="StaticBody2D" parent="Table/Boundaries" unique_id=1422985418]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/RightRail" unique_id=941662349]
+position = Vector2(1443, 536.75)
+shape = SubResource("RectangleShape2D_0bbpv")
+
+[node name="TopLeftPocket_RightJaw" type="StaticBody2D" parent="Table/Boundaries" unique_id=1722720738]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/TopLeftPocket_RightJaw" unique_id=1461462221]
+shape = SubResource("SegmentShape2D_rarhs")
+
+[node name="TopLeftPocket_LeftJaw" type="StaticBody2D" parent="Table/Boundaries" unique_id=2079509442]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/TopLeftPocket_LeftJaw" unique_id=643224297]
+position = Vector2(-43, 39)
+shape = SubResource("SegmentShape2D_rarhs")
+
+[node name="BottomRightPocket_RightJaw" type="StaticBody2D" parent="Table/Boundaries" unique_id=497152273]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/BottomRightPocket_RightJaw" unique_id=31275181]
+position = Vector2(923, 466)
+shape = SubResource("SegmentShape2D_rarhs")
+
+[node name="BottomRightCorner_LeftJaw" type="StaticBody2D" parent="Table/Boundaries" unique_id=1338473939]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/BottomRightCorner_LeftJaw" unique_id=2113319402]
+position = Vector2(879, 505)
+shape = SubResource("SegmentShape2D_rarhs")
+
+[node name="TopRightCorner_LeftJaw" type="StaticBody2D" parent="Table/Boundaries" unique_id=872005477]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/TopRightCorner_LeftJaw" unique_id=1591322523]
+shape = SubResource("SegmentShape2D_vcsgt")
+
+[node name="TopRightCorner_RightJaw" type="StaticBody2D" parent="Table/Boundaries" unique_id=1941822480]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/TopRightCorner_RightJaw" unique_id=22262986]
+position = Vector2(42, 39)
+shape = SubResource("SegmentShape2D_vcsgt")
+
+[node name="BottomLeftCorner_RightJaw" type="StaticBody2D" parent="Table/Boundaries" unique_id=1071873357]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/BottomLeftCorner_RightJaw" unique_id=117796828]
+position = Vector2(-881, 506)
+shape = SubResource("SegmentShape2D_vcsgt")
+
+[node name="BottomLeftCorner_LeftJaw" type="StaticBody2D" parent="Table/Boundaries" unique_id=320218298]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/BottomLeftCorner_LeftJaw" unique_id=102911162]
+position = Vector2(-923, 465)
+shape = SubResource("SegmentShape2D_vcsgt")
+
+[node name="TopPocket" type="StaticBody2D" parent="Table/Boundaries" unique_id=1764743999]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/TopPocket" unique_id=467977230]
+position = Vector2(1, 0)
+shape = SubResource("SegmentShape2D_c01mt")
+
+[node name="CollisionShape2D2" type="CollisionShape2D" parent="Table/Boundaries/TopPocket" unique_id=808336415]
+position = Vector2(0, 2)
+shape = SubResource("SegmentShape2D_nxtc6")
+
+[node name="BottomPocket" type="StaticBody2D" parent="Table/Boundaries" unique_id=1343963322]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Boundaries/BottomPocket" unique_id=189115840]
+shape = SubResource("SegmentShape2D_jlsqs")
+
+[node name="CollisionShape2D2" type="CollisionShape2D" parent="Table/Boundaries/BottomPocket" unique_id=494020401]
+position = Vector2(-1, 1)
+shape = SubResource("SegmentShape2D_q8u5g")
+
+[node name="Pockets" type="Node2D" parent="Table" unique_id=168170532]
+
+[node name="PocketTopLeft" type="Area2D" parent="Table/Pockets" unique_id=1290076813]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Pockets/PocketTopLeft" unique_id=184984241]
+position = Vector2(477, 282)
+shape = SubResource("CircleShape2D_rvslj")
+
+[node name="PocketTopMiddle" type="Area2D" parent="Table/Pockets" unique_id=562464281]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Pockets/PocketTopMiddle" unique_id=157751317]
+position = Vector2(960, 259)
+shape = SubResource("CircleShape2D_rvslj")
+
+[node name="PocketTopRight" type="Area2D" parent="Table/Pockets" unique_id=1332491691]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Pockets/PocketTopRight" unique_id=2108624207]
+position = Vector2(1441, 279)
+shape = SubResource("CircleShape2D_rvslj")
+
+[node name="PocketBottomLeft" type="Area2D" parent="Table/Pockets" unique_id=1226509107]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Pockets/PocketBottomLeft" unique_id=148630836]
+position = Vector2(478, 790)
+shape = SubResource("CircleShape2D_rvslj")
+
+[node name="PocketBottom Middle" type="Area2D" parent="Table/Pockets" unique_id=1890614378]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Pockets/PocketBottom Middle" unique_id=412233986]
+position = Vector2(959, 813)
+shape = SubResource("CircleShape2D_rvslj")
+
+[node name="PocketBottomRight" type="Area2D" parent="Table/Pockets" unique_id=62862024]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Pockets/PocketBottomRight" unique_id=1385265997]
+position = Vector2(1440, 791)
+shape = SubResource("CircleShape2D_rvslj")
 
 [node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=980633167]
 
