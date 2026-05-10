@@ -121,6 +121,41 @@ Rules:
 - Do not change reward pacing or spawn odds during cleanup/refactor passes.
 - Keep ball creation paths centralized here when possible.
 
+### `scripts/ShotEventSystem.gd`
+
+`ShotEventSystem.gd` owns per-shot event history for future Doubloons scoring.
+
+Responsibilities:
+
+- Start/reset shot event tracking.
+- Store ordered per-ball shot events.
+- Track foundation events like `BANK`, `CHAIN`, `ANOMALY_TOUCH`, and `MULTI_SINK`.
+- Report event history when balls sink.
+
+Rules:
+
+- Do not add Doubloons scoring, coin UI, or reward math here until explicitly requested.
+- `Table.gd` should report gameplay events; `ShotEventSystem.gd` should store history.
+- Keep this system passive so event tracking never changes gameplay feel.
+
+### `scripts/ScoreSystem.gd`
+
+`ScoreSystem.gd` owns Doubloons scoring math and first-pass score presentation.
+
+Responsibilities:
+
+- Convert `ShotEventSystem.gd` histories into Doubloon rewards.
+- Track the running Doubloons total.
+- Print/debug scoring breakdowns.
+- Emit HUD total changes.
+- Show lightweight pocket-side score popups.
+
+Rules:
+
+- Do not track shot events here; consume histories from `ShotEventSystem.gd`.
+- Do not add coin sprays, heavy VFX, or reward-shop logic here unless explicitly requested.
+- Keep scoring changes separate from physics, pockets, and anomaly behavior.
+
 ### `scripts/WayfinderSystem.gd`
 
 `WayfinderSystem.gd` owns the Wayfinder anomaly.

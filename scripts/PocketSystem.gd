@@ -10,6 +10,7 @@ var table
 var pockets_root: Node
 var pocket_positions: Array[Vector2] = []
 var pocket_radii: Array[float] = []
+var last_captured_pocket_index := -1
 var checks_this_frame := 0
 var captures_this_frame := 0
 
@@ -37,9 +38,11 @@ func reset_frame_stats() -> void:
 
 
 func check_pockets(moving_balls: Array[Ball]) -> Ball:
+	last_captured_pocket_index = -1
 	for ball in moving_balls:
 		var pocket_index: int = _get_capturing_pocket_index(ball)
 		if pocket_index >= 0:
+			last_captured_pocket_index = pocket_index
 			captures_this_frame += 1
 			return ball
 
@@ -58,6 +61,13 @@ func is_position_too_close_to_pocket(candidate: Vector2, ball_radius: float, ext
 
 func get_pocket_positions() -> Array[Vector2]:
 	return pocket_positions
+
+
+func get_last_captured_pocket_position() -> Vector2:
+	if last_captured_pocket_index < 0 or last_captured_pocket_index >= pocket_positions.size():
+		return Vector2.ZERO
+
+	return pocket_positions[last_captured_pocket_index]
 
 
 func get_checks_this_frame() -> int:

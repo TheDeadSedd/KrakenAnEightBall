@@ -107,6 +107,7 @@ func _try_begin_guidance(striker: Ball, target: Ball) -> void:
 		return
 
 	_begin_guidance(target, chosen_pocket)
+	table.shot_event_system.record_anomaly_touch(target)
 	_set_redirect_pair_cooldown(striker, target)
 	_print_guidance_start_debug(striker, target, chosen_pocket)
 

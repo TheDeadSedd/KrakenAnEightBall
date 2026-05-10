@@ -242,6 +242,23 @@ theme_override_font_sizes/font_size = 18
 text = "Loading table..."
 autowrap_mode = 3
 
+[node name="DoubloonsLabel" type="Label" parent="CanvasLayer/HUD"]
+layout_mode = 0
+offset_left = 1268.0
+offset_top = 162.0
+offset_right = 1628.0
+offset_bottom = 206.0
+theme_override_colors/font_color = Color(1, 0.86, 0.36, 1)
+theme_override_colors/font_shadow_color = Color(0.08, 0.04, 0.01, 0.8)
+theme_override_colors/font_outline_color = Color(0.18, 0.08, 0.02, 0.95)
+theme_override_constants/shadow_offset_x = 2
+theme_override_constants/shadow_offset_y = 2
+theme_override_constants/outline_size = 4
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 28
+horizontal_alignment = 2
+text = "Doubloons: 0"
+
 [node name="ResultLabel" type="Label" parent="CanvasLayer/HUD" unique_id=556767554]
 layout_mode = 0
 offset_left = 710.0

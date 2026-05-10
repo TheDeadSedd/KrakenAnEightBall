@@ -53,6 +53,7 @@ const KRAKEN_ART_ALPHA := 0.18
 
 # Escalation loop. Stylish shots immediately queue new ball drops.
 const MULTI_POCKET_BONUS_THRESHOLD := 2
+const CHAIN_EVENT_SPEED_GAIN_MIN := 6.0
 
 # Shot result callouts. These are temporary arcade feedback, not scoring.
 const RESULT_MESSAGES_ENABLED := true
@@ -89,6 +90,8 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var balls: Node2D = $Balls
 @onready var pocket_system: PocketSystem = $PocketSystem
 @onready var boundary_system: BoundarySystem = $BoundarySystem
+@onready var shot_event_system: ShotEventSystem = $ShotEventSystem
+@onready var score_system: ScoreSystem = $ScoreSystem
 @onready var aim_preview: AimPreview = $AimPreview
 @onready var spawn_system: SpawnSystem = $SpawnSystem
 @onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
@@ -137,6 +140,8 @@ var perf_pocket_check_ms := 0.0
 func _ready() -> void:
 	pocket_system.setup(self)
 	boundary_system.setup(self)
+	shot_event_system.setup(self)
+	score_system.setup(self)
 	aim_preview.setup(self)
 	spawn_system.setup(self)
 	wayfinder_system.setup(self)
@@ -242,11 +247,13 @@ func _draw_table_art() -> void:
 	var presentation_rect: Rect2 = get_presentation_rect()
 	draw_texture_rect(SHIP_FLOOR_TEXTURE, presentation_rect, false)
 	draw_rect(presentation_rect, Color(0, 0, 0, 0.18), true)
-	_draw_kraken_felt_art()
 	draw_texture_rect(TABLE_FRAME_TEXTURE, table_frame_art_rect, false)
+	_draw_kraken_felt_art()
 
 
 func _draw_kraken_felt_art() -> void:
+	# The felt is baked into the table frame, so the center symbol draws as
+	# its own overlay above the frame while still staying below balls/cue.
 	var kraken_rect: Rect2 = _fit_texture_rect_inside(KRAKEN_SILHOUETTE_TEXTURE, playfield_rect.grow(-54.0))
 	draw_texture_rect(
 		KRAKEN_SILHOUETTE_TEXTURE,
@@ -427,9 +434,12 @@ func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
 	if real_overlap > 0.0:
 		_separate_overlapping_balls(ball_a, ball_b, normal, real_overlap)
 
+	var pre_collision_velocity_a: Vector2 = ball_a.velocity
+	var pre_collision_velocity_b: Vector2 = ball_b.velocity
 	if _apply_ball_collision_response(ball_a, ball_b, normal):
 		perf_ball_collisions_resolved += 1
-		_note_cue_object_contact_for_bank(ball_a, ball_b)
+		_note_cue_object_contact(ball_a, ball_b)
+		_note_chain_contact(ball_a, ball_b, pre_collision_velocity_a, pre_collision_velocity_b)
 	_note_actual_cue_ball_hit(ball_a, ball_b)
 	wayfinder_system.handle_collision(ball_a, ball_b)
 
@@ -472,6 +482,7 @@ func _resolve_rail_collisions() -> void:
 		var hit_events: Array = boundary_system.resolve_ball_against_boundaries(ball, RAIL_RESTITUTION)
 		for hit_event in hit_events:
 			_note_cue_rail_touch(ball)
+			shot_event_system.record_bank(ball)
 			aim_preview.record_actual_bank_debug(
 				ball,
 				hit_event.position,
@@ -669,9 +680,12 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 		_finish_game("8 ball sunk. Game over.")
 		return
 
+	var score_context: Dictionary = _make_sink_score_context(ball)
 	ball.sink()
 	ball.queue_free()
 	_note_object_ball_pocketed(ball)
+	var score_snapshot: Dictionary = shot_event_system.get_sunk_ball_score_snapshot(int(score_context["ball_id"]))
+	score_system.score_sunk_ball_snapshot(score_snapshot, score_context)
 	status_text_changed.emit("Ball %s sunk." % ball.ball_number)
 
 
@@ -687,6 +701,7 @@ func _start_shot_tracking() -> void:
 	shot_multi_pocket_bonus_awarded = false
 	shot_bank_bonus_awarded = false
 	shot_bank_eligible_ball_ids.clear()
+	shot_event_system.start_shot()
 
 
 func _note_cue_rail_touch(ball: Ball) -> void:
@@ -694,17 +709,49 @@ func _note_cue_rail_touch(ball: Ball) -> void:
 		shot_cue_touched_rail = true
 
 
-func _note_cue_object_contact_for_bank(ball_a: Ball, ball_b: Ball) -> void:
-	if not shot_active or not shot_cue_touched_rail:
+func _note_cue_object_contact(ball_a: Ball, ball_b: Ball) -> void:
+	if not shot_active:
 		return
 
 	var object_ball: Ball = _get_cue_contacted_object_ball(ball_a, ball_b)
 	if object_ball == null:
 		return
 
+	shot_event_system.record_cue_object_contact(object_ball)
+	_note_cue_object_contact_for_bank(object_ball)
+
+
+func _note_cue_object_contact_for_bank(object_ball: Ball) -> void:
+	if not shot_cue_touched_rail:
+		return
+
 	# A ball is bank-eligible only if the cue had already touched a rail
 	# before this cue-to-object contact.
 	shot_bank_eligible_ball_ids[object_ball.get_instance_id()] = true
+
+
+func _note_chain_contact(
+	ball_a: Ball,
+	ball_b: Ball,
+	pre_collision_velocity_a: Vector2,
+	pre_collision_velocity_b: Vector2
+) -> void:
+	if not shot_active:
+		return
+
+	if not _is_scoring_object_ball(ball_a) or not _is_scoring_object_ball(ball_b):
+		return
+
+	if _did_ball_gain_chain_motion(ball_a, pre_collision_velocity_a):
+		shot_event_system.record_chain_transfer(ball_b, ball_a)
+
+	if _did_ball_gain_chain_motion(ball_b, pre_collision_velocity_b):
+		shot_event_system.record_chain_transfer(ball_a, ball_b)
+
+
+func _did_ball_gain_chain_motion(ball: Ball, pre_collision_velocity: Vector2) -> bool:
+	var speed_gain: float = ball.velocity.length() - pre_collision_velocity.length()
+	return speed_gain >= CHAIN_EVENT_SPEED_GAIN_MIN
 
 
 func _get_cue_contacted_object_ball(ball_a: Ball, ball_b: Ball) -> Ball:
@@ -715,6 +762,15 @@ func _get_cue_contacted_object_ball(ball_a: Ball, ball_b: Ball) -> Ball:
 	return null
 
 
+func _make_sink_score_context(ball: Ball) -> Dictionary:
+	return {
+		"ball_id": ball.get_instance_id(),
+		"sink_position": ball.global_position,
+		"sink_velocity": ball.velocity,
+		"pocket_position": pocket_system.get_last_captured_pocket_position(),
+	}
+
+
 func _is_scoring_object_ball(ball: Ball) -> bool:
 	return ball != null and ball.ball_type == Ball.BallType.OBJECT
 
@@ -723,8 +779,8 @@ func _note_object_ball_pocketed(ball: Ball) -> void:
 	if not shot_active:
 		return
 
+	shot_event_system.record_ball_sunk(ball)
 	shot_pocketed_object_balls += 1
-	_queue_ball_sunk_message()
 
 	if shot_bank_eligible_ball_ids.has(ball.get_instance_id()):
 		shot_had_bank_pocket = true
@@ -740,6 +796,7 @@ func _try_finish_shot() -> void:
 
 	shot_active = false
 	aim_preview.stop_actual_path_recording()
+	shot_event_system.finish_shot()
 #endregion
 
 
@@ -840,15 +897,8 @@ func get_debug_spawn_hotkey_data() -> Dictionary:
 
 
 #region Callouts / Notifications
-# Owns arcade event callouts only; reward spawning is separated below.
+# Center/top callouts are now reserved for spawn/drop-flow messages.
 # Future extraction candidate: HUD/CalloutSystem.
-func _queue_ball_sunk_message() -> void:
-	if shot_pocketed_object_balls == 1:
-		_queue_result_message("1 BALL SUNK")
-	elif shot_pocketed_object_balls > 1:
-		_queue_result_message("%s BALLS SUNK" % shot_pocketed_object_balls)
-
-
 func queue_spawn_reward_message(is_wayfinder: bool) -> void:
 	if is_wayfinder:
 		_queue_result_message("WAYFINDER BALL DROPPED")
@@ -1017,7 +1067,6 @@ func _try_award_bank_bonus() -> void:
 		return
 
 	shot_bank_bonus_awarded = true
-	_queue_result_message("BANK SHOT")
 	spawn_system.queue_spawn_reward(1)
 #endregion
 
