@@ -1,0 +1,215 @@
+@tool
+extends Node2D
+class_name CueController
+
+# Owns the cue sprite presentation and cue-specific grab-zone hit testing.
+# Table.gd remains responsible for shot state, shot velocity, and aim prediction.
+const CUE_TEXTURE := preload("res://assets/table_art/tentacle_pool_cue.png")
+const CUE_GAP := 22.0
+const CUE_MIN_PULLBACK := 8.0
+const CUE_MAX_PULLBACK := 78.0
+const CUE_TEXTURE_REGION := Rect2(88, 339, 1356, 310)
+const CUE_SPRITE_LENGTH := 230.0
+const CUE_IDLE_SWAY_AMOUNT := 0.02
+const CUE_IDLE_SWAY_SPEED := 2.2
+const CUE_PULLBACK_LERP_SPEED := 14.0
+const CUE_STRIKE_TIME := 0.055
+const CUE_RECOIL_TIME := 0.08
+const CUE_SETTLE_TIME := 0.14
+const CUE_STRIKE_FORWARD_PULLBACK_LOW := 2.0
+const CUE_STRIKE_FORWARD_PULLBACK_HIGH := -34.0
+const CUE_RECOIL_PULLBACK_RATIO := 0.34
+const CUE_GRAB_BACK_PADDING_X := 34.0
+const CUE_GRAB_FRONT_PADDING_X := 10.0
+const CUE_GRAB_PADDING_Y := 28.0
+
+@onready var cue_sprite: Sprite2D = $CueSprite
+
+var cue_visual_pullback := 0.0
+var release_animation_timer := 0.0
+var release_start_pullback := 0.0
+var release_power_ratio := 0.0
+var release_position := Vector2.ZERO
+var release_rotation := 0.0
+
+
+func setup() -> void:
+	cue_sprite.texture = CUE_TEXTURE
+	cue_sprite.centered = false
+	cue_sprite.region_enabled = true
+	cue_sprite.region_rect = CUE_TEXTURE_REGION
+	var cue_scale: float = CUE_SPRITE_LENGTH / CUE_TEXTURE_REGION.size.x
+	cue_sprite.scale = Vector2.ONE * cue_scale
+	cue_sprite.z_index = 12
+
+
+func update_cue(
+	cue_ball: Ball,
+	can_shoot: bool,
+	is_dragging: bool,
+	shot_drag_vector: Vector2,
+	max_drag_distance: float,
+	game_over: bool,
+	delta: float
+) -> void:
+	if not is_instance_valid(cue_ball) or not cue_ball.visible or game_over:
+		visible = false
+		return
+
+	var should_show: bool = is_dragging or release_animation_timer > 0.0
+	if not should_show and not can_shoot:
+		visible = false
+		return
+
+	_update_cue_transform(cue_ball, can_shoot, is_dragging, shot_drag_vector, max_drag_distance, delta)
+
+
+func is_point_over_grab_zone(world_position: Vector2, cue_ball: Ball, max_drag_distance: float) -> bool:
+	if visible:
+		var visible_cue_position: Vector2 = global_transform.affine_inverse() * world_position
+		if _get_cue_grab_rect(cue_visual_pullback).has_point(visible_cue_position):
+			return true
+
+	var drag_vector: Vector2 = _get_drag_vector(cue_ball.global_position, world_position, max_drag_distance)
+	var aim_direction: Vector2 = drag_vector.normalized()
+	if aim_direction == Vector2.ZERO:
+		return false
+
+	var cue_transform := Transform2D(aim_direction.angle(), cue_ball.global_position)
+	var local_position: Vector2 = cue_transform.affine_inverse() * world_position
+	var pullback: float = get_pullback_for_drag_vector(drag_vector, max_drag_distance)
+	return _get_cue_grab_rect(pullback).has_point(local_position)
+
+
+func get_pullback_for_drag_vector(drag_vector: Vector2, max_drag_distance: float) -> float:
+	var power_ratio: float = clamp(drag_vector.length() / max_drag_distance, 0.0, 1.0)
+	return lerp(CUE_MIN_PULLBACK, CUE_MAX_PULLBACK, power_ratio)
+
+
+func begin_recoil(anchor_position: Vector2, rotation_angle: float, start_pullback: float) -> void:
+	release_position = anchor_position
+	release_rotation = rotation_angle
+	release_start_pullback = start_pullback
+	release_power_ratio = _get_power_ratio_from_pullback(start_pullback)
+	release_animation_timer = _get_release_animation_total_time()
+
+
+func stop_recoil() -> void:
+	release_animation_timer = 0.0
+
+
+func get_rotation_angle() -> float:
+	return rotation
+
+
+func _update_cue_transform(
+	cue_ball: Ball,
+	can_shoot: bool,
+	is_dragging: bool,
+	shot_drag_vector: Vector2,
+	max_drag_distance: float,
+	delta: float
+) -> void:
+	var anchor_position: Vector2 = cue_ball.global_position
+	var rotation_angle := 0.0
+	var target_pullback := CUE_MIN_PULLBACK
+	var should_show := true
+	if is_dragging:
+		var aim_direction: Vector2 = shot_drag_vector.normalized()
+		rotation_angle = aim_direction.angle() if aim_direction != Vector2.ZERO else rotation
+		target_pullback = get_pullback_for_drag_vector(shot_drag_vector, max_drag_distance)
+	elif release_animation_timer > 0.0:
+		anchor_position = release_position
+		rotation_angle = release_rotation
+		release_animation_timer = max(release_animation_timer - delta, 0.0)
+		var release_elapsed: float = _get_release_animation_total_time() - release_animation_timer
+		target_pullback = _get_release_animation_pullback(release_elapsed)
+		_apply_cue_transform(anchor_position, rotation_angle, target_pullback, should_show, delta, true)
+		return
+	else:
+		var mouse_direction: Vector2 = (cue_ball.global_position - get_global_mouse_position()).normalized()
+		rotation_angle = mouse_direction.angle() if mouse_direction != Vector2.ZERO else rotation
+		target_pullback = 0.0
+		should_show = can_shoot
+
+	_apply_cue_transform(anchor_position, rotation_angle, target_pullback, should_show, delta)
+
+
+func _apply_cue_transform(
+	anchor_position: Vector2,
+	rotation_angle: float,
+	target_pullback: float,
+	should_show: bool,
+	delta: float,
+	snap_pullback: bool = false
+) -> void:
+	var idle_sway: float = sin(Time.get_ticks_msec() * 0.001 * CUE_IDLE_SWAY_SPEED) * CUE_IDLE_SWAY_AMOUNT
+	if snap_pullback:
+		cue_visual_pullback = target_pullback
+	else:
+		cue_visual_pullback = lerp(cue_visual_pullback, target_pullback, clamp(delta * CUE_PULLBACK_LERP_SPEED, 0.0, 1.0))
+	global_position = anchor_position
+	rotation = rotation_angle + idle_sway
+	_position_cue_sprite(cue_visual_pullback)
+	visible = should_show
+
+
+func _get_release_animation_pullback(elapsed: float) -> float:
+	var strike_end: float = CUE_STRIKE_TIME
+	var recoil_end: float = CUE_STRIKE_TIME + CUE_RECOIL_TIME
+	var forward_pullback: float = lerp(
+		CUE_STRIKE_FORWARD_PULLBACK_LOW,
+		CUE_STRIKE_FORWARD_PULLBACK_HIGH,
+		release_power_ratio
+	)
+	var recoil_pullback: float = release_start_pullback * CUE_RECOIL_PULLBACK_RATIO
+
+	if elapsed <= strike_end:
+		var strike_ratio: float = clamp(elapsed / CUE_STRIKE_TIME, 0.0, 1.0)
+		return lerp(release_start_pullback, forward_pullback, _ease_out_cubic(strike_ratio))
+
+	if elapsed <= recoil_end:
+		var recoil_ratio: float = clamp((elapsed - strike_end) / CUE_RECOIL_TIME, 0.0, 1.0)
+		return lerp(forward_pullback, recoil_pullback, _ease_out_cubic(recoil_ratio))
+
+	var settle_ratio: float = clamp((elapsed - recoil_end) / CUE_SETTLE_TIME, 0.0, 1.0)
+	return lerp(recoil_pullback, 0.0, smoothstep(0.0, 1.0, settle_ratio))
+
+
+func _get_release_animation_total_time() -> float:
+	return CUE_STRIKE_TIME + CUE_RECOIL_TIME + CUE_SETTLE_TIME
+
+
+func _get_power_ratio_from_pullback(pullback: float) -> float:
+	return clamp((pullback - CUE_MIN_PULLBACK) / (CUE_MAX_PULLBACK - CUE_MIN_PULLBACK), 0.0, 1.0)
+
+
+func _ease_out_cubic(ratio: float) -> float:
+	return 1.0 - pow(1.0 - ratio, 3.0)
+
+
+func _get_drag_vector(cue_ball_position: Vector2, mouse_position: Vector2, max_drag_distance: float) -> Vector2:
+	var drag_vector: Vector2 = cue_ball_position - mouse_position
+	return drag_vector.limit_length(max_drag_distance)
+
+
+func _get_cue_grab_rect(pullback: float) -> Rect2:
+	var cue_scale: float = cue_sprite.scale.x
+	var cue_width: float = CUE_TEXTURE_REGION.size.y * cue_scale
+	var cue_length: float = CUE_TEXTURE_REGION.size.x * cue_scale
+	return Rect2(
+		-(CUE_GAP + pullback + cue_length) - CUE_GRAB_BACK_PADDING_X,
+		-cue_width * 0.5 - CUE_GRAB_PADDING_Y,
+		cue_length + CUE_GRAB_BACK_PADDING_X + CUE_GRAB_FRONT_PADDING_X,
+		cue_width + CUE_GRAB_PADDING_Y * 2.0
+	)
+
+
+func _position_cue_sprite(pullback: float) -> void:
+	var cue_scale: float = cue_sprite.scale.x
+	var cue_width: float = CUE_TEXTURE_REGION.size.y * cue_scale
+	var cue_length: float = CUE_TEXTURE_REGION.size.x * cue_scale
+	cue_sprite.position = Vector2(
+		-(CUE_GAP + pullback + cue_length),
+		-cue_width * 0.5
+	)
