@@ -2,7 +2,7 @@
 extends Node
 class_name AnchorBallSystem
 
-# Owns Anchor Ball's mild local pull. Table.gd owns the physics loop and ball list.
+# Owns Anchor Ball's cursed-tide pull. Table.gd owns the physics loop and ball list.
 const DEBUG_RADIUS_COLOR := Color(0.28, 0.72, 0.84, 0.26)
 const DEBUG_RADIUS_EDGE_COLOR := Color(0.60, 0.96, 1.0, 0.82)
 const DEBUG_VECTOR_COLOR := Color(0.82, 0.98, 1.0, 0.92)
@@ -11,21 +11,27 @@ const DEBUG_VECTOR_MIN_LENGTH := 8.0
 const DEBUG_VECTOR_MAX_LENGTH := 36.0
 const STATIONARY_ANCHOR_PULL_MULTIPLIER := 0.5
 
+# Gameplay pull tuning.
 @export var enabled := true
 @export var influence_radius := 230.0
 @export var pull_strength := 400.0
 @export_range(0.0, 1.0, 0.01) var minimum_pull_strength := 0.08
 # Lets close settled balls barely wake without turning Anchor into a table-wide vacuum.
 @export_range(0.0, 1.0, 0.01) var stationary_ball_multiplier := 0.20
+
+# Contact-loop guards.
 @export var inner_dead_zone_radius := 28.0
 @export var post_collision_pull_cooldown := 0.35
+
+# Visual/debug controls.
 @export_range(0.0, 1.0, 0.01) var visual_effect_strength := 1.0
 @export var anchor_visuals_enabled := true
 @export var max_visible_field_auras := 3
+@export var debug_visual_enabled := false
+
 # Debug safety valve only. Normal play should support chaos by degrading visuals first.
 @export var anchor_spawn_cap_enabled := false
 @export var max_anchor_balls_on_table := 3
-@export var debug_visual_enabled := false
 
 var table
 var active_anchor_ball_count := 0

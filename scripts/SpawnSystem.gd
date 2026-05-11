@@ -15,7 +15,7 @@ class StartingBallData:
 	var eight_ball: Ball
 	var eight_start := Vector2.ZERO
 
-# Testing shortcuts for temporary debug spawning.
+# Debug-only spawn shortcuts.
 const DEBUG_SPAWN_WAYFINDER_ENABLED := true
 const DEBUG_SPAWN_WAYFINDER_KEY := KEY_F
 const DEBUG_SPAWN_POWDER_KEG_ENABLED := true
@@ -34,14 +34,20 @@ const RACK_ORIGIN := Vector2(1150.0, 540.0)
 const RACK_ROWS := 5
 const RACK_SPACING_MULTIPLIER := 2.12
 
-# Reward spawn tuning.
+# Reward spawn cadence.
 const BALLS_PER_REWARD_DROP := 3
+
+# Regular reward anomaly pool. Anchor is intentionally not part of this pool.
 const TOTAL_ANOMALY_SPAWN_CHANCE := 0.12
 const WAYFINDER_SPAWN_CHANCE := 0.06
 const POWDER_KEG_SPAWN_CHANCE := 0.06
-const ANCHOR_ESCALATION_BALL_COUNT_THRESHOLD := 40
+
+# Anchor rolls before the regular anomaly pool and uses table population escalation.
+const ANCHOR_HIGH_COUNT_THRESHOLD := 40
 const ANCHOR_LOW_COUNT_SPAWN_CHANCE := 0.03
 const ANCHOR_HIGH_COUNT_SPAWN_CHANCE := 0.30
+
+# Reward drop placement and pacing.
 const SPAWN_SEARCH_CENTER := Vector2(960.0, 540.0)
 const SPAWN_SEARCH_STEP := 34.0
 const SPAWN_SEARCH_RINGS := 10
@@ -112,7 +118,7 @@ func award_base_spawn_progress() -> void:
 
 func queue_spawn_reward(spawn_count: int) -> void:
 	for _spawn_index in range(spawn_count):
-		var request: SpawnBallRequest = _make_spawn_ball_request()
+		var request: SpawnBallRequest = _make_reward_spawn_request()
 		pending_spawn_requests.append(request)
 		table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball)
 
@@ -272,21 +278,25 @@ func _ball_color(number: int) -> Color:
 	return colors.get(number, Color("d7b347"))
 
 
-func _make_spawn_ball_request() -> SpawnBallRequest:
+func _make_reward_spawn_request() -> SpawnBallRequest:
 	var request: SpawnBallRequest = SpawnBallRequest.new()
 	request.ball_number = _get_next_spawn_ball_number()
-	if _should_spawn_anchor_reward_ball():
+	if _roll_anchor_priority_spawn():
 		request.is_anchor_ball = true
 		return request
 
+	_apply_regular_anomaly_pool_roll(request)
+	return request
+
+
+func _apply_regular_anomaly_pool_roll(request: SpawnBallRequest) -> void:
 	var anomaly_roll: float = randf()
 	if anomaly_roll > TOTAL_ANOMALY_SPAWN_CHANCE:
-		return request
+		return
 
 	var powder_keg_threshold: float = WAYFINDER_SPAWN_CHANCE + POWDER_KEG_SPAWN_CHANCE
 	request.is_wayfinder = anomaly_roll <= WAYFINDER_SPAWN_CHANCE
 	request.is_powder_keg = anomaly_roll > WAYFINDER_SPAWN_CHANCE and anomaly_roll <= powder_keg_threshold
-	return request
 
 
 func _make_specific_spawn_request(is_wayfinder: bool, is_powder_keg: bool, is_anchor_ball: bool) -> SpawnBallRequest:
@@ -319,19 +329,19 @@ func _can_spawn_anchor_ball() -> bool:
 	return table != null and table.anchor_ball_system.can_spawn_anchor_ball()
 
 
-func _should_spawn_anchor_reward_ball() -> bool:
+func _roll_anchor_priority_spawn() -> bool:
 	if not _can_spawn_anchor_ball():
 		return false
-	return randf() <= _get_anchor_reward_spawn_chance()
+	return randf() <= _get_anchor_priority_spawn_chance()
 
 
-func _get_anchor_reward_spawn_chance() -> float:
-	if _get_visible_ball_count() > ANCHOR_ESCALATION_BALL_COUNT_THRESHOLD:
+func _get_anchor_priority_spawn_chance() -> float:
+	if _get_visible_table_ball_count() > ANCHOR_HIGH_COUNT_THRESHOLD:
 		return ANCHOR_HIGH_COUNT_SPAWN_CHANCE
 	return ANCHOR_LOW_COUNT_SPAWN_CHANCE
 
 
-func _get_visible_ball_count() -> int:
+func _get_visible_table_ball_count() -> int:
 	var visible_ball_count := 0
 	for child in table.balls.get_children():
 		var ball := child as Ball

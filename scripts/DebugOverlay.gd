@@ -161,7 +161,7 @@ func _on_anchor_debug_visual_toggled(enabled: bool) -> void:
 
 func _sync_powder_keg_debug_toggles() -> void:
 	powder_keg_particles_check_box.set_pressed_no_signal(table.powder_keg_system.explosion_particles_enabled)
-	powder_keg_reduced_particles_check_box.set_pressed_no_signal(table.powder_keg_system.reduced_particle_test_enabled)
+	powder_keg_reduced_particles_check_box.set_pressed_no_signal(table.powder_keg_system.reduced_particles_debug_enabled)
 	powder_keg_suppress_trails_check_box.set_pressed_no_signal(table.powder_keg_system.suppress_trails_after_explosion)
 
 
@@ -170,7 +170,7 @@ func _on_powder_keg_particles_toggled(enabled: bool) -> void:
 
 
 func _on_powder_keg_reduced_particles_toggled(enabled: bool) -> void:
-	table.powder_keg_system.reduced_particle_test_enabled = enabled
+	table.powder_keg_system.reduced_particles_debug_enabled = enabled
 
 
 func _on_powder_keg_suppress_trails_toggled(enabled: bool) -> void:
@@ -217,56 +217,82 @@ func _make_performance_debug_text() -> String:
 			snapshot["moving_balls"],
 			snapshot["stopped_balls"],
 		],
-		"Wayfinders: %s active / %s guided" % [
+		"",
+		"ANOMALIES",
+		"Wayfinder: %s active / %s guided" % [
 			snapshot["active_wayfinders"],
 			snapshot["guided_wayfinder_targets"],
 		],
-		"Anchor balls: %s" % snapshot["anchor_balls"],
-		"Anchor affected balls: %s" % snapshot["anchor_affected_balls"],
-		"Anchor force applications/frame: %s" % snapshot["anchor_force_applications"],
-		"Anchor avg force: %.2f" % float(snapshot["anchor_avg_force"]),
-		"Anchor max force: %.2f" % float(snapshot["anchor_max_force"]),
-		"Anchor nearest distance: %s" % _debug_distance_text(float(snapshot["anchor_nearest_distance"])),
-		"Anchor enabled: %s" % _debug_true_false_text(bool(snapshot["anchor_enabled"])),
-		"Anchor radius: %.1f" % float(snapshot["anchor_radius"]),
-		"Anchor strength: %.1f" % float(snapshot["anchor_strength"]),
-		"Anchor visuals enabled: %s" % _debug_true_false_text(bool(snapshot["anchor_visuals_enabled"])),
-		"Anchor visual nodes active: %s" % snapshot["anchor_visual_nodes_active"],
-		"Anchor field rings drawn: %s / %s" % [
+		"Anchor: %s active / %s affected / %s force apps" % [
+			snapshot["anchor_balls"],
+			snapshot["anchor_affected_balls"],
+			snapshot["anchor_force_applications"],
+		],
+		"Anchor force: avg %.2f / max %.2f / nearest %s" % [
+			float(snapshot["anchor_avg_force"]),
+			float(snapshot["anchor_max_force"]),
+			_debug_distance_text(float(snapshot["anchor_nearest_distance"])),
+		],
+		"Anchor tuning: %s / radius %.1f / strength %.1f" % [
+			_debug_bool_text(bool(snapshot["anchor_enabled"])),
+			float(snapshot["anchor_radius"]),
+			float(snapshot["anchor_strength"]),
+		],
+		"Anchor visuals: %s / nodes %s / fields %s/%s / markers %s" % [
+			_debug_bool_text(bool(snapshot["anchor_visuals_enabled"])),
+			snapshot["anchor_visual_nodes_active"],
 			snapshot["anchor_field_rings_drawn"],
 			snapshot["anchor_max_visible_field_auras"],
+			snapshot["anchor_affected_markers_active"],
 		],
-		"Anchor affected-ball markers active: %s" % snapshot["anchor_affected_markers_active"],
-		"Anchor debug spawn cap: %s / %s" % [
+		"Anchor debug cap: %s / %s" % [
 			_debug_bool_text(bool(snapshot["anchor_spawn_cap_enabled"])),
 			snapshot["anchor_spawn_cap"],
 		],
-		"Trails: %s points / %s balls" % [
+		"",
+		"VISUAL COST",
+		"Trails: %s points / %s balls / %s redraws" % [
 			snapshot["trail_points"],
 			snapshot["balls_with_trails"],
+			snapshot["trail_redraws"],
 		],
-		"Trail redraws: %s" % snapshot["trail_redraws"],
-		"Powder Keg particle bursts: %s" % snapshot["active_powder_keg_particle_bursts"],
-		"Score popup labels: %s" % snapshot["active_score_popup_labels"],
+		"Particles/popups: %s Powder Keg bursts / %s score labels" % [
+			snapshot["active_powder_keg_particle_bursts"],
+			snapshot["active_score_popup_labels"],
+		],
+		"",
+		"PHYSICS",
 		"Substeps: %s" % snapshot["physics_substeps"],
 		"Grid cells: %s / max cell: %s" % [
 			snapshot["spatial_grid_cells"],
 			snapshot["spatial_grid_max_cell_size"],
 		],
-		"Broad-phase candidates: %s" % snapshot["broadphase_candidate_pairs"],
-		"Ball pairs checked: %s" % snapshot["ball_pair_checks"],
-		"Ball collisions: %s" % snapshot["ball_collisions_resolved"],
-		"Rail checks: %s" % snapshot["rail_checks"],
-		"Rail collisions: %s" % snapshot["rail_collisions_resolved"],
-		"Pocket checks: %s" % snapshot["pocket_checks"],
-		"Pocket captures: %s" % snapshot["pocket_captures"],
-		"Aim prediction: %s" % _debug_bool_text(bool(snapshot["aim_prediction_enabled"])),
-		"Shot comparison: %s" % _debug_bool_text(bool(snapshot["shot_comparison_enabled"])),
-		"Physics ms: %.2f" % float(snapshot["physics_process_ms"]),
-		"Ball collision ms: %.2f" % float(snapshot["ball_collision_ms"]),
-		"Rail ms: %.2f" % float(snapshot["rail_collision_ms"]),
-		"Pocket ms: %.2f" % float(snapshot["pocket_check_ms"]),
-		"Aim prediction ms: %.2f" % float(snapshot["aim_prediction_ms"]),
+		"Ball pairs: %s candidates / %s checked / %s collisions" % [
+			snapshot["broadphase_candidate_pairs"],
+			snapshot["ball_pair_checks"],
+			snapshot["ball_collisions_resolved"],
+		],
+		"Rails: %s checks / %s hits" % [
+			snapshot["rail_checks"],
+			snapshot["rail_collisions_resolved"],
+		],
+		"Pockets: %s checks / %s captures" % [
+			snapshot["pocket_checks"],
+			snapshot["pocket_captures"],
+		],
+		"",
+		"TIMING",
+		"Frame: %.2f ms / ball %.2f / rail %.2f / pocket %.2f" % [
+			float(snapshot["physics_process_ms"]),
+			float(snapshot["ball_collision_ms"]),
+			float(snapshot["rail_collision_ms"]),
+			float(snapshot["pocket_check_ms"]),
+		],
+		"Aim: %s / comparison %s / %.2f ms" % [
+			_debug_bool_text(bool(snapshot["aim_prediction_enabled"])),
+			_debug_bool_text(bool(snapshot["shot_comparison_enabled"])),
+			float(snapshot["aim_prediction_ms"]),
+		],
 	]
 	return "\n".join(lines)
 
@@ -322,7 +348,3 @@ func _debug_distance_text(distance: float) -> String:
 	if distance < 0.0:
 		return "none"
 	return "%.1f" % distance
-
-
-func _debug_true_false_text(enabled: bool) -> String:
-	return "true" if enabled else "false"

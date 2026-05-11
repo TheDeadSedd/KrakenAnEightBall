@@ -8,13 +8,18 @@ const EXPLOSION_SPARK_COLOR := Color(1.0, 0.86, 0.38, 1.0)
 const EXPLOSION_SMOKE_COLOR := Color(0.34, 0.24, 0.16, 0.72)
 const EXPLOSION_GLOW_COLOR := Color(1.0, 0.62, 0.2, 1.0)
 
+# Gameplay explosion tuning.
 @export var explosion_radius := 165.0
 @export var explosion_force := 245.0
 @export_range(0.0, 1.0, 0.01) var min_force_ratio := 0.24
+
+# Particle presentation tuning.
 @export var particle_lifetime := 0.92
 @export var particle_amount := 72
 @export var explosion_particles_enabled := true
-@export var reduced_particle_test_enabled := false
+
+# Debug-only visual load toggles.
+@export var reduced_particles_debug_enabled := false
 @export var reduced_particle_lifetime := 0.45
 @export var reduced_particle_amount := 24
 @export var suppress_trails_after_explosion := false
@@ -163,12 +168,12 @@ func _spawn_explosion_particles(explosion_center: Vector2) -> void:
 
 
 func _get_effective_particle_lifetime() -> float:
-	if reduced_particle_test_enabled:
+	if reduced_particles_debug_enabled:
 		return reduced_particle_lifetime
 	return particle_lifetime
 
 
 func _get_effective_particle_amount() -> int:
-	if reduced_particle_test_enabled:
+	if reduced_particles_debug_enabled:
 		return reduced_particle_amount
 	return particle_amount

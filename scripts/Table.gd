@@ -55,7 +55,7 @@ const KRAKEN_ART_ALPHA := 0.18
 const MULTI_POCKET_BONUS_THRESHOLD := 2
 const CHAIN_EVENT_SPEED_GAIN_MIN := 6.0
 
-# Shot result callouts. These are temporary arcade feedback, not scoring.
+# Spawn/drop-flow callouts. Scoring feedback stays in ScoreSystem.gd.
 const RESULT_MESSAGES_ENABLED := true
 const RESULT_MESSAGE_POSITION := Vector2(PRESENTATION_OFFSET_X + 600.0, PRESENTATION_OFFSET_Y + 132.0)
 const RESULT_MESSAGE_SIZE := Vector2(540, 58)
@@ -687,7 +687,7 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 
 	if ball == cue_ball:
 		if DEBUG_NO_GAME_OVER:
-			_reset_ball(ball, spawn_system.get_cue_start(), "Cue ball reset for testing.")
+			_reset_ball(ball, spawn_system.get_cue_start(), "Cue ball reset.")
 			return
 		ball.sink()
 		_finish_game("Cue ball sunk. Game over.")
@@ -695,7 +695,7 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 
 	if ball == eight_ball:
 		if DEBUG_NO_GAME_OVER:
-			_reset_ball(ball, eight_start, "8 ball reset for testing.")
+			_reset_ball(ball, eight_start, "8 ball reset.")
 			return
 		ball.sink()
 		_finish_game("8 ball sunk. Game over.")

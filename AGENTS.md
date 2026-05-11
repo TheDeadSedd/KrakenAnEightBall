@@ -12,7 +12,7 @@ Core pillars:
 - Pirate/kraken table presentation and in-engine charm.
 - Doubloons scoring driven by trick-shot event history.
 - Pocket-side score celebrations instead of generic center-screen scoring spam.
-- Occasional anomaly balls, starting with the Wayfinder Ball.
+- Occasional anomaly balls: Wayfinder Ball, Powder Keg, and Anchor Ball.
 - Fast iteration over broad systems.
 
 Target platforms:
@@ -32,7 +32,7 @@ Does not own large new feature systems unless there is no cleaner option. New ga
 
 ### `scripts/Ball.gd`
 
-Owns individual ball identity, velocity/friction state, generated ball visuals, spawn/drop presentation state, trails, and minimal anomaly flags such as `is_wayfinder` / `wayfinder_active`.
+Owns individual ball identity, velocity/friction state, generated ball visuals, spawn/drop presentation state, trails, and minimal anomaly identity/state flags such as `is_wayfinder`, `is_powder_keg`, `is_anchor_ball`, and `wayfinder_active`.
 
 Does not own table-wide gameplay rules, scoring, spawning decisions, pocket logic, or anomaly systems beyond per-ball state that must live on the ball.
 
@@ -56,15 +56,27 @@ Does not mutate real gameplay state. Prediction must stay side-effect-free and s
 
 ### `scripts/SpawnSystem.gd`
 
-Owns cue ball start/reset helpers, starting rack/object-ball creation, reward spawns, debug ball spawns, safe spawn search, drop animation coordination, and spawn-related callouts.
+Owns cue ball start/reset helpers, starting rack/object-ball creation, reward spawns, debug ball spawns, safe spawn search, drop animation coordination, spawn-related callouts, regular anomaly pool odds, and Anchor priority spawn odds.
 
-Does not own scoring, pocket consequences, shot lifecycle, physics tuning, or anomaly behavior after a ball exists.
+Does not own scoring, pocket consequences, shot lifecycle, physics tuning, score-tied reward decisions, or anomaly behavior after a ball exists.
 
 ### `scripts/WayfinderSystem.gd`
 
 Owns Wayfinder activation/deactivation, guided-ball tracking, pocket cone selection, timed guidance, redirect cooldowns, and Wayfinder debug logging.
 
 Does not own ball-to-ball collision response, pocket geometry, spawn chance, or general anomaly architecture.
+
+### `scripts/PowderKegSystem.gd`
+
+Owns Powder Keg cue-ball contact explosions, radial push falloff, explosion particle bursts, one-shot explosion state, and Powder Keg debug/performance toggles.
+
+Does not own ball-to-ball collision response, spawn chance, scoring values, pocket geometry, or general physics feel.
+
+### `scripts/AnchorBallSystem.gd`
+
+Owns Anchor Ball cursed-tide pull behavior, Anchor source/target rules, contact-loop cooldowns, affected-ball marker reporting, Anchor debug visuals, visual aura caps, and Anchor performance counters.
+
+Does not own ball-to-ball collision response, cue input, scoring values, prediction, pocket geometry, or SpawnSystem's reward-roll decisions.
 
 ### `scripts/PocketSystem.gd`
 
@@ -124,7 +136,11 @@ Does not own table gameplay systems.
 
 ## Anomaly Architecture
 
-Future anomaly balls should generally get their own system scripts. `WayfinderSystem.gd` is the first example.
+Anomaly balls should generally get their own system scripts. Current active anomaly systems are:
+
+- `WayfinderSystem.gd`
+- `PowderKegSystem.gd`
+- `AnchorBallSystem.gd`
 
 Pattern:
 
@@ -135,11 +151,35 @@ Pattern:
 - Avoid hardcoding new anomaly behavior directly into `Table.gd`.
 - Do not create a broad abstract anomaly framework until multiple anomalies prove the need.
 
-Possible future systems:
+Current anomaly rules:
 
-- `PowderKegSystem.gd`
+- Wayfinder activates from cue-ball contact, then can guide eligible object balls toward reachable pockets during collision-driven redirects.
+- Powder Keg explodes on cue-ball contact only.
+- Powder Keg pushes nearby balls outward with falloff, then removes itself from the table.
+- Powder Keg particle bursts should look juicy and readable, but debug/quality controls should allow particles to degrade safely under load.
+- Anchor pulls object balls only. It does not affect the cue ball.
+- Anchor does not pull other Anchor balls, though Anchor balls still physically collide normally.
+- Moving Anchor balls use full pull strength.
+- Stationary Anchor balls remain active field sources but use half pull strength.
+- Anchor has an inner dead zone and a per Anchor/target post-collision pull cooldown to prevent gravity-loop chase bumps.
+- Anchor uses independent reward spawn logic before the regular anomaly pool: 3% when the table has 40 or fewer balls, and 30% when the table has more than 40 balls.
+
+Possible future anomaly systems:
+
 - `EtherealSystem.gd`
-- `AnchorBallSystem.gd`
+
+## Future Ball Drop System Boundary
+
+The upcoming score-tied ball drop loop should become its own focused system, likely `BallDropSystem.gd`, instead of expanding `ScoreSystem.gd` or `Table.gd`.
+
+Preferred future flow:
+
+- `ShotEventSystem.gd` / `ScoreSystem.gd` report score events.
+- `BallDropSystem.gd` decides drop rewards from those score events.
+- `SpawnSystem.gd` performs the actual drops and safe placement.
+- `Table.gd` coordinates only.
+
+Do not bury score-tied reward decisions inside `ScoreSystem.gd`, and do not add another large reward subsystem directly to `Table.gd`.
 
 ## Score And Doubloons Rules
 
@@ -157,9 +197,14 @@ Possible future systems:
 - Stopped-ball filtering exists and should be preserved.
 - Ball-vs-ball broad-phase spatial grid exists and should be preserved.
 - Rail checks and pocket checks should run only for moving gameplay-active balls.
-- Performance overlay/debug tools exist in `DebugOverlay.gd` and use snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, and `WayfinderSystem.gd`.
+- Performance overlay/debug tools exist in `DebugOverlay.gd` and use snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, and `AnchorBallSystem.gd`.
 - Do not remove counters or make them misleading during optimization.
 - Do not add spatial partition rewrites or alternate physics engines without a focused request.
+- Do not solve chaos by preventing chaos. Large earned chain reactions and high ball counts are intended.
+- Do not hard-cap normal gameplay ball counts as the primary optimization strategy unless explicitly requested.
+- Keep physics/gameplay authoritative and correct. Degrade visual effects first under load.
+- Good first optimization targets include particles, trails, aura effects, popup labels, redraw frequency, pooling/reuse, and offscreen or low-priority visual simplification.
+- Debug/stress testing should continue to support 100+ balls.
 
 ## Development Rules
 
@@ -173,6 +218,24 @@ Possible future systems:
 - Avoid broad architecture abstractions until repeated patterns prove they are needed.
 - Keep exports, APKs, zips, and generated builds out of Git.
 - Commit after stable milestones, especially after playable checkpoints, extractions, and successful tuning passes.
+
+## Next Major Goal
+
+Implement score-tied ball drops:
+
+better play -> more score events/Doubloons -> more balls -> more interactions -> higher score before the table empties.
+
+Ball drop messaging should rotate instead of saying only "Ball Dropped." Candidate lines include:
+
+- "The Kraken provides..."
+- "There's another one here somewhere..."
+- "Austin's got it going on!"
+
+Cue ball and eight ball sinking should no longer end the game as this loop comes online:
+
+- Each should cost 25 Doubloons.
+- Each should remove a ball from the table.
+- Use a reversed ball-drop animation as the placeholder removal animation.
 
 ## Current Architecture Direction
 

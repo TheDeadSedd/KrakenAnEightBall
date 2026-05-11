@@ -387,7 +387,7 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
-text = "Anchor Visuals Enabled"
+text = "Anchor Visuals"
 
 [node name="AnchorDebugVisualCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
 layout_mode = 2
@@ -408,14 +408,14 @@ layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
-text = "Powder Keg Reduced Particles Test"
+text = "Powder Keg Low Particles Debug"
 
 [node name="PowderKegSuppressTrailsCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
-text = "Suppress Powder Keg Trails"
+text = "Powder Keg Suppress Trails Debug"
 
 [node name="DebugHotkeyLabel" type="Label" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=1546782174]
 layout_mode = 2
