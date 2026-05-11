@@ -20,11 +20,11 @@ const SCORE_POPUP_HOLD_PER_ITEM := 0.35
 const SCORE_POPUP_FADE_TIME := 0.28
 const SCORE_POPUP_OUTWARD_DRIFT_DISTANCE := 18.0
 const SCORE_POPUP_LIFETIME_DRIFT_SPEED := 8.0
-const SCORE_POPUP_START_SCALE := Vector2(0.82, 0.82)
-const SCORE_POPUP_POP_SCALE := Vector2(1.15, 1.15)
+const SCORE_POPUP_START_SCALE := Vector2(0.78, 0.78)
+const SCORE_POPUP_POP_SCALE := Vector2(1.35, 1.35)
 const SCORE_POPUP_FINAL_PULSE_SCALE := Vector2(1.08, 1.08)
 const SCORE_POPUP_POP_IN_TIME := 0.1
-const SCORE_POPUP_SETTLE_TIME := 0.1
+const SCORE_POPUP_SETTLE_TIME := 0.08
 const SCORE_SEGMENT_CHAR_WIDTH := 13.0
 const SCORE_SEGMENT_HEIGHT := 36.0
 const SCORE_SEGMENT_GAP := 6.0
@@ -34,15 +34,27 @@ const SCORE_SIDE_POCKET_X_TOLERANCE_RATIO := 0.18
 const CORNER_SCORE_ARC_PADDING := 18.0
 const CORNER_SCORE_SEGMENT_SPACING := 42.0
 const CORNER_SCORE_STRAIGHT_EXTENSION := 80.0
+const CORNER_SCORE_LABEL_MAX_TILT_DEGREES := 10.0
 const SCORE_EVENT_LABEL_ERUPT_TIME := 0.18
-const SCORE_EVENT_LABEL_START_SCALE := Vector2(0.76, 0.76)
-const SCORE_EVENT_LABEL_POP_SCALE := Vector2(1.12, 1.12)
+const SCORE_EVENT_LABEL_START_SCALE := Vector2(0.78, 0.78)
+const SCORE_EVENT_LABEL_POP_SCALE := Vector2(1.3, 1.3)
 const SCORE_EVENT_LABEL_ANGLE_MIN_DEGREES := 30.0
 const SCORE_EVENT_LABEL_ANGLE_MAX_DEGREES := 70.0
 const SCORE_EVENT_LABEL_DISTANCE := 64.0
 const SCORE_EVENT_LABEL_DISTANCE_STEP := 16.0
 const SCORE_EVENT_LABEL_START_DISTANCE := 16.0
 const SCORE_EVENT_LABEL_TILT_DEGREES := 10.0
+const SCORE_LABEL_POP_FLASH_COLOR := Color(1.18, 1.12, 0.9, 1.0)
+const SCORE_LABEL_BASE_MODULATE := Color(1, 1, 1, 1)
+const SCORE_LABEL_HIDDEN_MODULATE := Color(1, 1, 1, 0)
+const SCORE_LABEL_GLOW_COLOR := Color(1.0, 0.92, 0.55, 0.5)
+const SCORE_LABEL_GLOW_SCALE_BOOST := Vector2(1.14, 1.14)
+const SCORE_LABEL_GLOW_PEAK_BOOST := Vector2(1.5, 1.5)
+const SCORE_LABEL_GLOW_POP_TIME := 0.08
+const SCORE_LABEL_GLOW_FADE_TIME := 0.28
+const SCORE_LABEL_GLOW_FONT_COLOR := Color(1.0, 0.96, 0.8, 0.18)
+const SCORE_LABEL_GLOW_OUTLINE_COLOR := Color(1.0, 0.88, 0.45, 0.78)
+const SCORE_LABEL_GLOW_OUTLINE_SIZE := 10
 const EVENT_REWARDS := {
 	"BANK": BANK_REWARD,
 	"CHAIN": CHAIN_REWARD,
@@ -413,7 +425,7 @@ func _make_score_segment_label(text: String) -> Label:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_apply_score_segment_theme(label)
-	label.modulate = Color(1, 1, 1, 0)
+	label.modulate = SCORE_LABEL_HIDDEN_MODULATE
 	return label
 
 
@@ -456,7 +468,7 @@ func _layout_corner_score_segment_labels(popup: ScorePopup, widths: Array[float]
 		var label: Label = popup.score_labels[index]
 		var path_point: Dictionary = _get_corner_score_path_point(popup, distances[index], arc_radius)
 		var center: Vector2 = path_point["position"]
-		var rotation: float = float(path_point["rotation"])
+		var rotation: float = _get_corner_score_label_rotation(float(path_point["rotation"]))
 		_apply_score_segment_label_layout(label, center, widths[index], rotation)
 
 
@@ -565,6 +577,12 @@ func _get_corner_score_path_point(popup: ScorePopup, path_distance: float, arc_r
 	return _get_corner_score_path_point_for_distance(path_distance, half_arc, arc_center, arc_radius, start_angle, end_angle)
 
 
+func _get_corner_score_label_rotation(path_rotation: float) -> float:
+	var path_direction: Vector2 = Vector2.RIGHT.rotated(path_rotation)
+	var max_tilt_radians: float = deg_to_rad(CORNER_SCORE_LABEL_MAX_TILT_DEGREES)
+	return clamp(path_direction.y * max_tilt_radians, -max_tilt_radians, max_tilt_radians)
+
+
 func _get_corner_score_path_point_for_distance(
 	path_distance: float,
 	half_arc: float,
@@ -612,12 +630,12 @@ func _get_corner_arc_path_point(
 func _get_corner_score_arc_angles(pocket_position: Vector2) -> Array:
 	var corner_signs: Vector2 = _get_corner_signs(pocket_position)
 	if corner_signs.x < 0.0 and corner_signs.y < 0.0:
-		return [PI, PI * 1.5]
+		return [0.0, PI * 0.5]
 	if corner_signs.x > 0.0 and corner_signs.y < 0.0:
-		return [-PI * 0.5, 0.0]
+		return [PI * 0.5, PI]
 	if corner_signs.x > 0.0 and corner_signs.y > 0.0:
-		return [PI * 0.5, 0.0]
-	return [PI, PI * 0.5]
+		return [PI, PI * 1.5]
+	return [PI * 1.5, PI * 2.0]
 
 
 func _get_corner_signs(pocket_position: Vector2) -> Vector2:
@@ -638,11 +656,56 @@ func _get_readable_corner_rotation(rotation: float) -> float:
 	return rotation
 
 
-func _play_score_segment_pop_in(label: Label) -> void:
+func _spawn_reveal_glow(label: Label, target_position: Variant = null) -> void:
+	call_deferred("_spawn_reveal_glow_deferred", label, target_position)
+
+
+func _spawn_reveal_glow_deferred(label: Label, target_position: Variant = null) -> void:
+	if not is_instance_valid(label) or label.get_parent() == null:
+		return
+
+	var glow_label := Label.new()
+	glow_label.text = label.text
+	glow_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	glow_label.horizontal_alignment = label.horizontal_alignment
+	glow_label.vertical_alignment = label.vertical_alignment
+	glow_label.position = label.position
+	glow_label.size = label.size
+	glow_label.pivot_offset = label.pivot_offset
+	glow_label.rotation = label.rotation
+	glow_label.scale = label.scale * SCORE_LABEL_GLOW_SCALE_BOOST
+	glow_label.modulate = SCORE_LABEL_GLOW_COLOR
+	_apply_glow_label_theme(label, glow_label)
+	table.add_child(glow_label)
+	table.move_child(glow_label, label.get_index())
+
 	var tween: Tween = table.create_tween()
 	tween.set_parallel(true)
-	tween.tween_property(label, "modulate:a", 1.0, SCORE_POPUP_POP_IN_TIME)
+	if target_position is Vector2:
+		tween.tween_property(glow_label, "position", target_position, SCORE_LABEL_GLOW_POP_TIME + SCORE_LABEL_GLOW_FADE_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.tween_property(glow_label, "scale", SCORE_LABEL_GLOW_PEAK_BOOST, SCORE_LABEL_GLOW_POP_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.tween_property(glow_label, "modulate:a", 0.0, SCORE_LABEL_GLOW_POP_TIME + SCORE_LABEL_GLOW_FADE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.chain().tween_callback(glow_label.queue_free)
+
+
+func _apply_glow_label_theme(source: Label, target: Label) -> void:
+	target.add_theme_font_override("font", source.get_theme_font("font"))
+	target.add_theme_font_size_override("font_size", source.get_theme_font_size("font_size"))
+	target.add_theme_color_override("font_color", SCORE_LABEL_GLOW_FONT_COLOR)
+	target.add_theme_color_override("font_shadow_color", Color(1, 1, 1, 0))
+	target.add_theme_color_override("font_outline_color", SCORE_LABEL_GLOW_OUTLINE_COLOR)
+	target.add_theme_constant_override("outline_size", SCORE_LABEL_GLOW_OUTLINE_SIZE)
+	target.add_theme_constant_override("shadow_offset_x", 0)
+	target.add_theme_constant_override("shadow_offset_y", 0)
+
+
+func _play_score_segment_pop_in(label: Label) -> void:
+	_spawn_reveal_glow(label)
+	var tween: Tween = table.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(label, "modulate", SCORE_LABEL_POP_FLASH_COLOR, SCORE_POPUP_POP_IN_TIME)
 	tween.tween_property(label, "scale", SCORE_POPUP_POP_SCALE, SCORE_POPUP_POP_IN_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.chain().tween_property(label, "modulate", SCORE_LABEL_BASE_MODULATE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tween.chain().tween_property(label, "scale", Vector2.ONE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
@@ -665,7 +728,7 @@ func _show_event_label_for_latest_item(popup: ScorePopup) -> void:
 	var event_index: int = popup.event_labels.size()
 	var total_events: int = _get_total_event_label_count(popup)
 	var target_offset: Vector2 = _get_event_label_slot_offset(event_index, total_events, popup)
-	var event_label := _make_score_event_label("%s!" % label_text, event_index, popup.line_rotation)
+	var event_label := _make_score_event_label("%s!" % label_text, event_index, _get_event_label_base_rotation(popup))
 	event_label.position = popup.anchor_position + popup.lifetime_drift + target_offset.normalized() * SCORE_EVENT_LABEL_START_DISTANCE
 	table.add_child(event_label)
 	_place_score_label_below_gameplay(event_label)
@@ -716,8 +779,14 @@ func _make_score_event_label(text: String, event_index: int, line_rotation: floa
 	label.add_theme_color_override("font_color", Color(0.94, 1.0, 0.72))
 	label.add_theme_color_override("font_outline_color", Color(0.04, 0.08, 0.04, 0.92))
 	label.add_theme_constant_override("outline_size", 3)
-	label.modulate = Color(1, 1, 1, 0)
+	label.modulate = SCORE_LABEL_HIDDEN_MODULATE
 	return label
+
+
+func _get_event_label_base_rotation(popup: ScorePopup) -> float:
+	if popup.is_corner_pocket:
+		return 0.0
+	return popup.line_rotation
 
 
 func _get_event_label_tilt(event_index: int) -> float:
@@ -727,11 +796,13 @@ func _get_event_label_tilt(event_index: int) -> float:
 
 func _erupt_score_event_label(label: Label, popup: ScorePopup, target_offset: Vector2) -> void:
 	var target_position: Vector2 = popup.anchor_position + popup.lifetime_drift + target_offset
+	_spawn_reveal_glow(label, target_position)
 	var tween: Tween = table.create_tween()
 	tween.set_parallel(true)
 	tween.tween_property(label, "position", target_position, SCORE_EVENT_LABEL_ERUPT_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
-	tween.tween_property(label, "modulate:a", 1.0, SCORE_EVENT_LABEL_ERUPT_TIME)
+	tween.tween_property(label, "modulate", SCORE_LABEL_POP_FLASH_COLOR, SCORE_EVENT_LABEL_ERUPT_TIME)
 	tween.tween_property(label, "scale", SCORE_EVENT_LABEL_POP_SCALE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.55).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.chain().tween_property(label, "modulate", SCORE_LABEL_BASE_MODULATE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tween.chain().tween_property(label, "scale", Vector2.ONE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.45)
 
 
