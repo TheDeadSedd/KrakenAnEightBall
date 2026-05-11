@@ -37,9 +37,11 @@ const RACK_SPACING_MULTIPLIER := 2.12
 # Reward spawn tuning.
 const BALLS_PER_REWARD_DROP := 3
 const TOTAL_ANOMALY_SPAWN_CHANCE := 0.12
-const WAYFINDER_SPAWN_CHANCE := 0.04
-const POWDER_KEG_SPAWN_CHANCE := 0.04
-const ANCHOR_BALL_SPAWN_CHANCE := 0.04
+const WAYFINDER_SPAWN_CHANCE := 0.06
+const POWDER_KEG_SPAWN_CHANCE := 0.06
+const ANCHOR_ESCALATION_BALL_COUNT_THRESHOLD := 40
+const ANCHOR_LOW_COUNT_SPAWN_CHANCE := 0.03
+const ANCHOR_HIGH_COUNT_SPAWN_CHANCE := 0.30
 const SPAWN_SEARCH_CENTER := Vector2(960.0, 540.0)
 const SPAWN_SEARCH_STEP := 34.0
 const SPAWN_SEARCH_RINGS := 10
@@ -273,17 +275,17 @@ func _ball_color(number: int) -> Color:
 func _make_spawn_ball_request() -> SpawnBallRequest:
 	var request: SpawnBallRequest = SpawnBallRequest.new()
 	request.ball_number = _get_next_spawn_ball_number()
+	if _should_spawn_anchor_reward_ball():
+		request.is_anchor_ball = true
+		return request
+
 	var anomaly_roll: float = randf()
 	if anomaly_roll > TOTAL_ANOMALY_SPAWN_CHANCE:
 		return request
 
 	var powder_keg_threshold: float = WAYFINDER_SPAWN_CHANCE + POWDER_KEG_SPAWN_CHANCE
-	var anchor_ball_threshold: float = powder_keg_threshold + ANCHOR_BALL_SPAWN_CHANCE
 	request.is_wayfinder = anomaly_roll <= WAYFINDER_SPAWN_CHANCE
 	request.is_powder_keg = anomaly_roll > WAYFINDER_SPAWN_CHANCE and anomaly_roll <= powder_keg_threshold
-	request.is_anchor_ball = anomaly_roll > powder_keg_threshold and anomaly_roll <= anchor_ball_threshold
-	if request.is_anchor_ball and not _can_spawn_anchor_ball():
-		_assign_anchor_cap_fallback(request)
 	return request
 
 
@@ -313,17 +315,29 @@ func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
 
 
 func _can_spawn_anchor_ball() -> bool:
+	# Disabled by default; this is a debug safety valve, not normal-play optimization.
 	return table != null and table.anchor_ball_system.can_spawn_anchor_ball()
 
 
-func _assign_anchor_cap_fallback(request: SpawnBallRequest) -> void:
-	request.is_anchor_ball = false
-	var fallback_roll: float = randf()
-	if fallback_roll < 0.34:
-		return
+func _should_spawn_anchor_reward_ball() -> bool:
+	if not _can_spawn_anchor_ball():
+		return false
+	return randf() <= _get_anchor_reward_spawn_chance()
 
-	request.is_wayfinder = fallback_roll < 0.67
-	request.is_powder_keg = not request.is_wayfinder
+
+func _get_anchor_reward_spawn_chance() -> float:
+	if _get_visible_ball_count() > ANCHOR_ESCALATION_BALL_COUNT_THRESHOLD:
+		return ANCHOR_HIGH_COUNT_SPAWN_CHANCE
+	return ANCHOR_LOW_COUNT_SPAWN_CHANCE
+
+
+func _get_visible_ball_count() -> int:
+	var visible_ball_count := 0
+	for child in table.balls.get_children():
+		var ball := child as Ball
+		if ball != null and ball.visible:
+			visible_ball_count += 1
+	return visible_ball_count
 
 
 func _get_next_spawn_ball_number() -> int:

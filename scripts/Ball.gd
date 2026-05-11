@@ -154,7 +154,7 @@ func note_anchor_influence(strength: float, pull_direction: Vector2) -> void:
 		_clear_anchor_influence_visual()
 		return
 
-	var clamped_strength: float = clamp(strength, 0.20, 1.0)
+	var clamped_strength: float = clamp(strength, 0.34, 1.0)
 	_anchor_influence_visual_strength = max(_anchor_influence_visual_strength, clamped_strength)
 	_anchor_influence_fade_remaining = ANCHOR_INFLUENCE_FADE_TIME
 	if pull_direction.length_squared() > 0.001:
@@ -849,22 +849,22 @@ func _draw_anchor_influence_indicator(origin: Vector2) -> void:
 	var strength: float = clamp(_anchor_influence_visual_strength, 0.0, 1.0)
 
 	var aura_color: Color = ANCHOR_INFLUENCE_COLOR
-	aura_color.a = (0.11 + pulse * 0.05) * strength
-	draw_arc(origin, radius + 3.6 + pulse * 1.2, 0.0, TAU, 34, aura_color, 1.8)
+	aura_color.a = (0.22 + pulse * 0.10) * strength
+	draw_arc(origin, radius + 4.2 + pulse * 1.5, 0.0, TAU, 34, aura_color, 2.4)
 
 	var ripple_color: Color = ANCHOR_INFLUENCE_WAKE_COLOR
-	ripple_color.a = 0.10 * strength
-	draw_arc(origin, radius + 7.0, deg_to_rad(20.0) + time, deg_to_rad(160.0) + time, 20, ripple_color, 1.2)
-	draw_arc(origin, radius + 7.0, deg_to_rad(200.0) + time, deg_to_rad(320.0) + time, 20, ripple_color, 1.2)
+	ripple_color.a = 0.20 * strength
+	draw_arc(origin, radius + 7.6, deg_to_rad(20.0) + time, deg_to_rad(160.0) + time, 20, ripple_color, 1.7)
+	draw_arc(origin, radius + 7.6, deg_to_rad(200.0) + time, deg_to_rad(320.0) + time, 20, ripple_color, 1.7)
 
 	if _anchor_influence_direction.length_squared() <= 0.001:
 		return
 
 	var wake_color: Color = ANCHOR_INFLUENCE_WAKE_COLOR
-	wake_color.a = 0.16 * strength
+	wake_color.a = 0.30 * strength
 	var wake_start: Vector2 = origin - _anchor_influence_direction * (radius + 1.5)
-	var wake_end: Vector2 = origin - _anchor_influence_direction * (radius + 9.0 + pulse * 2.0)
-	draw_line(wake_start, wake_end, wake_color, 1.5)
+	var wake_end: Vector2 = origin - _anchor_influence_direction * (radius + 11.0 + pulse * 2.5)
+	draw_line(wake_start, wake_end, wake_color, 2.1)
 
 
 func _draw_anchor_current(origin: Vector2) -> void:

@@ -237,7 +237,7 @@ func _make_performance_debug_text() -> String:
 			snapshot["anchor_max_visible_field_auras"],
 		],
 		"Anchor affected-ball markers active: %s" % snapshot["anchor_affected_markers_active"],
-		"Anchor spawn cap: %s / %s" % [
+		"Anchor debug spawn cap: %s / %s" % [
 			_debug_bool_text(bool(snapshot["anchor_spawn_cap_enabled"])),
 			snapshot["anchor_spawn_cap"],
 		],

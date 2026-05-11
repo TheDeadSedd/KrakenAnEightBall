@@ -9,17 +9,21 @@ const DEBUG_VECTOR_COLOR := Color(0.82, 0.98, 1.0, 0.92)
 const DEBUG_VECTOR_LENGTH_SCALE := 0.32
 const DEBUG_VECTOR_MIN_LENGTH := 8.0
 const DEBUG_VECTOR_MAX_LENGTH := 36.0
+const STATIONARY_ANCHOR_PULL_MULTIPLIER := 0.5
 
 @export var enabled := true
 @export var influence_radius := 230.0
-@export var pull_strength := 60.0
+@export var pull_strength := 400.0
 @export_range(0.0, 1.0, 0.01) var minimum_pull_strength := 0.08
-# Defaulting this to zero preserves the current "balls settle, then shoot" rhythm.
-@export_range(0.0, 1.0, 0.01) var stationary_ball_multiplier := 0.0
+# Lets close settled balls barely wake without turning Anchor into a table-wide vacuum.
+@export_range(0.0, 1.0, 0.01) var stationary_ball_multiplier := 0.20
+@export var inner_dead_zone_radius := 28.0
+@export var post_collision_pull_cooldown := 0.35
 @export_range(0.0, 1.0, 0.01) var visual_effect_strength := 1.0
 @export var anchor_visuals_enabled := true
 @export var max_visible_field_auras := 3
-@export var anchor_spawn_cap_enabled := true
+# Debug safety valve only. Normal play should support chaos by degrading visuals first.
+@export var anchor_spawn_cap_enabled := false
 @export var max_anchor_balls_on_table := 3
 @export var debug_visual_enabled := false
 
@@ -31,6 +35,7 @@ var max_force_this_frame := 0.0
 var nearest_distance_this_frame := INF
 var affected_ball_ids: Dictionary = {}
 var debug_pull_vectors: Dictionary = {}
+var post_collision_pull_cooldowns: Dictionary = {}
 
 
 func setup(table_ref) -> void:
@@ -51,6 +56,7 @@ func update_pull(delta: float) -> void:
 	if table == null:
 		return
 
+	_update_post_collision_pull_cooldowns(delta)
 	var anchor_balls: Array[Ball] = _get_active_anchor_balls()
 	active_anchor_ball_count = anchor_balls.size()
 	if debug_visual_enabled:
@@ -69,6 +75,11 @@ func update_pull(delta: float) -> void:
 
 func finish_frame() -> void:
 	_sync_anchor_influence_markers()
+
+
+func handle_collision(ball_a: Ball, ball_b: Ball) -> void:
+	_try_set_post_collision_cooldown(ball_a, ball_b)
+	_try_set_post_collision_cooldown(ball_b, ball_a)
 
 
 func get_debug_snapshot() -> Dictionary:
@@ -123,7 +134,7 @@ func get_current_anchor_ball_count() -> int:
 	var anchor_ball_count := 0
 	for child in table.balls.get_children():
 		var ball := child as Ball
-		if ball != null and ball.is_anchor_ball and ball.visible:
+		if _is_anchor_field_source(ball):
 			anchor_ball_count += 1
 	return anchor_ball_count
 
@@ -161,9 +172,14 @@ func _get_active_anchor_balls() -> Array[Ball]:
 	var anchor_balls: Array[Ball] = []
 	for child in table.balls.get_children():
 		var ball := child as Ball
-		if ball != null and ball.is_anchor_ball and ball.is_gameplay_active():
+		if _is_anchor_field_source(ball):
 			anchor_balls.append(ball)
 	return anchor_balls
+
+
+func _is_anchor_field_source(ball: Ball) -> bool:
+	# Stopped Anchors remain persistent field sources while they exist on the table.
+	return ball != null and ball.is_anchor_ball and ball.is_gameplay_active()
 
 
 func _apply_anchor_visual_settings(anchor_balls: Array[Ball]) -> void:
@@ -220,7 +236,7 @@ func _sync_anchor_influence_markers() -> void:
 		if ball == null:
 			continue
 
-		if not anchor_visuals_enabled or not ball.visible or not ball.gameplay_enabled:
+		if ball.is_anchor_ball or not anchor_visuals_enabled or not ball.visible or not ball.gameplay_enabled:
 			ball.clear_anchor_influence_marker()
 			continue
 
@@ -238,6 +254,10 @@ func _apply_anchor_pull(anchor_ball: Ball, delta: float) -> void:
 		var distance: float = offset.length()
 		if distance <= 0.001 or distance > influence_radius:
 			continue
+		if distance <= _get_inner_dead_zone_radius(anchor_ball, target_ball):
+			continue
+		if _is_pull_pair_on_cooldown(anchor_ball, target_ball):
+			continue
 
 		nearest_distance_this_frame = min(nearest_distance_this_frame, distance)
 		var motion_multiplier: float = _get_motion_multiplier(target_ball)
@@ -246,7 +266,8 @@ func _apply_anchor_pull(anchor_ball: Ball, delta: float) -> void:
 
 		var distance_ratio: float = 1.0 - clamp(distance / influence_radius, 0.0, 1.0)
 		var pull_ratio: float = lerp(minimum_pull_strength, 1.0, distance_ratio * distance_ratio)
-		var force_magnitude: float = pull_strength * pull_ratio * motion_multiplier
+		var source_multiplier: float = _get_anchor_source_multiplier(anchor_ball)
+		var force_magnitude: float = pull_strength * source_multiplier * pull_ratio * motion_multiplier
 		var pull_direction: Vector2 = offset.normalized()
 		target_ball.velocity += pull_direction * force_magnitude * delta
 		target_ball.note_anchor_influence(pull_ratio, pull_direction)
@@ -256,15 +277,53 @@ func _apply_anchor_pull(anchor_ball: Ball, delta: float) -> void:
 func _is_pull_target(anchor_ball: Ball, target_ball: Ball) -> bool:
 	if target_ball == null or target_ball == anchor_ball:
 		return false
+	if target_ball.is_anchor_ball:
+		return false
 	if not target_ball.is_gameplay_active():
 		return false
-	return target_ball.ball_type == Ball.BallType.CUE or target_ball.ball_type == Ball.BallType.OBJECT
+	return target_ball.ball_type == Ball.BallType.OBJECT
 
 
 func _get_motion_multiplier(target_ball: Ball) -> float:
 	if target_ball.is_moving():
 		return 1.0
 	return stationary_ball_multiplier
+
+
+func _get_anchor_source_multiplier(anchor_ball: Ball) -> float:
+	if anchor_ball.is_moving():
+		return 1.0
+	return STATIONARY_ANCHOR_PULL_MULTIPLIER
+
+
+func _get_inner_dead_zone_radius(anchor_ball: Ball, target_ball: Ball) -> float:
+	return max(inner_dead_zone_radius, anchor_ball.radius + target_ball.radius)
+
+
+func _try_set_post_collision_cooldown(anchor_ball: Ball, target_ball: Ball) -> void:
+	if not _is_anchor_field_source(anchor_ball):
+		return
+	if not _is_pull_target(anchor_ball, target_ball):
+		return
+
+	post_collision_pull_cooldowns[_get_pull_pair_key(anchor_ball, target_ball)] = post_collision_pull_cooldown
+
+
+func _is_pull_pair_on_cooldown(anchor_ball: Ball, target_ball: Ball) -> bool:
+	return post_collision_pull_cooldowns.has(_get_pull_pair_key(anchor_ball, target_ball))
+
+
+func _update_post_collision_pull_cooldowns(delta: float) -> void:
+	var expired_keys: Array[String] = []
+	for pair_key in post_collision_pull_cooldowns.keys():
+		var remaining_time: float = float(post_collision_pull_cooldowns[pair_key]) - delta
+		if remaining_time <= 0.0:
+			expired_keys.append(pair_key)
+		else:
+			post_collision_pull_cooldowns[pair_key] = remaining_time
+
+	for pair_key in expired_keys:
+		post_collision_pull_cooldowns.erase(pair_key)
 
 
 func _record_force_application(anchor_ball: Ball, target_ball: Ball, offset: Vector2, force_magnitude: float) -> void:

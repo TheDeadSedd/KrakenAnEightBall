@@ -453,6 +453,7 @@ func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
 	_note_actual_cue_ball_hit(ball_a, ball_b)
 	wayfinder_system.handle_collision(ball_a, ball_b)
 	powder_keg_system.handle_collision(ball_a, ball_b)
+	anchor_ball_system.handle_collision(ball_a, ball_b)
 
 
 func _separate_overlapping_balls(ball_a: Ball, ball_b: Ball, normal: Vector2, overlap: float) -> void:
