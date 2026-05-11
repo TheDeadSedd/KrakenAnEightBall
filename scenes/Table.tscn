@@ -1,4 +1,4 @@
-[gd_scene load_steps=11 format=3]
+[gd_scene load_steps=12 format=3]
 
 [ext_resource type="Script" path="res://scripts/Table.gd" id="1_table_script"]
 [ext_resource type="Script" path="res://scripts/CueController.gd" id="2_cue_controller"]
@@ -10,6 +10,7 @@
 [ext_resource type="Script" path="res://scripts/ShotEventSystem.gd" id="8_shot_event_system"]
 [ext_resource type="Script" path="res://scripts/ScoreSystem.gd" id="9_score_system"]
 [ext_resource type="Script" path="res://scripts/PowderKegSystem.gd" id="10_powder_keg_system"]
+[ext_resource type="Script" path="res://scripts/AnchorBallSystem.gd" id="11_anchor_ball_system"]
 
 [node name="Table" type="Node2D"]
 script = ExtResource("1_table_script")
@@ -37,6 +38,9 @@ script = ExtResource("5_wayfinder_system")
 
 [node name="PowderKegSystem" type="Node" parent="."]
 script = ExtResource("10_powder_keg_system")
+
+[node name="AnchorBallSystem" type="Node" parent="."]
+script = ExtResource("11_anchor_ball_system")
 
 [node name="CuePivot" type="Node2D" parent="."]
 z_index = 12

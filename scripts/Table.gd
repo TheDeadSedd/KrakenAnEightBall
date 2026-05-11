@@ -96,6 +96,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var spawn_system: SpawnSystem = $SpawnSystem
 @onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
 @onready var powder_keg_system: PowderKegSystem = $PowderKegSystem
+@onready var anchor_ball_system: AnchorBallSystem = $AnchorBallSystem
 @onready var cue_controller: CueController = $CuePivot
 #endregion
 
@@ -147,6 +148,7 @@ func _ready() -> void:
 	spawn_system.setup(self)
 	wayfinder_system.setup(self)
 	powder_keg_system.setup(self)
+	anchor_ball_system.setup(self)
 	_cache_table_geometry()
 	cue_controller.setup()
 	if Engine.is_editor_hint():
@@ -177,6 +179,7 @@ func _physics_process(delta: float) -> void:
 	var step_delta: float = delta / float(PHYSICS_SUBSTEPS)
 	for _step in range(PHYSICS_SUBSTEPS):
 		wayfinder_system.update_guidance(step_delta)
+		anchor_ball_system.update_pull(step_delta)
 		_move_balls(step_delta)
 		var phase_start_usec: int = Time.get_ticks_usec()
 		_resolve_ball_collisions()
@@ -192,6 +195,7 @@ func _physics_process(delta: float) -> void:
 		aim_preview.record_actual_path_step()
 		_apply_ball_friction(step_delta)
 
+	anchor_ball_system.finish_frame()
 	spawn_system.process_spawn_queue(delta)
 	_process_callout_queue(delta)
 	_try_finish_shot()
@@ -243,6 +247,7 @@ func _draw() -> void:
 	_ensure_table_geometry_cached()
 	_draw_table_art()
 	_draw_collision_debug()
+	anchor_ball_system.draw_debug(self)
 
 
 func _draw_table_art() -> void:
@@ -538,6 +543,7 @@ func _reset_performance_frame_stats() -> void:
 	perf_ball_collision_ms = 0.0
 	perf_rail_collision_ms = 0.0
 	perf_pocket_check_ms = 0.0
+	anchor_ball_system.reset_frame_stats()
 
 
 func _reset_ball_debug_frame_stats() -> void:
@@ -836,12 +842,29 @@ func get_physics_debug_snapshot() -> Dictionary:
 
 func get_performance_debug_snapshot() -> Dictionary:
 	var counts: Dictionary = _get_performance_ball_counts()
+	var anchor_snapshot: Dictionary = anchor_ball_system.get_debug_snapshot()
 	return {
 		"total_balls": counts["total"],
 		"moving_balls": counts["moving"],
 		"stopped_balls": counts["stopped"],
 		"active_wayfinders": counts["active_wayfinders"],
 		"guided_wayfinder_targets": wayfinder_system.get_guided_target_count(),
+		"anchor_balls": anchor_snapshot["active_anchor_balls"],
+		"anchor_affected_balls": anchor_snapshot["affected_balls"],
+		"anchor_force_applications": anchor_snapshot["force_applications"],
+		"anchor_avg_force": anchor_snapshot["avg_force"],
+		"anchor_max_force": anchor_snapshot["max_force"],
+		"anchor_nearest_distance": anchor_snapshot["nearest_distance"],
+		"anchor_enabled": anchor_snapshot["enabled"],
+		"anchor_radius": anchor_snapshot["influence_radius"],
+		"anchor_strength": anchor_snapshot["pull_strength"],
+		"anchor_visuals_enabled": anchor_snapshot["visuals_enabled"],
+		"anchor_visual_nodes_active": anchor_snapshot["visual_nodes_active"],
+		"anchor_field_rings_drawn": anchor_snapshot["field_rings_drawn"],
+		"anchor_affected_markers_active": anchor_snapshot["affected_markers_active"],
+		"anchor_max_visible_field_auras": anchor_snapshot["max_visible_field_auras"],
+		"anchor_spawn_cap_enabled": anchor_snapshot["spawn_cap_enabled"],
+		"anchor_spawn_cap": anchor_snapshot["max_anchor_balls_on_table"],
 		"trail_points": counts["trail_points"],
 		"balls_with_trails": counts["balls_with_trails"],
 		"trail_redraws": counts["trail_redraws"],
@@ -901,6 +924,7 @@ func _get_ball_debug_snapshot(ball: Ball) -> Dictionary:
 		"is_eight_ball": ball == eight_ball,
 		"is_wayfinder": ball.is_wayfinder,
 		"is_powder_keg": ball.is_powder_keg,
+		"is_anchor_ball": ball.is_anchor_ball,
 		"wayfinder_active": ball.is_wayfinder and ball.wayfinder_active,
 		"guided": wayfinder_system.is_ball_guided(ball),
 		"gameplay_enabled": ball.gameplay_enabled,
@@ -927,11 +951,13 @@ func get_debug_spawn_hotkey_data() -> Dictionary:
 #region Callouts / Notifications
 # Center/top callouts are now reserved for spawn/drop-flow messages.
 # Future extraction candidate: HUD/CalloutSystem.
-func queue_spawn_reward_message(is_wayfinder: bool, is_powder_keg: bool = false) -> void:
+func queue_spawn_reward_message(is_wayfinder: bool, is_powder_keg: bool = false, is_anchor_ball: bool = false) -> void:
 	if is_wayfinder:
 		_queue_result_message("WAYFINDER BALL DROPPED")
 	elif is_powder_keg:
 		_queue_result_message("POWDER KEG DROPPED")
+	elif is_anchor_ball:
+		_queue_result_message("ANCHOR BALL DROPPED")
 	else:
 		_queue_result_message("+1 BALL DROPPED")
 

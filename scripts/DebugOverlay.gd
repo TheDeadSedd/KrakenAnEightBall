@@ -15,6 +15,8 @@ const PERFORMANCE_OVERLAY_DRAG_HEIGHT := 34.0
 @onready var shot_path_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/ShotPathCheckBox
 @onready var physics_debug_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PhysicsDebugCheckBox
 @onready var performance_overlay_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PerformanceOverlayCheckBox
+@onready var anchor_visuals_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/AnchorVisualsCheckBox
+@onready var anchor_debug_visual_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/AnchorDebugVisualCheckBox
 @onready var powder_keg_particles_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PowderKegParticlesCheckBox
 @onready var powder_keg_reduced_particles_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PowderKegReducedParticlesCheckBox
 @onready var powder_keg_suppress_trails_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PowderKegSuppressTrailsCheckBox
@@ -33,6 +35,8 @@ func setup(table_ref: BilliardsTable) -> void:
 	shot_path_check_box.set_pressed_no_signal(table.is_shot_path_debug_enabled())
 	physics_debug_check_box.set_pressed_no_signal(false)
 	performance_overlay_check_box.set_pressed_no_signal(false)
+	anchor_visuals_check_box.set_pressed_no_signal(table.anchor_ball_system.are_anchor_visuals_enabled())
+	anchor_debug_visual_check_box.set_pressed_no_signal(table.anchor_ball_system.is_debug_visual_enabled())
 	_sync_powder_keg_debug_toggles()
 	debug_hotkey_label.text = _make_debug_hotkey_text()
 	_connect_debug_controls()
@@ -45,6 +49,10 @@ func _connect_debug_controls() -> void:
 		physics_debug_check_box.toggled.connect(_on_physics_debug_toggled)
 	if not performance_overlay_check_box.toggled.is_connected(_on_performance_overlay_toggled):
 		performance_overlay_check_box.toggled.connect(_on_performance_overlay_toggled)
+	if not anchor_visuals_check_box.toggled.is_connected(_on_anchor_visuals_toggled):
+		anchor_visuals_check_box.toggled.connect(_on_anchor_visuals_toggled)
+	if not anchor_debug_visual_check_box.toggled.is_connected(_on_anchor_debug_visual_toggled):
+		anchor_debug_visual_check_box.toggled.connect(_on_anchor_debug_visual_toggled)
 	if not powder_keg_particles_check_box.toggled.is_connected(_on_powder_keg_particles_toggled):
 		powder_keg_particles_check_box.toggled.connect(_on_powder_keg_particles_toggled)
 	if not powder_keg_reduced_particles_check_box.toggled.is_connected(_on_powder_keg_reduced_particles_toggled):
@@ -143,6 +151,14 @@ func _on_performance_overlay_toggled(enabled: bool) -> void:
 		performance_overlay_label.text = _make_performance_debug_text()
 
 
+func _on_anchor_visuals_toggled(enabled: bool) -> void:
+	table.anchor_ball_system.set_anchor_visuals_enabled(enabled)
+
+
+func _on_anchor_debug_visual_toggled(enabled: bool) -> void:
+	table.anchor_ball_system.set_debug_visual_enabled(enabled)
+
+
 func _sync_powder_keg_debug_toggles() -> void:
 	powder_keg_particles_check_box.set_pressed_no_signal(table.powder_keg_system.explosion_particles_enabled)
 	powder_keg_reduced_particles_check_box.set_pressed_no_signal(table.powder_keg_system.reduced_particle_test_enabled)
@@ -163,9 +179,10 @@ func _on_powder_keg_suppress_trails_toggled(enabled: bool) -> void:
 
 func _make_debug_hotkey_text() -> String:
 	var hotkeys: Dictionary = table.get_debug_spawn_hotkey_data()
-	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
+	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Spawn Anchor Ball\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
 		OS.get_keycode_string(int(hotkeys["wayfinder_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["powder_keg_spawn_key"])),
+		OS.get_keycode_string(int(hotkeys["anchor_ball_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["normal_spawn_key"])),
 		OS.get_keycode_string(PERFORMANCE_OVERLAY_TOGGLE_KEY),
 	]
@@ -203,6 +220,26 @@ func _make_performance_debug_text() -> String:
 		"Wayfinders: %s active / %s guided" % [
 			snapshot["active_wayfinders"],
 			snapshot["guided_wayfinder_targets"],
+		],
+		"Anchor balls: %s" % snapshot["anchor_balls"],
+		"Anchor affected balls: %s" % snapshot["anchor_affected_balls"],
+		"Anchor force applications/frame: %s" % snapshot["anchor_force_applications"],
+		"Anchor avg force: %.2f" % float(snapshot["anchor_avg_force"]),
+		"Anchor max force: %.2f" % float(snapshot["anchor_max_force"]),
+		"Anchor nearest distance: %s" % _debug_distance_text(float(snapshot["anchor_nearest_distance"])),
+		"Anchor enabled: %s" % _debug_true_false_text(bool(snapshot["anchor_enabled"])),
+		"Anchor radius: %.1f" % float(snapshot["anchor_radius"]),
+		"Anchor strength: %.1f" % float(snapshot["anchor_strength"]),
+		"Anchor visuals enabled: %s" % _debug_true_false_text(bool(snapshot["anchor_visuals_enabled"])),
+		"Anchor visual nodes active: %s" % snapshot["anchor_visual_nodes_active"],
+		"Anchor field rings drawn: %s / %s" % [
+			snapshot["anchor_field_rings_drawn"],
+			snapshot["anchor_max_visible_field_auras"],
+		],
+		"Anchor affected-ball markers active: %s" % snapshot["anchor_affected_markers_active"],
+		"Anchor spawn cap: %s / %s" % [
+			_debug_bool_text(bool(snapshot["anchor_spawn_cap_enabled"])),
+			snapshot["anchor_spawn_cap"],
 		],
 		"Trails: %s points / %s balls" % [
 			snapshot["trail_points"],
@@ -261,6 +298,8 @@ func _get_ball_debug_name(ball_data: Dictionary) -> String:
 		return "Wayfinder Ball"
 	if bool(ball_data["is_powder_keg"]):
 		return "Powder Keg"
+	if bool(ball_data["is_anchor_ball"]):
+		return "Anchor Ball"
 	return "Ball %s" % ball_data["ball_number"]
 
 
@@ -277,3 +316,13 @@ func _get_ball_drag_band_name(ball_data: Dictionary) -> String:
 
 func _debug_bool_text(enabled: bool) -> String:
 	return "enabled" if enabled else "disabled"
+
+
+func _debug_distance_text(distance: float) -> String:
+	if distance < 0.0:
+		return "none"
+	return "%.1f" % distance
+
+
+func _debug_true_false_text(enabled: bool) -> String:
+	return "true" if enabled else "false"

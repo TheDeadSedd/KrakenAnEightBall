@@ -22,6 +22,15 @@ const POWDER_KEG_BASE_COLOR := Color("7b4723")
 const POWDER_KEG_BAND_COLOR := Color("e0b15e")
 const POWDER_KEG_STAVE_COLOR := Color("4a2714")
 const POWDER_KEG_FUSE_COLOR := Color("f6d07c")
+const ANCHOR_BALL_BASE_COLOR := Color("2a343a")
+const ANCHOR_BALL_RIM_COLOR := Color("0f171b")
+const ANCHOR_BALL_MARK_COLOR := Color("9db0ae")
+const ANCHOR_BALL_CURRENT_COLOR := Color("70a9b4")
+const ANCHOR_BALL_MIST_COLOR := Color("173b42")
+const ANCHOR_INFLUENCE_COLOR := Color("8ff7e4")
+const ANCHOR_INFLUENCE_WAKE_COLOR := Color("d3fff8")
+const ANCHOR_INFLUENCE_FADE_TIME := 0.18
+const ANCHOR_INFLUENCE_RELEASE_STRENGTH := 0.22
 const DEBUG_WAYFINDER := false
 
 @export var ball_type := BallType.OBJECT
@@ -74,6 +83,11 @@ var gameplay_enabled := true
 var is_wayfinder := false
 var wayfinder_active := false
 var is_powder_keg := false
+var is_anchor_ball := false
+var anchor_visual_effect_strength := 0.7
+var anchor_field_visual_radius := 230.0
+var anchor_visuals_enabled := true
+var anchor_field_visual_enabled := true
 
 var _spawn_drop_active := false
 var _spawn_drop_elapsed := 0.0
@@ -87,6 +101,9 @@ var _trail_points: Array[TrailPoint] = []
 var _last_trail_position := Vector2.ZERO
 var _trail_suppression_remaining := 0.0
 var _trail_redraws_this_frame := 0
+var _anchor_influence_visual_strength := 0.0
+var _anchor_influence_fade_remaining := 0.0
+var _anchor_influence_direction := Vector2.ZERO
 
 
 func _ready() -> void:
@@ -97,11 +114,26 @@ func _ready() -> void:
 	queue_redraw()
 
 
+func _exit_tree() -> void:
+	_clear_anchor_influence_visual()
+
+
 func _process(delta: float) -> void:
 	if _spawn_drop_active:
 		_update_spawn_drop(delta)
 
+	_update_anchor_influence_visual(delta)
+
 	if is_wayfinder and wayfinder_active and gameplay_enabled:
+		queue_redraw()
+	elif (
+		is_anchor_ball
+		and gameplay_enabled
+		and visible
+		and anchor_visuals_enabled
+		and anchor_field_visual_enabled
+		and anchor_visual_effect_strength > 0.0
+	):
 		queue_redraw()
 
 	_update_trail(delta)
@@ -113,6 +145,80 @@ func suppress_trail_for(duration: float) -> void:
 		_trail_points.clear()
 		_queue_trail_redraw()
 	_last_trail_position = global_position
+
+
+func note_anchor_influence(strength: float, pull_direction: Vector2) -> void:
+	if not visible or not gameplay_enabled:
+		return
+	if not anchor_visuals_enabled:
+		_clear_anchor_influence_visual()
+		return
+
+	var clamped_strength: float = clamp(strength, 0.20, 1.0)
+	_anchor_influence_visual_strength = max(_anchor_influence_visual_strength, clamped_strength)
+	_anchor_influence_fade_remaining = ANCHOR_INFLUENCE_FADE_TIME
+	if pull_direction.length_squared() > 0.001:
+		_anchor_influence_direction = pull_direction.normalized()
+	queue_redraw()
+
+
+func release_anchor_influence_marker() -> void:
+	if _anchor_influence_visual_strength <= 0.0:
+		return
+
+	if not visible or not gameplay_enabled or not anchor_visuals_enabled or not is_moving():
+		_clear_anchor_influence_visual()
+		return
+
+	_anchor_influence_fade_remaining = 0.0
+	_anchor_influence_visual_strength = min(_anchor_influence_visual_strength, ANCHOR_INFLUENCE_RELEASE_STRENGTH)
+	queue_redraw()
+
+
+func clear_anchor_influence_marker() -> void:
+	_clear_anchor_influence_visual()
+
+
+func set_anchor_visuals_enabled(enabled: bool) -> void:
+	if anchor_visuals_enabled == enabled:
+		return
+
+	anchor_visuals_enabled = enabled
+	if not anchor_visuals_enabled:
+		_clear_anchor_influence_visual()
+	queue_redraw()
+
+
+func set_anchor_field_visual_enabled(enabled: bool) -> void:
+	if anchor_field_visual_enabled == enabled:
+		return
+
+	anchor_field_visual_enabled = enabled
+	queue_redraw()
+
+
+func is_anchor_visual_node_active() -> bool:
+	return is_anchor_field_visual_drawn() or is_anchor_influence_marker_active()
+
+
+func is_anchor_field_visual_drawn() -> bool:
+	return (
+		is_anchor_ball
+		and visible
+		and gameplay_enabled
+		and anchor_visuals_enabled
+		and anchor_field_visual_enabled
+	)
+
+
+func is_anchor_influence_marker_active() -> bool:
+	return (
+		visible
+		and gameplay_enabled
+		and anchor_visuals_enabled
+		and is_moving()
+		and _anchor_influence_visual_strength > 0.0
+	)
 
 
 func get_trail_point_count() -> int:
@@ -132,13 +238,15 @@ func setup(
 	new_number: int,
 	new_color: Color,
 	new_is_wayfinder: bool = false,
-	new_is_powder_keg: bool = false
+	new_is_powder_keg: bool = false,
+	new_is_anchor_ball: bool = false
 ) -> void:
 	ball_type = new_type
 	ball_number = new_number
 	ball_color = new_color
 	is_wayfinder = new_is_wayfinder
 	is_powder_keg = new_is_powder_keg
+	is_anchor_ball = new_is_anchor_ball
 	_reset_wayfinder_state()
 	_update_label()
 	_update_number_color()
@@ -236,6 +344,7 @@ func sink() -> void:
 	_trail_suppression_remaining = 0.0
 	_trail_points.clear()
 	visible = false
+	_clear_anchor_influence_visual()
 	sunk.emit(self)
 
 
@@ -253,6 +362,7 @@ func respawn_at(new_position: Vector2) -> void:
 	_spawn_drop_horizontal_offset = Vector2.ZERO
 	_spawn_landing_damping_remaining = 0.0
 	_trail_suppression_remaining = 0.0
+	_clear_anchor_influence_visual()
 	_reset_trail()
 
 
@@ -272,6 +382,7 @@ func begin_spawn_drop(final_position: Vector2) -> void:
 	scale = Vector2.ONE * spawn_drop_start_scale
 	_update_label_layout()
 	_reset_trail()
+	_clear_anchor_influence_visual()
 
 
 func _update_spawn_drop(delta: float) -> void:
@@ -461,6 +572,34 @@ func _reset_trail() -> void:
 	_queue_trail_redraw()
 
 
+func _update_anchor_influence_visual(delta: float) -> void:
+	if _anchor_influence_visual_strength <= 0.0:
+		return
+
+	if not visible or not gameplay_enabled or not anchor_visuals_enabled or not is_moving():
+		_clear_anchor_influence_visual()
+		return
+
+	if _anchor_influence_fade_remaining > 0.0:
+		_anchor_influence_fade_remaining = max(_anchor_influence_fade_remaining - delta, 0.0)
+	else:
+		_anchor_influence_visual_strength = max(
+			_anchor_influence_visual_strength - delta / ANCHOR_INFLUENCE_FADE_TIME,
+			0.0
+		)
+
+	queue_redraw()
+
+
+func _clear_anchor_influence_visual() -> void:
+	var had_visual: bool = _anchor_influence_visual_strength > 0.0 or _anchor_influence_fade_remaining > 0.0
+	_anchor_influence_visual_strength = 0.0
+	_anchor_influence_fade_remaining = 0.0
+	_anchor_influence_direction = Vector2.ZERO
+	if had_visual:
+		queue_redraw()
+
+
 func _queue_trail_redraw() -> void:
 	_trail_redraws_this_frame += 1
 	queue_redraw()
@@ -472,7 +611,7 @@ func _update_label_layout() -> void:
 
 
 func _update_label() -> void:
-	if ball_type == BallType.CUE or is_wayfinder or is_powder_keg:
+	if ball_type == BallType.CUE or is_wayfinder or is_powder_keg or is_anchor_ball:
 		number_label.text = ""
 	else:
 		number_label.text = str(ball_number)
@@ -483,6 +622,8 @@ func _update_number_color() -> void:
 		number_label.add_theme_color_override("font_color", Color("082522"))
 	elif is_powder_keg:
 		number_label.add_theme_color_override("font_color", Color("f9edd2"))
+	elif is_anchor_ball:
+		number_label.add_theme_color_override("font_color", Color("d9e2df"))
 	elif ball_type == BallType.EIGHT:
 		number_label.add_theme_color_override("font_color", Color.WHITE)
 	else:
@@ -538,8 +679,13 @@ func _draw() -> void:
 	var shadow_color: Color = Color(0, 0, 0, 0.22)
 	var shine_color: Color = Color(1, 1, 1, 0.34)
 
+	if anchor_visuals_enabled and _anchor_influence_visual_strength > 0.0:
+		_draw_anchor_influence_indicator(origin)
+
 	if is_wayfinder:
 		_draw_wayfinder_aura(origin)
+	elif is_anchor_ball and anchor_visuals_enabled and anchor_field_visual_enabled:
+		_draw_anchor_current(origin)
 
 	draw_circle(origin + Vector2(1.5, 2.0), radius, shadow_color)
 	draw_circle(origin, radius + 1.2, Color(0, 0, 0, 0.12))
@@ -547,7 +693,7 @@ func _draw() -> void:
 	draw_circle(origin + Vector2(-radius * 0.18, -radius * 0.22), radius * 0.72, display_color.lightened(0.16))
 	draw_arc(origin, radius - rim_width * 0.5, 0.0, TAU, 40, rim_color, rim_width)
 
-	if not is_wayfinder and (ball_type == BallType.OBJECT or ball_type == BallType.EIGHT):
+	if not is_wayfinder and not is_anchor_ball and (ball_type == BallType.OBJECT or ball_type == BallType.EIGHT):
 		var number_spot_color := Color.WHITE
 		draw_circle(origin, radius * number_spot_scale, number_spot_color)
 		draw_arc(
@@ -567,11 +713,16 @@ func _draw() -> void:
 		_draw_wayfinder_mark(origin)
 	elif is_powder_keg:
 		_draw_powder_keg_mark(origin)
+	elif is_anchor_ball:
+		_draw_anchor_mark(origin)
 
 	draw_circle(origin + Vector2(-radius * 0.32, -radius * 0.36), radius * highlight_scale, shine_color)
 
 
 func _get_display_color() -> Color:
+	if is_anchor_ball:
+		return ANCHOR_BALL_BASE_COLOR
+
 	if is_powder_keg:
 		return POWDER_KEG_BASE_COLOR
 
@@ -649,6 +800,29 @@ func _draw_powder_keg_mark(origin: Vector2) -> void:
 	draw_circle(origin + Vector2(radius * 0.28, -radius * 1.22), 2.4, Color(1.0, 0.76, 0.34, 0.9))
 
 
+func _draw_anchor_mark(origin: Vector2) -> void:
+	var shank_top: Vector2 = origin + Vector2(0, -radius * 0.58)
+	var shank_bottom: Vector2 = origin + Vector2(0, radius * 0.30)
+	draw_arc(origin + Vector2(0, radius * 0.18), radius * 0.45, deg_to_rad(25.0), deg_to_rad(155.0), 24, ANCHOR_BALL_MARK_COLOR, 2.2)
+	draw_line(shank_top, shank_bottom, ANCHOR_BALL_MARK_COLOR, 2.6)
+	draw_line(origin + Vector2(-radius * 0.34, -radius * 0.25), origin + Vector2(radius * 0.34, -radius * 0.25), ANCHOR_BALL_MARK_COLOR, 2.0)
+	draw_circle(shank_top, radius * 0.16, Color(0.03, 0.06, 0.07, 0.82))
+	draw_arc(shank_top, radius * 0.16, 0.0, TAU, 18, ANCHOR_BALL_MARK_COLOR, 1.6)
+	draw_line(
+		origin + Vector2(-radius * 0.43, radius * 0.32),
+		origin + Vector2(-radius * 0.58, radius * 0.10),
+		ANCHOR_BALL_MARK_COLOR,
+		2.0
+	)
+	draw_line(
+		origin + Vector2(radius * 0.43, radius * 0.32),
+		origin + Vector2(radius * 0.58, radius * 0.10),
+		ANCHOR_BALL_MARK_COLOR,
+		2.0
+	)
+	draw_arc(origin, radius - 3.0, 0.0, TAU, 40, ANCHOR_BALL_RIM_COLOR, 1.5)
+
+
 func _draw_wayfinder_aura(origin: Vector2) -> void:
 	var aura_alpha: float = 0.18
 	var aura_radius: float = radius + 2.0
@@ -667,6 +841,63 @@ func _draw_wayfinder_aura(origin: Vector2) -> void:
 		var inner_glow: Color = WAYFINDER_MARK_COLOR
 		inner_glow.a = 0.22
 		draw_arc(origin, aura_radius - 4.0, 0.0, TAU, 32, inner_glow, 1.4)
+
+
+func _draw_anchor_influence_indicator(origin: Vector2) -> void:
+	var time: float = Time.get_ticks_msec() / 1000.0
+	var pulse: float = 0.5 + 0.5 * sin(time * 9.0)
+	var strength: float = clamp(_anchor_influence_visual_strength, 0.0, 1.0)
+
+	var aura_color: Color = ANCHOR_INFLUENCE_COLOR
+	aura_color.a = (0.11 + pulse * 0.05) * strength
+	draw_arc(origin, radius + 3.6 + pulse * 1.2, 0.0, TAU, 34, aura_color, 1.8)
+
+	var ripple_color: Color = ANCHOR_INFLUENCE_WAKE_COLOR
+	ripple_color.a = 0.10 * strength
+	draw_arc(origin, radius + 7.0, deg_to_rad(20.0) + time, deg_to_rad(160.0) + time, 20, ripple_color, 1.2)
+	draw_arc(origin, radius + 7.0, deg_to_rad(200.0) + time, deg_to_rad(320.0) + time, 20, ripple_color, 1.2)
+
+	if _anchor_influence_direction.length_squared() <= 0.001:
+		return
+
+	var wake_color: Color = ANCHOR_INFLUENCE_WAKE_COLOR
+	wake_color.a = 0.16 * strength
+	var wake_start: Vector2 = origin - _anchor_influence_direction * (radius + 1.5)
+	var wake_end: Vector2 = origin - _anchor_influence_direction * (radius + 9.0 + pulse * 2.0)
+	draw_line(wake_start, wake_end, wake_color, 1.5)
+
+
+func _draw_anchor_current(origin: Vector2) -> void:
+	var time: float = Time.get_ticks_msec() / 1000.0
+	var pulse: float = 0.5 + 0.5 * sin(time * 4.8)
+	var strength: float = clamp(anchor_visual_effect_strength, 0.0, 1.0)
+
+	var field_color: Color = ANCHOR_BALL_CURRENT_COLOR
+	field_color.a = 0.035 * strength
+	draw_arc(origin, anchor_field_visual_radius, 0.0, TAU, 96, field_color, 1.0)
+	draw_arc(
+		origin,
+		anchor_field_visual_radius * 0.62,
+		deg_to_rad(30.0) + time * 0.35,
+		deg_to_rad(190.0) + time * 0.35,
+		36,
+		field_color,
+		1.0
+	)
+
+	var mist_color: Color = ANCHOR_BALL_MIST_COLOR
+	mist_color.a = (0.10 + pulse * 0.08) * strength
+	draw_circle(origin, radius + 11.0 + pulse * 2.5, mist_color)
+
+	var current_color: Color = ANCHOR_BALL_CURRENT_COLOR
+	current_color.a = (0.18 + pulse * 0.10) * strength
+	var swirl_offset: float = time * 1.5
+	draw_arc(origin, radius + 5.0 + pulse * 1.5, deg_to_rad(205.0) + swirl_offset, deg_to_rad(335.0) + swirl_offset, 28, current_color, 2.1)
+	draw_arc(origin, radius + 10.0 - pulse * 1.0, deg_to_rad(25.0) + swirl_offset, deg_to_rad(165.0) + swirl_offset, 28, current_color, 1.7)
+
+	var dark_current_color: Color = ANCHOR_BALL_RIM_COLOR
+	dark_current_color.a = (0.16 + pulse * 0.06) * strength
+	draw_arc(origin, radius + 8.0, deg_to_rad(150.0) - swirl_offset, deg_to_rad(270.0) - swirl_offset, 24, dark_current_color, 1.5)
 
 
 func _draw_trail() -> void:

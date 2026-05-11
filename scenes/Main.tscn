@@ -308,7 +308,7 @@ layout_mode = 0
 offset_left = 12.0
 offset_top = 238.0
 offset_right = 440.0
-offset_bottom = 660.0
+offset_bottom = 1020.0
 mouse_filter = 2
 theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
 
@@ -339,7 +339,7 @@ layout_mode = 0
 offset_left = 34.0
 offset_top = 34.0
 offset_right = 384.0
-offset_bottom = 304.0
+offset_bottom = 424.0
 
 [node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/DebugMenuPanel" unique_id=2087057257]
 layout_mode = 2
@@ -382,6 +382,20 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Show Performance Overlay"
 
+[node name="AnchorVisualsCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 14
+text = "Anchor Visuals Enabled"
+
+[node name="AnchorDebugVisualCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 14
+text = "Show Anchor Pull Debug"
+
 [node name="PowderKegParticlesCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
@@ -410,4 +424,4 @@ theme_override_colors/font_outline_color = Color(0.02, 0.03, 0.03, 0.82)
 theme_override_constants/outline_size = 1
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 13
-text = "F: Spawn Wayfinder Ball\nG: Spawn Normal Ball"
+text = "F: Spawn Wayfinder Ball\nH: Spawn Powder Keg\nJ: Spawn Anchor Ball\nG: Spawn Normal Ball\nF3: Performance Overlay"
