@@ -339,7 +339,7 @@ layout_mode = 0
 offset_left = 34.0
 offset_top = 34.0
 offset_right = 384.0
-offset_bottom = 214.0
+offset_bottom = 304.0
 
 [node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/DebugMenuPanel" unique_id=2087057257]
 layout_mode = 2
@@ -381,6 +381,27 @@ theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Show Performance Overlay"
+
+[node name="PowderKegParticlesCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 14
+text = "Powder Keg Particles"
+
+[node name="PowderKegReducedParticlesCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 14
+text = "Powder Keg Reduced Particles Test"
+
+[node name="PowderKegSuppressTrailsCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 14
+text = "Suppress Powder Keg Trails"
 
 [node name="DebugHotkeyLabel" type="Label" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=1546782174]
 layout_mode = 2

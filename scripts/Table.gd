@@ -95,6 +95,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var aim_preview: AimPreview = $AimPreview
 @onready var spawn_system: SpawnSystem = $SpawnSystem
 @onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
+@onready var powder_keg_system: PowderKegSystem = $PowderKegSystem
 @onready var cue_controller: CueController = $CuePivot
 #endregion
 
@@ -145,6 +146,7 @@ func _ready() -> void:
 	aim_preview.setup(self)
 	spawn_system.setup(self)
 	wayfinder_system.setup(self)
+	powder_keg_system.setup(self)
 	_cache_table_geometry()
 	cue_controller.setup()
 	if Engine.is_editor_hint():
@@ -421,6 +423,9 @@ func _get_ball_pair_key(ball_a: Ball, ball_b: Ball) -> String:
 
 
 func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
+	if not ball_a.is_gameplay_active() or not ball_b.is_gameplay_active():
+		return
+
 	perf_ball_pair_checks += 1
 	var offset: Vector2 = ball_b.global_position - ball_a.global_position
 	var distance: float = offset.length()
@@ -442,6 +447,7 @@ func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
 		_note_chain_contact(ball_a, ball_b, pre_collision_velocity_a, pre_collision_velocity_b)
 	_note_actual_cue_ball_hit(ball_a, ball_b)
 	wayfinder_system.handle_collision(ball_a, ball_b)
+	powder_keg_system.handle_collision(ball_a, ball_b)
 
 
 func _separate_overlapping_balls(ball_a: Ball, ball_b: Ball, normal: Vector2, overlap: float) -> void:
@@ -520,6 +526,7 @@ func _get_moving_active_balls() -> Array[Ball]:
 # Maintains gameplay counters consumed by DebugOverlay.gd.
 # No debug UI ownership should live in Table.gd after this extraction.
 func _reset_performance_frame_stats() -> void:
+	_reset_ball_debug_frame_stats()
 	perf_ball_pair_checks = 0
 	perf_broadphase_candidate_pairs = 0
 	perf_spatial_grid_cells = 0
@@ -531,6 +538,13 @@ func _reset_performance_frame_stats() -> void:
 	perf_ball_collision_ms = 0.0
 	perf_rail_collision_ms = 0.0
 	perf_pocket_check_ms = 0.0
+
+
+func _reset_ball_debug_frame_stats() -> void:
+	for child in balls.get_children():
+		var ball := child as Ball
+		if ball != null:
+			ball.reset_trail_redraw_count()
 
 
 func _elapsed_ms_since(start_usec: int) -> float:
@@ -828,6 +842,11 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"stopped_balls": counts["stopped"],
 		"active_wayfinders": counts["active_wayfinders"],
 		"guided_wayfinder_targets": wayfinder_system.get_guided_target_count(),
+		"trail_points": counts["trail_points"],
+		"balls_with_trails": counts["balls_with_trails"],
+		"trail_redraws": counts["trail_redraws"],
+		"active_powder_keg_particle_bursts": powder_keg_system.get_active_particle_burst_count(),
+		"active_score_popup_labels": score_system.get_active_popup_label_count(),
 		"physics_substeps": PHYSICS_SUBSTEPS,
 		"spatial_grid_cells": perf_spatial_grid_cells,
 		"spatial_grid_max_cell_size": perf_spatial_grid_max_cell_size,
@@ -854,6 +873,9 @@ func _get_performance_ball_counts() -> Dictionary:
 		"moving": 0,
 		"stopped": 0,
 		"active_wayfinders": 0,
+		"trail_points": 0,
+		"balls_with_trails": 0,
+		"trail_redraws": 0,
 	}
 
 	for child in balls.get_children():
@@ -863,6 +885,10 @@ func _get_performance_ball_counts() -> Dictionary:
 		counts["total"] += 1
 		counts["moving"] += 1 if ball.is_moving() else 0
 		counts["active_wayfinders"] += 1 if ball.is_wayfinder and ball.wayfinder_active else 0
+		var trail_point_count: int = ball.get_trail_point_count()
+		counts["trail_points"] += trail_point_count
+		counts["balls_with_trails"] += 1 if trail_point_count > 0 else 0
+		counts["trail_redraws"] += ball.get_trail_redraw_count()
 
 	counts["stopped"] = max(counts["total"] - counts["moving"], 0)
 	return counts
@@ -874,6 +900,7 @@ func _get_ball_debug_snapshot(ball: Ball) -> Dictionary:
 		"is_cue_ball": ball == cue_ball,
 		"is_eight_ball": ball == eight_ball,
 		"is_wayfinder": ball.is_wayfinder,
+		"is_powder_keg": ball.is_powder_keg,
 		"wayfinder_active": ball.is_wayfinder and ball.wayfinder_active,
 		"guided": wayfinder_system.is_ball_guided(ball),
 		"gameplay_enabled": ball.gameplay_enabled,
@@ -900,9 +927,11 @@ func get_debug_spawn_hotkey_data() -> Dictionary:
 #region Callouts / Notifications
 # Center/top callouts are now reserved for spawn/drop-flow messages.
 # Future extraction candidate: HUD/CalloutSystem.
-func queue_spawn_reward_message(is_wayfinder: bool) -> void:
+func queue_spawn_reward_message(is_wayfinder: bool, is_powder_keg: bool = false) -> void:
 	if is_wayfinder:
 		_queue_result_message("WAYFINDER BALL DROPPED")
+	elif is_powder_keg:
+		_queue_result_message("POWDER KEG DROPPED")
 	else:
 		_queue_result_message("+1 BALL DROPPED")
 

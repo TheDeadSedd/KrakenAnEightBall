@@ -7,6 +7,7 @@ class_name SpawnSystem
 class SpawnBallRequest:
 	var ball_number := 1
 	var is_wayfinder := false
+	var is_powder_keg := false
 
 class StartingBallData:
 	var cue_ball: Ball
@@ -16,6 +17,8 @@ class StartingBallData:
 # Testing shortcuts for temporary debug spawning.
 const DEBUG_SPAWN_WAYFINDER_ENABLED := true
 const DEBUG_SPAWN_WAYFINDER_KEY := KEY_F
+const DEBUG_SPAWN_POWDER_KEG_ENABLED := true
+const DEBUG_SPAWN_POWDER_KEG_KEY := KEY_H
 const DEBUG_SPAWN_NORMAL_BALL_ENABLED := true
 const DEBUG_SPAWN_NORMAL_BALL_KEY := KEY_G
 
@@ -30,7 +33,9 @@ const RACK_SPACING_MULTIPLIER := 2.12
 
 # Reward spawn tuning.
 const BALLS_PER_REWARD_DROP := 3
-const WAYFINDER_SPAWN_CHANCE := 0.12
+const TOTAL_ANOMALY_SPAWN_CHANCE := 0.12
+const WAYFINDER_SPAWN_CHANCE := 0.06
+const POWDER_KEG_SPAWN_CHANCE := 0.06
 const SPAWN_SEARCH_CENTER := Vector2(960.0, 540.0)
 const SPAWN_SEARCH_STEP := 34.0
 const SPAWN_SEARCH_RINGS := 10
@@ -75,6 +80,10 @@ func try_handle_debug_spawn_input(event: InputEvent) -> bool:
 		queue_debug_wayfinder_spawn()
 		return true
 
+	if DEBUG_SPAWN_POWDER_KEG_ENABLED and key_event.keycode == DEBUG_SPAWN_POWDER_KEG_KEY:
+		queue_debug_powder_keg_spawn()
+		return true
+
 	if DEBUG_SPAWN_NORMAL_BALL_ENABLED and key_event.keycode == DEBUG_SPAWN_NORMAL_BALL_KEY:
 		queue_debug_normal_ball_spawn()
 		return true
@@ -95,19 +104,25 @@ func queue_spawn_reward(spawn_count: int) -> void:
 	for _spawn_index in range(spawn_count):
 		var request: SpawnBallRequest = _make_spawn_ball_request()
 		pending_spawn_requests.append(request)
-		table.queue_spawn_reward_message(request.is_wayfinder)
+		table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg)
 
 
 func queue_debug_wayfinder_spawn() -> void:
-	var request: SpawnBallRequest = _make_specific_spawn_request(true)
+	var request: SpawnBallRequest = _make_specific_spawn_request(true, false)
 	pending_spawn_requests.append(request)
-	table.queue_spawn_reward_message(request.is_wayfinder)
+	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg)
+
+
+func queue_debug_powder_keg_spawn() -> void:
+	var request: SpawnBallRequest = _make_specific_spawn_request(false, true)
+	pending_spawn_requests.append(request)
+	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg)
 
 
 func queue_debug_normal_ball_spawn() -> void:
-	var request: SpawnBallRequest = _make_specific_spawn_request(false)
+	var request: SpawnBallRequest = _make_specific_spawn_request(false, false)
 	pending_spawn_requests.append(request)
-	table.queue_spawn_reward_message(request.is_wayfinder)
+	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg)
 
 
 func process_spawn_queue(delta: float) -> void:
@@ -140,6 +155,7 @@ func get_cue_start() -> Vector2:
 func get_debug_spawn_hotkey_data() -> Dictionary:
 	return {
 		"wayfinder_spawn_key": DEBUG_SPAWN_WAYFINDER_KEY,
+		"powder_keg_spawn_key": DEBUG_SPAWN_POWDER_KEG_KEY,
 		"normal_spawn_key": DEBUG_SPAWN_NORMAL_BALL_KEY,
 	}
 
@@ -192,6 +208,14 @@ func _create_wayfinder_ball(number: int, color: Color, position: Vector2) -> Bal
 	return ball
 
 
+func _create_powder_keg_ball(number: int, color: Color, position: Vector2) -> Ball:
+	var ball := BALL_SCENE.instantiate() as Ball
+	table.balls.add_child(ball)
+	ball.global_position = position
+	ball.setup(Ball.BallType.OBJECT, number, color, false, true)
+	return ball
+
+
 func _ball_type_from_number(number: int) -> int:
 	if number == 8:
 		return Ball.BallType.EIGHT
@@ -222,14 +246,20 @@ func _ball_color(number: int) -> Color:
 func _make_spawn_ball_request() -> SpawnBallRequest:
 	var request: SpawnBallRequest = SpawnBallRequest.new()
 	request.ball_number = _get_next_spawn_ball_number()
-	request.is_wayfinder = randf() <= WAYFINDER_SPAWN_CHANCE
+	var anomaly_roll: float = randf()
+	if anomaly_roll > TOTAL_ANOMALY_SPAWN_CHANCE:
+		return request
+
+	request.is_wayfinder = anomaly_roll <= WAYFINDER_SPAWN_CHANCE
+	request.is_powder_keg = not request.is_wayfinder
 	return request
 
 
-func _make_specific_spawn_request(is_wayfinder: bool) -> SpawnBallRequest:
+func _make_specific_spawn_request(is_wayfinder: bool, is_powder_keg: bool) -> SpawnBallRequest:
 	var request: SpawnBallRequest = SpawnBallRequest.new()
 	request.ball_number = _get_next_spawn_ball_number()
 	request.is_wayfinder = is_wayfinder
+	request.is_powder_keg = is_powder_keg
 	return request
 
 
@@ -238,6 +268,8 @@ func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
 	var ball: Ball
 	if request.is_wayfinder:
 		ball = _create_wayfinder_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
+	elif request.is_powder_keg:
+		ball = _create_powder_keg_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
 	else:
 		ball = _create_ball(Ball.BallType.OBJECT, request.ball_number, _ball_color(request.ball_number), spawn_position)
 	ball.begin_spawn_drop(spawn_position)

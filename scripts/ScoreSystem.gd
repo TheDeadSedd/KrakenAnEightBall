@@ -76,6 +76,8 @@ class ScorePopup:
 	var pocket_radius := 0.0
 	var line_items: Array[Dictionary] = []
 	var event_labels: Array[Label] = []
+	var event_label_counts: Dictionary = {}
+	var event_label_indices: Dictionary = {}
 	var revealed_count := 0
 	var reveal_timer := 0.0
 	var hold_timer := 0.0
@@ -106,6 +108,21 @@ func _process(delta: float) -> void:
 
 func get_doubloons_total() -> int:
 	return doubloons_total
+
+
+func get_active_popup_label_count() -> int:
+	var label_count := 0
+	for popup_value in active_score_popups:
+		var popup: ScorePopup = popup_value as ScorePopup
+		if popup == null:
+			continue
+		for score_label in popup.score_labels:
+			if is_instance_valid(score_label):
+				label_count += 1
+		for event_label in popup.event_labels:
+			if is_instance_valid(event_label):
+				label_count += 1
+	return label_count
 
 
 func score_sunk_ball_snapshot(snapshot: Dictionary, sink_context: Dictionary = {}) -> void:
@@ -144,6 +161,8 @@ func _try_add_base_reward(ball_id: int, line_items: Array[Dictionary]) -> bool:
 func _try_add_event_rewards(ball_id: int, snapshot: Dictionary, line_items: Array[Dictionary]) -> void:
 	var awarded_events: Dictionary = _get_or_make_awarded_event_set(ball_id)
 	var snapshot_event_counts: Dictionary = {}
+	var grouped_rewards: Dictionary = {}
+	var grouped_reward_order: Array[String] = []
 	var events: Array = snapshot.get("events", [])
 	for event_type_value in events:
 		var event_type: String = str(event_type_value)
@@ -153,7 +172,47 @@ func _try_add_event_rewards(ball_id: int, snapshot: Dictionary, line_items: Arra
 			continue
 
 		_mark_event_reward_awarded(event_type, awarded_events, snapshot_event_counts)
-		line_items.append({"label": _get_event_reward_label(event_type), "amount": int(EVENT_REWARDS[event_type])})
+		_add_grouped_event_reward(event_type, grouped_rewards, grouped_reward_order)
+
+	_append_grouped_event_rewards(grouped_rewards, grouped_reward_order, line_items)
+
+
+func _add_grouped_event_reward(
+	event_type: String,
+	grouped_rewards: Dictionary,
+	grouped_reward_order: Array[String]
+) -> void:
+	if not grouped_rewards.has(event_type):
+		grouped_reward_order.append(event_type)
+		grouped_rewards[event_type] = {
+			"label": _get_event_reward_label(event_type),
+			"amount": 0,
+			"count": 0,
+		}
+
+	var reward_data: Dictionary = grouped_rewards[event_type]
+	reward_data["amount"] = int(reward_data["amount"]) + int(EVENT_REWARDS[event_type])
+	reward_data["count"] = int(reward_data["count"]) + 1
+
+
+func _append_grouped_event_rewards(
+	grouped_rewards: Dictionary,
+	grouped_reward_order: Array[String],
+	line_items: Array[Dictionary]
+) -> void:
+	for event_type in grouped_reward_order:
+		var reward_data: Dictionary = grouped_rewards[event_type]
+		var label_text: String = _get_grouped_reward_label(str(reward_data["label"]), int(reward_data["count"]))
+		line_items.append({
+			"label": label_text,
+			"amount": int(reward_data["amount"]),
+		})
+
+
+func _get_grouped_reward_label(label_text: String, event_count: int) -> String:
+	if event_count <= 1:
+		return label_text
+	return "%s x%s" % [label_text, event_count]
 
 
 func _event_reward_already_awarded(
@@ -725,23 +784,50 @@ func _show_event_label_for_latest_item(popup: ScorePopup) -> void:
 	if label_text == "Sink":
 		return
 
+	var event_count: int = int(popup.event_label_counts.get(label_text, 0)) + 1
+	popup.event_label_counts[label_text] = event_count
+	if popup.event_label_indices.has(label_text):
+		_update_grouped_event_label(popup, label_text, event_count)
+		return
+
 	var event_index: int = popup.event_labels.size()
 	var total_events: int = _get_total_event_label_count(popup)
 	var target_offset: Vector2 = _get_event_label_slot_offset(event_index, total_events, popup)
-	var event_label := _make_score_event_label("%s!" % label_text, event_index, _get_event_label_base_rotation(popup))
+	var event_label := _make_score_event_label(_get_grouped_event_label_text(label_text, event_count), event_index, _get_event_label_base_rotation(popup))
 	event_label.position = popup.anchor_position + popup.lifetime_drift + target_offset.normalized() * SCORE_EVENT_LABEL_START_DISTANCE
 	table.add_child(event_label)
 	_place_score_label_below_gameplay(event_label)
 	popup.event_labels.append(event_label)
+	popup.event_label_indices[label_text] = event_index
 	_erupt_score_event_label(event_label, popup, target_offset)
 
 
+func _update_grouped_event_label(popup: ScorePopup, label_text: String, event_count: int) -> void:
+	var event_index: int = int(popup.event_label_indices[label_text])
+	if event_index < 0 or event_index >= popup.event_labels.size():
+		return
+
+	var event_label: Label = popup.event_labels[event_index]
+	if not is_instance_valid(event_label):
+		return
+
+	event_label.text = _get_grouped_event_label_text(label_text, event_count)
+	_play_grouped_event_label_pop(event_label)
+
+
+func _get_grouped_event_label_text(label_text: String, event_count: int) -> String:
+	if event_count <= 1:
+		return "%s!" % label_text
+	return "%s x%s!" % [label_text, event_count]
+
+
 func _get_total_event_label_count(popup: ScorePopup) -> int:
-	var event_count := 0
+	var event_types: Dictionary = {}
 	for line_item in popup.line_items:
-		if str(line_item["label"]) != "Sink":
-			event_count += 1
-	return max(event_count, 1)
+		var label_text: String = str(line_item["label"])
+		if label_text != "Sink":
+			event_types[label_text] = true
+	return max(event_types.size(), 1)
 
 
 func _get_event_label_slot_offset(event_index: int, total_events: int, popup: ScorePopup) -> Vector2:
@@ -804,6 +890,16 @@ func _erupt_score_event_label(label: Label, popup: ScorePopup, target_offset: Ve
 	tween.tween_property(label, "scale", SCORE_EVENT_LABEL_POP_SCALE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.55).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tween.chain().tween_property(label, "modulate", SCORE_LABEL_BASE_MODULATE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.45).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tween.chain().tween_property(label, "scale", Vector2.ONE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.45)
+
+
+func _play_grouped_event_label_pop(label: Label) -> void:
+	_spawn_reveal_glow(label)
+	var tween: Tween = table.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(label, "modulate", SCORE_LABEL_POP_FLASH_COLOR, SCORE_EVENT_LABEL_ERUPT_TIME * 0.45)
+	tween.tween_property(label, "scale", SCORE_EVENT_LABEL_POP_SCALE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.chain().tween_property(label, "modulate", SCORE_LABEL_BASE_MODULATE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.35).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.chain().tween_property(label, "scale", Vector2.ONE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.35)
 
 
 func _update_score_popup_drift(popup: ScorePopup, delta: float) -> void:

@@ -15,6 +15,9 @@ const PERFORMANCE_OVERLAY_DRAG_HEIGHT := 34.0
 @onready var shot_path_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/ShotPathCheckBox
 @onready var physics_debug_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PhysicsDebugCheckBox
 @onready var performance_overlay_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PerformanceOverlayCheckBox
+@onready var powder_keg_particles_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PowderKegParticlesCheckBox
+@onready var powder_keg_reduced_particles_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PowderKegReducedParticlesCheckBox
+@onready var powder_keg_suppress_trails_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PowderKegSuppressTrailsCheckBox
 @onready var debug_hotkey_label: Label = $DebugMenuPanel/Margin/VBox/DebugHotkeyLabel
 
 var table: BilliardsTable
@@ -30,6 +33,7 @@ func setup(table_ref: BilliardsTable) -> void:
 	shot_path_check_box.set_pressed_no_signal(table.is_shot_path_debug_enabled())
 	physics_debug_check_box.set_pressed_no_signal(false)
 	performance_overlay_check_box.set_pressed_no_signal(false)
+	_sync_powder_keg_debug_toggles()
 	debug_hotkey_label.text = _make_debug_hotkey_text()
 	_connect_debug_controls()
 
@@ -41,6 +45,12 @@ func _connect_debug_controls() -> void:
 		physics_debug_check_box.toggled.connect(_on_physics_debug_toggled)
 	if not performance_overlay_check_box.toggled.is_connected(_on_performance_overlay_toggled):
 		performance_overlay_check_box.toggled.connect(_on_performance_overlay_toggled)
+	if not powder_keg_particles_check_box.toggled.is_connected(_on_powder_keg_particles_toggled):
+		powder_keg_particles_check_box.toggled.connect(_on_powder_keg_particles_toggled)
+	if not powder_keg_reduced_particles_check_box.toggled.is_connected(_on_powder_keg_reduced_particles_toggled):
+		powder_keg_reduced_particles_check_box.toggled.connect(_on_powder_keg_reduced_particles_toggled)
+	if not powder_keg_suppress_trails_check_box.toggled.is_connected(_on_powder_keg_suppress_trails_toggled):
+		powder_keg_suppress_trails_check_box.toggled.connect(_on_powder_keg_suppress_trails_toggled)
 
 
 func _input(event: InputEvent) -> void:
@@ -133,10 +143,29 @@ func _on_performance_overlay_toggled(enabled: bool) -> void:
 		performance_overlay_label.text = _make_performance_debug_text()
 
 
+func _sync_powder_keg_debug_toggles() -> void:
+	powder_keg_particles_check_box.set_pressed_no_signal(table.powder_keg_system.explosion_particles_enabled)
+	powder_keg_reduced_particles_check_box.set_pressed_no_signal(table.powder_keg_system.reduced_particle_test_enabled)
+	powder_keg_suppress_trails_check_box.set_pressed_no_signal(table.powder_keg_system.suppress_trails_after_explosion)
+
+
+func _on_powder_keg_particles_toggled(enabled: bool) -> void:
+	table.powder_keg_system.explosion_particles_enabled = enabled
+
+
+func _on_powder_keg_reduced_particles_toggled(enabled: bool) -> void:
+	table.powder_keg_system.reduced_particle_test_enabled = enabled
+
+
+func _on_powder_keg_suppress_trails_toggled(enabled: bool) -> void:
+	table.powder_keg_system.suppress_trails_after_explosion = enabled
+
+
 func _make_debug_hotkey_text() -> String:
 	var hotkeys: Dictionary = table.get_debug_spawn_hotkey_data()
-	return "%s: Spawn Wayfinder Ball\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
+	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
 		OS.get_keycode_string(int(hotkeys["wayfinder_spawn_key"])),
+		OS.get_keycode_string(int(hotkeys["powder_keg_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["normal_spawn_key"])),
 		OS.get_keycode_string(PERFORMANCE_OVERLAY_TOGGLE_KEY),
 	]
@@ -175,6 +204,13 @@ func _make_performance_debug_text() -> String:
 			snapshot["active_wayfinders"],
 			snapshot["guided_wayfinder_targets"],
 		],
+		"Trails: %s points / %s balls" % [
+			snapshot["trail_points"],
+			snapshot["balls_with_trails"],
+		],
+		"Trail redraws: %s" % snapshot["trail_redraws"],
+		"Powder Keg particle bursts: %s" % snapshot["active_powder_keg_particle_bursts"],
+		"Score popup labels: %s" % snapshot["active_score_popup_labels"],
 		"Substeps: %s" % snapshot["physics_substeps"],
 		"Grid cells: %s / max cell: %s" % [
 			snapshot["spatial_grid_cells"],
@@ -223,6 +259,8 @@ func _get_ball_debug_name(ball_data: Dictionary) -> String:
 		return "8 Ball"
 	if bool(ball_data["is_wayfinder"]):
 		return "Wayfinder Ball"
+	if bool(ball_data["is_powder_keg"]):
+		return "Powder Keg"
 	return "Ball %s" % ball_data["ball_number"]
 
 

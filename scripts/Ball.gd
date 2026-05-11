@@ -18,6 +18,10 @@ const WAYFINDER_BASE_COLOR := Color("2f9f96")
 const WAYFINDER_MARK_COLOR := Color("f3d27a")
 const WAYFINDER_ACTIVE_GLOW_COLOR := Color("8ef7ea")
 const WAYFINDER_RING_COLOR := Color("173d3a")
+const POWDER_KEG_BASE_COLOR := Color("7b4723")
+const POWDER_KEG_BAND_COLOR := Color("e0b15e")
+const POWDER_KEG_STAVE_COLOR := Color("4a2714")
+const POWDER_KEG_FUSE_COLOR := Color("f6d07c")
 const DEBUG_WAYFINDER := false
 
 @export var ball_type := BallType.OBJECT
@@ -69,6 +73,7 @@ var gameplay_enabled := true
 # Wayfinder state stays intentionally small: anomaly identity plus current activation.
 var is_wayfinder := false
 var wayfinder_active := false
+var is_powder_keg := false
 
 var _spawn_drop_active := false
 var _spawn_drop_elapsed := 0.0
@@ -80,6 +85,8 @@ var _spawn_drop_horizontal_offset := Vector2.ZERO
 var _spawn_landing_damping_remaining := 0.0
 var _trail_points: Array[TrailPoint] = []
 var _last_trail_position := Vector2.ZERO
+var _trail_suppression_remaining := 0.0
+var _trail_redraws_this_frame := 0
 
 
 func _ready() -> void:
@@ -100,11 +107,38 @@ func _process(delta: float) -> void:
 	_update_trail(delta)
 
 
-func setup(new_type: int, new_number: int, new_color: Color, new_is_wayfinder: bool = false) -> void:
+func suppress_trail_for(duration: float) -> void:
+	_trail_suppression_remaining = max(_trail_suppression_remaining, duration)
+	if not _trail_points.is_empty():
+		_trail_points.clear()
+		_queue_trail_redraw()
+	_last_trail_position = global_position
+
+
+func get_trail_point_count() -> int:
+	return _trail_points.size()
+
+
+func get_trail_redraw_count() -> int:
+	return _trail_redraws_this_frame
+
+
+func reset_trail_redraw_count() -> void:
+	_trail_redraws_this_frame = 0
+
+
+func setup(
+	new_type: int,
+	new_number: int,
+	new_color: Color,
+	new_is_wayfinder: bool = false,
+	new_is_powder_keg: bool = false
+) -> void:
 	ball_type = new_type
 	ball_number = new_number
 	ball_color = new_color
 	is_wayfinder = new_is_wayfinder
+	is_powder_keg = new_is_powder_keg
 	_reset_wayfinder_state()
 	_update_label()
 	_update_number_color()
@@ -199,6 +233,7 @@ func sink() -> void:
 	_spawn_drop_visual_lean_direction = Vector2.ZERO
 	_spawn_drop_horizontal_offset = Vector2.ZERO
 	_spawn_landing_damping_remaining = 0.0
+	_trail_suppression_remaining = 0.0
 	_trail_points.clear()
 	visible = false
 	sunk.emit(self)
@@ -217,6 +252,7 @@ func respawn_at(new_position: Vector2) -> void:
 	_spawn_drop_visual_lean_direction = Vector2.ZERO
 	_spawn_drop_horizontal_offset = Vector2.ZERO
 	_spawn_landing_damping_remaining = 0.0
+	_trail_suppression_remaining = 0.0
 	_reset_trail()
 
 
@@ -362,17 +398,29 @@ func _get_random_spawn_settle_velocity() -> Vector2:
 
 
 func _update_trail(delta: float) -> void:
+	if _trail_suppression_remaining > 0.0:
+		_trail_suppression_remaining = max(_trail_suppression_remaining - delta, 0.0)
+		_last_trail_position = global_position
+		if not _trail_points.is_empty():
+			_trail_points.clear()
+			_queue_trail_redraw()
+		return
+
 	if not trail_enabled:
 		if not _trail_points.is_empty():
 			_trail_points.clear()
-			queue_redraw()
+			_queue_trail_redraw()
+		return
+
+	if _trail_points.is_empty() and _is_below_trail_speed():
+		_last_trail_position = global_position
 		return
 
 	_age_trail_points(delta)
 	_try_add_trail_point()
 
 	if not _trail_points.is_empty():
-		queue_redraw()
+		_queue_trail_redraw()
 
 
 func _age_trail_points(delta: float) -> void:
@@ -390,7 +438,7 @@ func _try_add_trail_point() -> void:
 	if not visible or not gameplay_enabled:
 		return
 
-	if velocity.length() < trail_speed_threshold:
+	if _is_below_trail_speed():
 		_last_trail_position = global_position
 		return
 
@@ -403,9 +451,18 @@ func _try_add_trail_point() -> void:
 	_last_trail_position = global_position
 
 
+func _is_below_trail_speed() -> bool:
+	return velocity.length() < trail_speed_threshold
+
+
 func _reset_trail() -> void:
 	_trail_points.clear()
 	_last_trail_position = global_position
+	_queue_trail_redraw()
+
+
+func _queue_trail_redraw() -> void:
+	_trail_redraws_this_frame += 1
 	queue_redraw()
 
 
@@ -415,7 +472,7 @@ func _update_label_layout() -> void:
 
 
 func _update_label() -> void:
-	if ball_type == BallType.CUE or is_wayfinder:
+	if ball_type == BallType.CUE or is_wayfinder or is_powder_keg:
 		number_label.text = ""
 	else:
 		number_label.text = str(ball_number)
@@ -424,6 +481,8 @@ func _update_label() -> void:
 func _update_number_color() -> void:
 	if is_wayfinder:
 		number_label.add_theme_color_override("font_color", Color("082522"))
+	elif is_powder_keg:
+		number_label.add_theme_color_override("font_color", Color("f9edd2"))
 	elif ball_type == BallType.EIGHT:
 		number_label.add_theme_color_override("font_color", Color.WHITE)
 	else:
@@ -506,11 +565,16 @@ func _draw() -> void:
 	if is_wayfinder:
 		draw_arc(origin, radius - 3.2, 0.0, TAU, 40, WAYFINDER_RING_COLOR, 1.6)
 		_draw_wayfinder_mark(origin)
+	elif is_powder_keg:
+		_draw_powder_keg_mark(origin)
 
 	draw_circle(origin + Vector2(-radius * 0.32, -radius * 0.36), radius * highlight_scale, shine_color)
 
 
 func _get_display_color() -> Color:
+	if is_powder_keg:
+		return POWDER_KEG_BASE_COLOR
+
 	if not is_wayfinder:
 		return ball_color
 
@@ -556,6 +620,33 @@ func _draw_wayfinder_mark(origin: Vector2) -> void:
 		PackedVector2Array([north_tip, north_left, origin, north_right]),
 		Color(0.96, 0.84, 0.48, 0.9)
 	)
+
+
+func _draw_powder_keg_mark(origin: Vector2) -> void:
+	var hoop_y_offset: float = radius * 0.36
+	draw_arc(origin + Vector2(0, -hoop_y_offset), radius * 0.82, 0.0, TAU, 34, POWDER_KEG_BAND_COLOR, 2.2)
+	draw_arc(origin + Vector2(0, hoop_y_offset), radius * 0.78, 0.0, TAU, 34, POWDER_KEG_BAND_COLOR, 2.0)
+	draw_line(
+		origin + Vector2(-radius * 0.34, -radius * 0.58),
+		origin + Vector2(-radius * 0.18, radius * 0.58),
+		POWDER_KEG_STAVE_COLOR,
+		1.6
+	)
+	draw_line(
+		origin + Vector2(radius * 0.10, -radius * 0.6),
+		origin + Vector2(radius * 0.28, radius * 0.56),
+		POWDER_KEG_STAVE_COLOR,
+		1.6
+	)
+	draw_circle(origin, radius * 0.15, Color("1e120c"))
+	draw_arc(origin, radius * 0.15, 0.0, TAU, 20, POWDER_KEG_BAND_COLOR, 1.0)
+	draw_line(
+		origin + Vector2(radius * 0.08, -radius * 0.82),
+		origin + Vector2(radius * 0.26, -radius * 1.18),
+		POWDER_KEG_FUSE_COLOR,
+		1.7
+	)
+	draw_circle(origin + Vector2(radius * 0.28, -radius * 1.22), 2.4, Color(1.0, 0.76, 0.34, 0.9))
 
 
 func _draw_wayfinder_aura(origin: Vector2) -> void:
