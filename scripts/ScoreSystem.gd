@@ -18,9 +18,25 @@ const SCORE_POPUP_REVEAL_DELAY := 0.5
 const SCORE_POPUP_MIN_HOLD_TIME := 1.0
 const SCORE_POPUP_HOLD_PER_ITEM := 0.35
 const SCORE_POPUP_FADE_TIME := 0.28
-const SCORE_POPUP_SIZE := Vector2(360, 44)
 const SCORE_POPUP_OUTWARD_DRIFT_DISTANCE := 18.0
+const SCORE_POPUP_LIFETIME_DRIFT_SPEED := 8.0
+const SCORE_POPUP_START_SCALE := Vector2(0.82, 0.82)
+const SCORE_POPUP_POP_SCALE := Vector2(1.15, 1.15)
+const SCORE_POPUP_FINAL_PULSE_SCALE := Vector2(1.08, 1.08)
+const SCORE_POPUP_POP_IN_TIME := 0.1
+const SCORE_POPUP_SETTLE_TIME := 0.1
+const SCORE_SEGMENT_CHAR_WIDTH := 13.0
+const SCORE_SEGMENT_HEIGHT := 36.0
+const SCORE_SEGMENT_GAP := 6.0
+const SCORE_SEGMENT_ARC_DEPTH := 16.0
+const SCORE_SEGMENT_ARC_ROTATION_DEGREES := 10.0
+const SCORE_SIDE_POCKET_X_TOLERANCE_RATIO := 0.18
+const CORNER_SCORE_ARC_PADDING := 18.0
+const CORNER_SCORE_SEGMENT_SPACING := 42.0
+const CORNER_SCORE_STRAIGHT_EXTENSION := 80.0
 const SCORE_EVENT_LABEL_ERUPT_TIME := 0.18
+const SCORE_EVENT_LABEL_START_SCALE := Vector2(0.76, 0.76)
+const SCORE_EVENT_LABEL_POP_SCALE := Vector2(1.12, 1.12)
 const SCORE_EVENT_LABEL_ANGLE_MIN_DEGREES := 30.0
 const SCORE_EVENT_LABEL_ANGLE_MAX_DEGREES := 70.0
 const SCORE_EVENT_LABEL_DISTANCE := 64.0
@@ -37,10 +53,15 @@ const EVENT_REWARDS := {
 
 class ScorePopup:
 	var ball_id := 0
-	var label: Label
+	var score_labels: Array[Label] = []
 	var anchor_position := Vector2.ZERO
 	var outward_direction := Vector2.UP
+	var inward_direction := Vector2.DOWN
+	var tangent_direction := Vector2.RIGHT
+	var lifetime_drift := Vector2.ZERO
 	var line_rotation := 0.0
+	var is_corner_pocket := false
+	var pocket_radius := 0.0
 	var line_items: Array[Dictionary] = []
 	var event_labels: Array[Label] = []
 	var revealed_count := 0
@@ -176,49 +197,54 @@ func _get_popup_anchor_position(ball_id: int) -> Vector2:
 	return context.get("pocket_position", Vector2.ZERO)
 
 
+func _get_popup_pocket_radius(ball_id: int) -> float:
+	var context: Dictionary = sink_contexts_by_ball.get(ball_id, {})
+	return float(context.get("pocket_radius", 0.0))
+
+
 func _get_popup_outward_direction(ball_id: int) -> Vector2:
 	var context: Dictionary = sink_contexts_by_ball.get(ball_id, {})
 	var pocket_position: Vector2 = context.get("pocket_position", Vector2.ZERO)
-	var pocket_direction: Vector2 = _get_popup_incoming_direction(ball_id)
-	return _choose_perpendicular_popup_direction(pocket_position, Vector2(-pocket_direction.y, pocket_direction.x))
+	return -_get_popup_inward_direction_from_position(pocket_position)
 
 
-func _get_popup_line_rotation(ball_id: int) -> float:
-	var perpendicular_rotation: float = _get_popup_incoming_direction(ball_id).angle() + PI / 2.0
-	return _get_readable_popup_rotation(perpendicular_rotation)
+func _get_popup_tangent_direction(ball_id: int, is_corner_pocket: bool) -> Vector2:
+	if is_corner_pocket:
+		return Vector2.RIGHT
+
+	var inward_direction: Vector2 = _get_popup_inward_direction(ball_id)
+	return _get_readable_popup_tangent(inward_direction)
 
 
-func _get_readable_popup_rotation(line_rotation: float) -> float:
-	var line_axis: Vector2 = Vector2.RIGHT.rotated(line_rotation)
-	if line_axis.dot(Vector2.RIGHT) < 0.0:
-		return line_rotation + PI
-	return line_rotation
-
-
-func _get_popup_incoming_direction(ball_id: int) -> Vector2:
+func _get_popup_inward_direction(ball_id: int) -> Vector2:
 	var context: Dictionary = sink_contexts_by_ball.get(ball_id, {})
 	var pocket_position: Vector2 = context.get("pocket_position", Vector2.ZERO)
-	var sink_position: Vector2 = context.get("sink_position", pocket_position)
-	var sink_velocity: Vector2 = context.get("sink_velocity", Vector2.ZERO)
-	return _get_pocket_entry_direction(sink_position, pocket_position, sink_velocity)
+	return _get_popup_inward_direction_from_position(pocket_position)
 
 
-func _get_pocket_entry_direction(sink_position: Vector2, pocket_position: Vector2, sink_velocity: Vector2) -> Vector2:
-	if sink_velocity.length() > 0.0:
-		return sink_velocity.normalized()
-	var direction: Vector2 = pocket_position - sink_position
-	if direction.length() > 0.0:
-		return direction.normalized()
-	return Vector2.UP
+func _get_popup_inward_direction_from_position(pocket_position: Vector2) -> Vector2:
+	var inward_direction: Vector2 = table.playfield_rect.get_center() - pocket_position
+	if inward_direction.length() <= 0.0:
+		return Vector2.DOWN
+	return inward_direction.normalized()
 
 
-func _choose_perpendicular_popup_direction(pocket_position: Vector2, perpendicular: Vector2) -> Vector2:
-	var center: Vector2 = table.playfield_rect.get_center()
-	var first_candidate: Vector2 = pocket_position + perpendicular
-	var second_candidate: Vector2 = pocket_position - perpendicular
-	if first_candidate.distance_squared_to(center) > second_candidate.distance_squared_to(center):
-		return perpendicular
-	return -perpendicular
+func _get_readable_popup_tangent(inward_direction: Vector2) -> Vector2:
+	var tangent_direction: Vector2 = inward_direction.rotated(PI / 2.0).normalized()
+	# Keep the score chain advancing in screen-reading order after deriving
+	# its basis from the authored pocket center.
+	if tangent_direction.x < -0.001 or (abs(tangent_direction.x) <= 0.001 and tangent_direction.y < 0.0):
+		return -tangent_direction
+	return tangent_direction
+
+
+func _is_corner_pocket_position(pocket_position: Vector2) -> bool:
+	if pocket_position == Vector2.ZERO:
+		return false
+
+	var playfield_center_x: float = table.playfield_rect.get_center().x
+	var side_pocket_tolerance: float = table.playfield_rect.size.x * SCORE_SIDE_POCKET_X_TOLERANCE_RATIO
+	return abs(pocket_position.x - playfield_center_x) > side_pocket_tolerance
 
 
 func _sum_line_items(line_items: Array[Dictionary]) -> int:
@@ -263,12 +289,13 @@ func _get_or_create_score_popup(ball_id: int) -> ScorePopup:
 
 	var popup: ScorePopup = ScorePopup.new()
 	popup.ball_id = ball_id
+	popup.inward_direction = _get_popup_inward_direction(ball_id)
 	popup.anchor_position = _get_popup_anchor_position(ball_id)
+	popup.pocket_radius = _get_popup_pocket_radius(ball_id)
+	popup.is_corner_pocket = _is_corner_pocket_position(popup.anchor_position)
 	popup.outward_direction = _get_popup_outward_direction(ball_id)
-	popup.line_rotation = _get_popup_line_rotation(ball_id)
-	popup.label = _make_score_popup_label(popup.anchor_position, popup.line_rotation)
-	table.add_child(popup.label)
-	_place_score_label_below_gameplay(popup.label)
+	popup.tangent_direction = _get_popup_tangent_direction(ball_id, popup.is_corner_pocket)
+	popup.line_rotation = popup.tangent_direction.angle()
 	score_popups_by_ball[ball_id] = popup
 	active_score_popups.append(popup)
 	return popup
@@ -278,6 +305,7 @@ func _update_score_popup(popup: ScorePopup, delta: float) -> void:
 	if popup == null or popup.removal_started:
 		return
 
+	_update_score_popup_drift(popup, delta)
 	if popup.revealed_count < popup.line_items.size():
 		popup.reveal_timer -= delta
 		if popup.reveal_timer <= 0.0:
@@ -293,36 +321,32 @@ func _reveal_next_score_item(popup: ScorePopup) -> void:
 	if popup.revealed_count >= popup.line_items.size():
 		return
 
-	if popup.revealed_count == 0:
-		_show_score_popup_label(popup)
 	popup.revealed_count += 1
-	_update_score_popup_text(popup)
+	_update_score_popup_segments(popup)
 	_show_event_label_for_latest_item(popup)
+	if popup.revealed_count >= popup.line_items.size() and popup.line_items.size() > 1:
+		_pulse_final_score_total(popup)
 	popup.reveal_timer = SCORE_POPUP_REVEAL_DELAY
 
 
-func _show_score_popup_label(popup: ScorePopup) -> void:
-	var color: Color = popup.label.modulate
-	color.a = 1.0
-	popup.label.modulate = color
+func _update_score_popup_segments(popup: ScorePopup) -> void:
+	var score_segments: Array[String] = _get_score_segments(popup)
+	_sync_score_segment_labels(popup, score_segments)
+	_layout_score_segment_labels(popup, score_segments)
 
 
-func _update_score_popup_text(popup: ScorePopup) -> void:
-	popup.label.text = _make_score_popup_text(popup)
-	popup.label.position = popup.anchor_position - SCORE_POPUP_SIZE * 0.5
-	popup.label.rotation = popup.line_rotation
-
-
-func _make_score_popup_text(popup: ScorePopup) -> String:
-	var amount_text := ""
+func _get_score_segments(popup: ScorePopup) -> Array[String]:
+	var segments: Array[String] = ["Sink!"]
 	var revealed_total := 0
 	for index in range(popup.revealed_count):
 		var line_item: Dictionary = popup.line_items[index]
-		amount_text += "+%s" % int(line_item["amount"])
-		revealed_total += int(line_item["amount"])
+		var amount: int = int(line_item["amount"])
+		segments.append("+%s" % amount)
+		revealed_total += amount
 
-	var total_text := "=%s" % revealed_total if popup.revealed_count >= popup.line_items.size() else ""
-	return "Sink! %s%s" % [amount_text, total_text]
+	if popup.revealed_count >= popup.line_items.size():
+		segments.append("=%s" % revealed_total)
+	return segments
 
 
 func _print_score_breakdown(
@@ -357,15 +381,43 @@ func _get_event_reward_label(event_type: String) -> String:
 			return event_type.capitalize()
 
 
-func _make_score_popup_label(anchor_position: Vector2, line_rotation: float) -> Label:
+func _sync_score_segment_labels(popup: ScorePopup, score_segments: Array[String]) -> void:
+	for index in range(score_segments.size()):
+		if index >= popup.score_labels.size():
+			_add_score_segment_label(popup, score_segments[index])
+		else:
+			popup.score_labels[index].text = score_segments[index]
+	_trim_stale_score_segment_labels(popup, score_segments.size())
+
+
+func _trim_stale_score_segment_labels(popup: ScorePopup, active_segment_count: int) -> void:
+	while popup.score_labels.size() > active_segment_count:
+		var stale_label: Label = popup.score_labels.pop_back()
+		if is_instance_valid(stale_label):
+			stale_label.queue_free()
+
+
+func _add_score_segment_label(popup: ScorePopup, text: String) -> void:
+	var label: Label = _make_score_segment_label(text)
+	table.add_child(label)
+	_place_score_label_below_gameplay(label)
+	popup.score_labels.append(label)
+	_play_score_segment_pop_in(label)
+
+
+func _make_score_segment_label(text: String) -> Label:
 	var label := Label.new()
-	label.size = SCORE_POPUP_SIZE
-	label.position = anchor_position - SCORE_POPUP_SIZE * 0.5
-	label.pivot_offset = SCORE_POPUP_SIZE * 0.5
-	label.rotation = line_rotation
+	label.text = text
+	label.scale = SCORE_POPUP_START_SCALE
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_apply_score_segment_theme(label)
+	label.modulate = Color(1, 1, 1, 0)
+	return label
+
+
+func _apply_score_segment_theme(label: Label) -> void:
 	label.add_theme_font_override("font", UI_FONT)
 	label.add_theme_font_size_override("font_size", 28)
 	label.add_theme_color_override("font_color", Color(1.0, 0.86, 0.36))
@@ -374,8 +426,234 @@ func _make_score_popup_label(anchor_position: Vector2, line_rotation: float) -> 
 	label.add_theme_constant_override("shadow_offset_x", 2)
 	label.add_theme_constant_override("shadow_offset_y", 2)
 	label.add_theme_constant_override("outline_size", 4)
-	label.modulate = Color(1, 1, 1, 0)
-	return label
+
+
+func _layout_score_segment_labels(popup: ScorePopup, score_segments: Array[String]) -> void:
+	var widths: Array[float] = _get_score_segment_widths(score_segments)
+	if popup.is_corner_pocket:
+		_layout_corner_score_segment_labels(popup, widths)
+		return
+
+	_layout_side_score_segment_labels(popup, widths)
+
+
+func _layout_side_score_segment_labels(popup: ScorePopup, widths: Array[float]) -> void:
+	var total_width: float = _get_score_segment_total_width(widths)
+	var cursor_x: float = -total_width * 0.5
+	for index in range(widths.size()):
+		var label: Label = popup.score_labels[index]
+		var width: float = widths[index]
+		var local_x: float = cursor_x + width * 0.5
+		var center: Vector2 = _get_score_segment_center(popup, local_x, total_width)
+		_layout_score_segment_label(label, center, width, local_x, total_width, popup)
+		cursor_x += width + SCORE_SEGMENT_GAP
+
+
+func _layout_corner_score_segment_labels(popup: ScorePopup, widths: Array[float]) -> void:
+	var arc_radius: float = _get_corner_score_arc_radius(popup)
+	var distances: Array[float] = _get_corner_score_segment_distances(widths, arc_radius)
+	for index in range(widths.size()):
+		var label: Label = popup.score_labels[index]
+		var path_point: Dictionary = _get_corner_score_path_point(popup, distances[index], arc_radius)
+		var center: Vector2 = path_point["position"]
+		var rotation: float = float(path_point["rotation"])
+		_apply_score_segment_label_layout(label, center, widths[index], rotation)
+
+
+func _get_score_segment_widths(score_segments: Array[String]) -> Array[float]:
+	var widths: Array[float] = []
+	for segment in score_segments:
+		widths.append(max(36.0, float(segment.length()) * SCORE_SEGMENT_CHAR_WIDTH))
+	return widths
+
+
+func _get_score_segment_total_width(widths: Array[float]) -> float:
+	var total_width := 0.0
+	for width in widths:
+		total_width += width
+	return total_width + SCORE_SEGMENT_GAP * max(widths.size() - 1, 0)
+
+
+func _get_score_segment_center(popup: ScorePopup, local_x: float, total_width: float) -> Vector2:
+	var arc_ratio: float = _get_score_segment_arc_ratio(local_x, total_width)
+	var arc_depth: float = _get_score_segment_arc_depth(popup)
+	var arc_offset: Vector2 = popup.inward_direction * arc_depth * arc_ratio
+	return _get_score_chain_anchor(popup) + popup.tangent_direction * local_x + arc_offset
+
+
+func _get_score_chain_anchor(popup: ScorePopup) -> Vector2:
+	return popup.anchor_position + popup.lifetime_drift
+
+
+func _get_score_segment_arc_depth(popup: ScorePopup) -> float:
+	return SCORE_SEGMENT_ARC_DEPTH
+
+
+func _layout_score_segment_label(
+	label: Label,
+	center: Vector2,
+	width: float,
+	local_x: float,
+	total_width: float,
+	popup: ScorePopup
+) -> void:
+	var rotation: float = _get_score_segment_rotation(local_x, total_width, popup)
+	_apply_score_segment_label_layout(label, center, width, rotation)
+
+
+func _apply_score_segment_label_layout(label: Label, center: Vector2, width: float, rotation: float) -> void:
+	label.size = Vector2(width, SCORE_SEGMENT_HEIGHT)
+	label.pivot_offset = label.size * 0.5
+	label.position = center - label.size * 0.5
+	label.rotation = rotation
+
+
+func _get_score_segment_rotation(local_x: float, total_width: float, popup: ScorePopup) -> float:
+	var arc_ratio: float = 0.0 if total_width <= 0.0 else clamp(local_x / (total_width * 0.5), -1.0, 1.0)
+	var arc_rotation: float = _get_score_segment_arc_rotation_degrees(popup)
+	var local_rotation := deg_to_rad(arc_rotation) * arc_ratio
+	return popup.line_rotation + local_rotation
+
+
+func _get_score_segment_arc_rotation_degrees(popup: ScorePopup) -> float:
+	return SCORE_SEGMENT_ARC_ROTATION_DEGREES
+
+
+func _get_score_segment_arc_ratio(local_x: float, total_width: float) -> float:
+	if total_width <= 0.0:
+		return 0.0
+	return pow(abs(local_x) / (total_width * 0.5), 2.0)
+
+
+func _get_corner_score_arc_radius(popup: ScorePopup) -> float:
+	return max(popup.pocket_radius + CORNER_SCORE_ARC_PADDING, CORNER_SCORE_ARC_PADDING)
+
+
+func _get_corner_score_segment_distances(widths: Array[float], arc_radius: float) -> Array[float]:
+	var distances: Array[float] = []
+	var cursor := 0.0
+	for width in widths:
+		var slot_width: float = max(width, CORNER_SCORE_SEGMENT_SPACING)
+		distances.append(cursor + slot_width * 0.5)
+		cursor += slot_width + SCORE_SEGMENT_GAP
+
+	var raw_total: float = max(cursor - SCORE_SEGMENT_GAP, 0.0)
+	var target_total: float = _get_corner_score_path_length(raw_total, widths.size(), arc_radius)
+	var scale: float = target_total / raw_total if raw_total > 0.0 else 1.0
+	for index in range(distances.size()):
+		distances[index] = (distances[index] - raw_total * 0.5) * scale
+	return distances
+
+
+func _get_corner_score_path_length(raw_total: float, segment_count: int, arc_radius: float) -> float:
+	if segment_count < 4:
+		return raw_total
+
+	var arc_length: float = arc_radius * PI * 0.5
+	var extended_length: float = arc_length + CORNER_SCORE_STRAIGHT_EXTENSION * 2.0
+	return max(raw_total, extended_length)
+
+
+func _get_corner_score_path_point(popup: ScorePopup, path_distance: float, arc_radius: float) -> Dictionary:
+	var arc_angles: Array = _get_corner_score_arc_angles(popup.anchor_position)
+	var start_angle: float = float(arc_angles[0])
+	var end_angle: float = float(arc_angles[1])
+	var angle_delta: float = end_angle - start_angle
+	var arc_length: float = abs(angle_delta) * arc_radius
+	var half_arc: float = arc_length * 0.5
+	var arc_center: Vector2 = popup.anchor_position + popup.lifetime_drift
+	return _get_corner_score_path_point_for_distance(path_distance, half_arc, arc_center, arc_radius, start_angle, end_angle)
+
+
+func _get_corner_score_path_point_for_distance(
+	path_distance: float,
+	half_arc: float,
+	arc_center: Vector2,
+	arc_radius: float,
+	start_angle: float,
+	end_angle: float
+) -> Dictionary:
+	var direction_sign := 1.0 if end_angle >= start_angle else -1.0
+	if path_distance < -half_arc:
+		return _get_corner_straight_path_point(arc_center, arc_radius, start_angle, direction_sign, path_distance + half_arc)
+	if path_distance > half_arc:
+		return _get_corner_straight_path_point(arc_center, arc_radius, end_angle, direction_sign, path_distance - half_arc)
+	return _get_corner_arc_path_point(arc_center, arc_radius, start_angle, end_angle, path_distance, half_arc)
+
+
+func _get_corner_straight_path_point(
+	arc_center: Vector2,
+	arc_radius: float,
+	angle: float,
+	direction_sign: float,
+	extension_distance: float
+) -> Dictionary:
+	var tangent: Vector2 = _get_corner_score_tangent(angle, direction_sign)
+	var position: Vector2 = arc_center + Vector2(cos(angle), sin(angle)) * arc_radius
+	return {"position": position + tangent * extension_distance, "rotation": _get_readable_corner_rotation(tangent.angle())}
+
+
+func _get_corner_arc_path_point(
+	arc_center: Vector2,
+	arc_radius: float,
+	start_angle: float,
+	end_angle: float,
+	path_distance: float,
+	half_arc: float
+) -> Dictionary:
+	var arc_ratio: float = clamp((path_distance + half_arc) / (half_arc * 2.0), 0.0, 1.0)
+	var angle: float = lerp(start_angle, end_angle, arc_ratio)
+	var direction_sign := 1.0 if end_angle >= start_angle else -1.0
+	var tangent: Vector2 = _get_corner_score_tangent(angle, direction_sign)
+	var position: Vector2 = arc_center + Vector2(cos(angle), sin(angle)) * arc_radius
+	return {"position": position, "rotation": _get_readable_corner_rotation(tangent.angle())}
+
+
+func _get_corner_score_arc_angles(pocket_position: Vector2) -> Array:
+	var corner_signs: Vector2 = _get_corner_signs(pocket_position)
+	if corner_signs.x < 0.0 and corner_signs.y < 0.0:
+		return [PI, PI * 1.5]
+	if corner_signs.x > 0.0 and corner_signs.y < 0.0:
+		return [-PI * 0.5, 0.0]
+	if corner_signs.x > 0.0 and corner_signs.y > 0.0:
+		return [PI * 0.5, 0.0]
+	return [PI, PI * 0.5]
+
+
+func _get_corner_signs(pocket_position: Vector2) -> Vector2:
+	var playfield_center: Vector2 = table.playfield_rect.get_center()
+	var x_sign := -1.0 if pocket_position.x < playfield_center.x else 1.0
+	var y_sign := -1.0 if pocket_position.y < playfield_center.y else 1.0
+	return Vector2(x_sign, y_sign)
+
+
+func _get_corner_score_tangent(angle: float, direction_sign: float) -> Vector2:
+	return (Vector2(-sin(angle), cos(angle)) * direction_sign).normalized()
+
+
+func _get_readable_corner_rotation(rotation: float) -> float:
+	var label_axis: Vector2 = Vector2.RIGHT.rotated(rotation)
+	if label_axis.x < -0.001 or (abs(label_axis.x) <= 0.001 and label_axis.y < 0.0):
+		return rotation + PI
+	return rotation
+
+
+func _play_score_segment_pop_in(label: Label) -> void:
+	var tween: Tween = table.create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(label, "modulate:a", 1.0, SCORE_POPUP_POP_IN_TIME)
+	tween.tween_property(label, "scale", SCORE_POPUP_POP_SCALE, SCORE_POPUP_POP_IN_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.chain().tween_property(label, "scale", Vector2.ONE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+
+func _pulse_final_score_total(popup: ScorePopup) -> void:
+	if popup.score_labels.is_empty():
+		return
+
+	var total_label: Label = popup.score_labels[popup.score_labels.size() - 1]
+	var tween: Tween = table.create_tween()
+	tween.tween_property(total_label, "scale", SCORE_POPUP_FINAL_PULSE_SCALE, SCORE_POPUP_POP_IN_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.tween_property(total_label, "scale", Vector2.ONE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
 func _show_event_label_for_latest_item(popup: ScorePopup) -> void:
@@ -386,9 +664,9 @@ func _show_event_label_for_latest_item(popup: ScorePopup) -> void:
 
 	var event_index: int = popup.event_labels.size()
 	var total_events: int = _get_total_event_label_count(popup)
-	var target_offset: Vector2 = _get_event_label_slot_offset(event_index, total_events)
-	var event_label := _make_score_event_label("%s!" % label_text, event_index)
-	event_label.position = popup.anchor_position + target_offset.normalized() * SCORE_EVENT_LABEL_START_DISTANCE
+	var target_offset: Vector2 = _get_event_label_slot_offset(event_index, total_events, popup)
+	var event_label := _make_score_event_label("%s!" % label_text, event_index, popup.line_rotation)
+	event_label.position = popup.anchor_position + popup.lifetime_drift + target_offset.normalized() * SCORE_EVENT_LABEL_START_DISTANCE
 	table.add_child(event_label)
 	_place_score_label_below_gameplay(event_label)
 	popup.event_labels.append(event_label)
@@ -403,35 +681,36 @@ func _get_total_event_label_count(popup: ScorePopup) -> int:
 	return max(event_count, 1)
 
 
-func _get_event_label_slot_offset(event_index: int, total_events: int) -> Vector2:
+func _get_event_label_slot_offset(event_index: int, total_events: int, popup: ScorePopup) -> Vector2:
 	if total_events <= 1:
-		return Vector2.UP * SCORE_EVENT_LABEL_DISTANCE
+		return popup.outward_direction * SCORE_EVENT_LABEL_DISTANCE
 
 	var slot_ratio: float = float(event_index) / float(total_events - 1)
 	var horizontal_slot: float = slot_ratio * 2.0 - 1.0
 	var angle_degrees: float = _get_event_label_slot_angle(abs(horizontal_slot))
 	var distance := SCORE_EVENT_LABEL_DISTANCE + float(event_index) * SCORE_EVENT_LABEL_DISTANCE_STEP
-	return _get_event_label_slot_direction(horizontal_slot, angle_degrees) * distance
+	return _get_event_label_slot_direction(popup.outward_direction, horizontal_slot, angle_degrees) * distance
 
 
 func _get_event_label_slot_angle(horizontal_strength: float) -> float:
-	return lerp(SCORE_EVENT_LABEL_ANGLE_MAX_DEGREES, SCORE_EVENT_LABEL_ANGLE_MIN_DEGREES, horizontal_strength)
+	return lerp(SCORE_EVENT_LABEL_ANGLE_MIN_DEGREES, SCORE_EVENT_LABEL_ANGLE_MAX_DEGREES, horizontal_strength)
 
 
-func _get_event_label_slot_direction(horizontal_slot: float, angle_degrees: float) -> Vector2:
+func _get_event_label_slot_direction(outward_direction: Vector2, horizontal_slot: float, angle_degrees: float) -> Vector2:
 	if abs(horizontal_slot) < 0.01:
-		return Vector2.UP
+		return outward_direction
 
 	var side := -1.0 if horizontal_slot < 0.0 else 1.0
 	var angle_radians: float = deg_to_rad(angle_degrees)
-	return Vector2(cos(angle_radians) * side, -sin(angle_radians)).normalized()
+	return outward_direction.rotated(angle_radians * side).normalized()
 
 
-func _make_score_event_label(text: String, event_index: int) -> Label:
+func _make_score_event_label(text: String, event_index: int, line_rotation: float) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	label.rotation_degrees = _get_event_label_tilt(event_index)
+	label.rotation = line_rotation + deg_to_rad(_get_event_label_tilt(event_index))
+	label.scale = SCORE_EVENT_LABEL_START_SCALE
 	label.add_theme_font_override("font", UI_FONT)
 	label.add_theme_font_size_override("font_size", 18)
 	label.add_theme_color_override("font_color", Color(0.94, 1.0, 0.72))
@@ -447,11 +726,22 @@ func _get_event_label_tilt(event_index: int) -> float:
 
 
 func _erupt_score_event_label(label: Label, popup: ScorePopup, target_offset: Vector2) -> void:
-	var target_position: Vector2 = popup.anchor_position + target_offset
+	var target_position: Vector2 = popup.anchor_position + popup.lifetime_drift + target_offset
 	var tween: Tween = table.create_tween()
 	tween.set_parallel(true)
 	tween.tween_property(label, "position", target_position, SCORE_EVENT_LABEL_ERUPT_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tween.tween_property(label, "modulate:a", 1.0, SCORE_EVENT_LABEL_ERUPT_TIME)
+	tween.tween_property(label, "scale", SCORE_EVENT_LABEL_POP_SCALE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.55).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	tween.chain().tween_property(label, "scale", Vector2.ONE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.45)
+
+
+func _update_score_popup_drift(popup: ScorePopup, delta: float) -> void:
+	var drift_step: Vector2 = popup.outward_direction * SCORE_POPUP_LIFETIME_DRIFT_SPEED * delta
+	popup.lifetime_drift += drift_step
+	_layout_score_segment_labels(popup, _get_score_segments(popup))
+	for event_label in popup.event_labels:
+		if is_instance_valid(event_label):
+			event_label.position += drift_step
 
 
 func _place_score_label_below_gameplay(label: Label) -> void:
@@ -463,8 +753,10 @@ func _fade_out_score_popup(popup: ScorePopup) -> void:
 	var tween: Tween = table.create_tween()
 	tween.set_parallel(true)
 	var drift: Vector2 = popup.outward_direction * SCORE_POPUP_OUTWARD_DRIFT_DISTANCE
-	tween.tween_property(popup.label, "position", popup.label.position + drift, SCORE_POPUP_FADE_TIME)
-	tween.tween_property(popup.label, "modulate:a", 0.0, SCORE_POPUP_FADE_TIME)
+	for score_label in popup.score_labels:
+		if is_instance_valid(score_label):
+			tween.tween_property(score_label, "position", score_label.position + drift, SCORE_POPUP_FADE_TIME)
+			tween.tween_property(score_label, "modulate:a", 0.0, SCORE_POPUP_FADE_TIME)
 	for event_label in popup.event_labels:
 		if is_instance_valid(event_label):
 			tween.tween_property(event_label, "position", event_label.position + drift, SCORE_POPUP_FADE_TIME)
@@ -475,8 +767,9 @@ func _fade_out_score_popup(popup: ScorePopup) -> void:
 func _remove_score_popup(popup: ScorePopup) -> void:
 	active_score_popups.erase(popup)
 	score_popups_by_ball.erase(popup.ball_id)
-	if is_instance_valid(popup.label):
-		popup.label.queue_free()
+	for score_label in popup.score_labels:
+		if is_instance_valid(score_label):
+			score_label.queue_free()
 	for event_label in popup.event_labels:
 		if is_instance_valid(event_label):
 			event_label.queue_free()

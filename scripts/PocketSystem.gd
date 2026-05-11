@@ -70,6 +70,13 @@ func get_last_captured_pocket_position() -> Vector2:
 	return pocket_positions[last_captured_pocket_index]
 
 
+func get_last_captured_pocket_radius() -> float:
+	if last_captured_pocket_index < 0 or last_captured_pocket_index >= pocket_radii.size():
+		return 0.0
+
+	return pocket_radii[last_captured_pocket_index]
+
+
 func get_checks_this_frame() -> int:
 	return checks_this_frame
 

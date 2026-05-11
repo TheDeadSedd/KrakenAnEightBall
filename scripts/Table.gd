@@ -768,6 +768,7 @@ func _make_sink_score_context(ball: Ball) -> Dictionary:
 		"sink_position": ball.global_position,
 		"sink_velocity": ball.velocity,
 		"pocket_position": pocket_system.get_last_captured_pocket_position(),
+		"pocket_radius": pocket_system.get_last_captured_pocket_radius(),
 	}
 
 
