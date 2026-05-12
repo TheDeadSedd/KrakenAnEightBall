@@ -218,6 +218,18 @@ func _make_performance_debug_text() -> String:
 			snapshot["stopped_balls"],
 		],
 		"",
+		"BALL DROPS",
+		"Ball drop progress: %s/%s Doubloons" % [
+			snapshot["ball_drop_progress"],
+			snapshot["ball_drop_threshold"],
+		],
+		"Ball drops queued: %s earned / %s pending / %s from last score" % [
+			snapshot["ball_drop_total_queued"],
+			snapshot["ball_drop_pending_spawns"],
+			snapshot["ball_drop_last_score_queued"],
+		],
+		"BallDropSystem enabled: %s" % _debug_bool_text(bool(snapshot["ball_drop_enabled"])),
+		"",
 		"ANOMALIES",
 		"Wayfinder: %s active / %s guided" % [
 			snapshot["active_wayfinders"],

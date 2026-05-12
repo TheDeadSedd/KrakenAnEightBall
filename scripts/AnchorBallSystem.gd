@@ -19,6 +19,14 @@ const STATIONARY_ANCHOR_PULL_MULTIPLIER := 0.5
 # Lets close settled balls barely wake without turning Anchor into a table-wide vacuum.
 @export_range(0.0, 1.0, 0.01) var stationary_ball_multiplier := 0.20
 
+# Stopped object balls use a cheaper wake path so settled high-ball-count tables
+# do not do full Anchor-vs-stationary work every physics substep.
+@export var stationary_pull_update_interval := 0.18
+@export var stationary_min_wake_speed := 5.0
+@export var max_stationary_wake_impulse := 8.0
+@export var stationary_wake_cooldown := 0.55
+@export var stationary_wake_recheck_distance := 10.0
+
 # Contact-loop guards.
 @export var inner_dead_zone_radius := 28.0
 @export var post_collision_pull_cooldown := 0.35
@@ -42,6 +50,9 @@ var nearest_distance_this_frame := INF
 var affected_ball_ids: Dictionary = {}
 var debug_pull_vectors: Dictionary = {}
 var post_collision_pull_cooldowns: Dictionary = {}
+var stationary_wake_cooldowns: Dictionary = {}
+var stationary_wake_positions: Dictionary = {}
+var stationary_pull_accumulator := 0.0
 
 
 func setup(table_ref) -> void:
@@ -63,6 +74,7 @@ func update_pull(delta: float) -> void:
 		return
 
 	_update_post_collision_pull_cooldowns(delta)
+	_update_stationary_wake_cooldowns(delta)
 	var anchor_balls: Array[Ball] = _get_active_anchor_balls()
 	active_anchor_ball_count = anchor_balls.size()
 	if debug_visual_enabled:
@@ -75,8 +87,18 @@ func update_pull(delta: float) -> void:
 	if not enabled:
 		return
 
+	var target_groups: Dictionary = _get_pull_target_groups()
+	var moving_targets: Array = target_groups["moving"]
+	var stationary_targets: Array = target_groups["stationary"]
+	var should_check_stationary_pull: bool = _should_check_stationary_pull(delta, not stationary_targets.is_empty())
+	if moving_targets.is_empty() and not should_check_stationary_pull:
+		return
+
 	for anchor_ball in anchor_balls:
-		_apply_anchor_pull(anchor_ball, delta)
+		if not moving_targets.is_empty():
+			_apply_anchor_pull_to_targets(anchor_ball, moving_targets, delta, false)
+		if should_check_stationary_pull:
+			_apply_anchor_pull_to_targets(anchor_ball, stationary_targets, delta, true)
 
 
 func finish_frame() -> void:
@@ -250,38 +272,133 @@ func _sync_anchor_influence_markers() -> void:
 			ball.release_anchor_influence_marker()
 
 
-func _apply_anchor_pull(anchor_ball: Ball, delta: float) -> void:
+func _get_pull_target_groups() -> Dictionary:
+	var moving_targets: Array[Ball] = []
+	var stationary_targets: Array[Ball] = []
 	for child in table.balls.get_children():
 		var target_ball := child as Ball
-		if not _is_pull_target(anchor_ball, target_ball):
+		if not _is_pull_target_candidate(target_ball):
 			continue
 
-		var offset: Vector2 = anchor_ball.global_position - target_ball.global_position
-		var distance: float = offset.length()
-		if distance <= 0.001 or distance > influence_radius:
-			continue
-		if distance <= _get_inner_dead_zone_radius(anchor_ball, target_ball):
-			continue
-		if _is_pull_pair_on_cooldown(anchor_ball, target_ball):
-			continue
+		if target_ball.is_moving():
+			moving_targets.append(target_ball)
+		else:
+			stationary_targets.append(target_ball)
 
-		nearest_distance_this_frame = min(nearest_distance_this_frame, distance)
-		var motion_multiplier: float = _get_motion_multiplier(target_ball)
-		if motion_multiplier <= 0.0:
-			continue
+	return {
+		"moving": moving_targets,
+		"stationary": stationary_targets,
+	}
 
-		var distance_ratio: float = 1.0 - clamp(distance / influence_radius, 0.0, 1.0)
-		var pull_ratio: float = lerp(minimum_pull_strength, 1.0, distance_ratio * distance_ratio)
-		var source_multiplier: float = _get_anchor_source_multiplier(anchor_ball)
-		var force_magnitude: float = pull_strength * source_multiplier * pull_ratio * motion_multiplier
-		var pull_direction: Vector2 = offset.normalized()
+
+func _should_check_stationary_pull(delta: float, has_stationary_targets: bool) -> bool:
+	if not has_stationary_targets or stationary_ball_multiplier <= 0.0:
+		stationary_pull_accumulator = 0.0
+		return false
+	if stationary_pull_update_interval <= 0.0:
+		return true
+
+	stationary_pull_accumulator += delta
+	if stationary_pull_accumulator < stationary_pull_update_interval:
+		return false
+
+	stationary_pull_accumulator = 0.0
+	return true
+
+
+func _apply_anchor_pull_to_targets(
+	anchor_ball: Ball,
+	target_balls: Array,
+	delta: float,
+	is_stationary_batch: bool
+) -> void:
+	for target_value in target_balls:
+		var target_ball := target_value as Ball
+		_try_apply_anchor_pull(anchor_ball, target_ball, delta, is_stationary_batch)
+
+
+func _try_apply_anchor_pull(
+	anchor_ball: Ball,
+	target_ball: Ball,
+	delta: float,
+	is_stationary_batch: bool
+) -> void:
+	if not _is_pull_target(anchor_ball, target_ball):
+		return
+
+	var offset: Vector2 = anchor_ball.global_position - target_ball.global_position
+	var distance_squared: float = offset.length_squared()
+	var influence_radius_squared: float = influence_radius * influence_radius
+	if distance_squared <= 0.000001 or distance_squared > influence_radius_squared:
+		return
+
+	var inner_dead_zone: float = _get_inner_dead_zone_radius(anchor_ball, target_ball)
+	if distance_squared <= inner_dead_zone * inner_dead_zone:
+		return
+	if _is_pull_pair_on_cooldown(anchor_ball, target_ball):
+		return
+
+	var distance: float = sqrt(distance_squared)
+	var motion_multiplier: float = _get_motion_multiplier(target_ball)
+	if motion_multiplier <= 0.0:
+		return
+
+	var distance_ratio: float = 1.0 - clamp(distance / influence_radius, 0.0, 1.0)
+	var pull_ratio: float = lerp(minimum_pull_strength, 1.0, distance_ratio * distance_ratio)
+	var source_multiplier: float = _get_anchor_source_multiplier(anchor_ball)
+	var force_magnitude: float = pull_strength * source_multiplier * pull_ratio * motion_multiplier
+
+	nearest_distance_this_frame = min(nearest_distance_this_frame, distance)
+	var pull_direction: Vector2 = offset / distance
+	if is_stationary_batch:
+		var wake_impulse: float = _get_stationary_wake_impulse(anchor_ball, target_ball, force_magnitude, delta)
+		if wake_impulse <= 0.0:
+			return
+		target_ball.velocity += pull_direction * wake_impulse
+		_start_stationary_wake_cooldown(anchor_ball, target_ball)
+	else:
 		target_ball.velocity += pull_direction * force_magnitude * delta
+
+	if target_ball.is_moving():
 		target_ball.note_anchor_influence(pull_ratio, pull_direction)
-		_record_force_application(anchor_ball, target_ball, offset, force_magnitude)
+	_record_force_application(anchor_ball, target_ball, offset, force_magnitude)
+
+
+func _get_stationary_wake_impulse(
+	anchor_ball: Ball,
+	target_ball: Ball,
+	force_magnitude: float,
+	delta: float
+) -> float:
+	if _is_stationary_wake_pair_on_cooldown(anchor_ball, target_ball):
+		return 0.0
+	if not _has_stationary_wake_pair_changed(anchor_ball, target_ball):
+		return 0.0
+
+	var estimated_interval_impulse: float = force_magnitude * max(stationary_pull_update_interval, delta)
+	var wake_speed: float = _get_stationary_wake_speed(target_ball, delta)
+	if estimated_interval_impulse < wake_speed:
+		return 0.0
+
+	var capped_wake_speed: float = min(wake_speed, max_stationary_wake_impulse)
+	if capped_wake_speed < target_ball.stop_threshold:
+		return 0.0
+	return capped_wake_speed
+
+
+func _get_stationary_wake_speed(target_ball: Ball, delta: float) -> float:
+	var friction_buffer: float = target_ball.rolling_friction * target_ball.crawl_speed_drag_multiplier * delta * 2.0
+	return max(stationary_min_wake_speed, target_ball.stop_threshold + friction_buffer)
 
 
 func _is_pull_target(anchor_ball: Ball, target_ball: Ball) -> bool:
 	if target_ball == null or target_ball == anchor_ball:
+		return false
+	return _is_pull_target_candidate(target_ball)
+
+
+func _is_pull_target_candidate(target_ball: Ball) -> bool:
+	if target_ball == null:
 		return false
 	if target_ball.is_anchor_ball:
 		return false
@@ -319,17 +436,58 @@ func _is_pull_pair_on_cooldown(anchor_ball: Ball, target_ball: Ball) -> bool:
 	return post_collision_pull_cooldowns.has(_get_pull_pair_key(anchor_ball, target_ball))
 
 
+func _is_stationary_wake_pair_on_cooldown(anchor_ball: Ball, target_ball: Ball) -> bool:
+	return stationary_wake_cooldowns.has(_get_pull_pair_key(anchor_ball, target_ball))
+
+
+func _start_stationary_wake_cooldown(anchor_ball: Ball, target_ball: Ball) -> void:
+	var pair_key: String = _get_pull_pair_key(anchor_ball, target_ball)
+	stationary_wake_positions[pair_key] = {
+		"anchor_position": anchor_ball.global_position,
+		"target_position": target_ball.global_position,
+	}
+	if stationary_wake_cooldown <= 0.0:
+		return
+	stationary_wake_cooldowns[pair_key] = stationary_wake_cooldown
+
+
+func _has_stationary_wake_pair_changed(anchor_ball: Ball, target_ball: Ball) -> bool:
+	if stationary_wake_recheck_distance <= 0.0:
+		return true
+
+	var pair_key: String = _get_pull_pair_key(anchor_ball, target_ball)
+	if not stationary_wake_positions.has(pair_key):
+		return true
+
+	var wake_position_data: Dictionary = stationary_wake_positions[pair_key]
+	var anchor_position: Vector2 = wake_position_data.get("anchor_position", anchor_ball.global_position)
+	var target_position: Vector2 = wake_position_data.get("target_position", target_ball.global_position)
+	var recheck_distance_squared: float = stationary_wake_recheck_distance * stationary_wake_recheck_distance
+	return (
+		anchor_ball.global_position.distance_squared_to(anchor_position) >= recheck_distance_squared
+		or target_ball.global_position.distance_squared_to(target_position) >= recheck_distance_squared
+	)
+
+
 func _update_post_collision_pull_cooldowns(delta: float) -> void:
+	_update_cooldown_dictionary(post_collision_pull_cooldowns, delta)
+
+
+func _update_stationary_wake_cooldowns(delta: float) -> void:
+	_update_cooldown_dictionary(stationary_wake_cooldowns, delta)
+
+
+func _update_cooldown_dictionary(cooldowns: Dictionary, delta: float) -> void:
 	var expired_keys: Array[String] = []
-	for pair_key in post_collision_pull_cooldowns.keys():
-		var remaining_time: float = float(post_collision_pull_cooldowns[pair_key]) - delta
+	for pair_key in cooldowns.keys():
+		var remaining_time: float = float(cooldowns[pair_key]) - delta
 		if remaining_time <= 0.0:
 			expired_keys.append(pair_key)
 		else:
-			post_collision_pull_cooldowns[pair_key] = remaining_time
+			cooldowns[pair_key] = remaining_time
 
 	for pair_key in expired_keys:
-		post_collision_pull_cooldowns.erase(pair_key)
+		cooldowns.erase(pair_key)
 
 
 func _record_force_application(anchor_ball: Ball, target_ball: Ball, offset: Vector2, force_magnitude: float) -> void:

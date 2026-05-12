@@ -7,6 +7,7 @@ const FULLSCREEN_TOGGLE_KEY := KEY_F11
 @onready var status_label: Label = $CanvasLayer/HUD/StatusLabel
 @onready var result_label: Label = $CanvasLayer/HUD/ResultLabel
 @onready var doubloons_label: Label = $CanvasLayer/HUD/DoubloonsLabel
+@onready var ball_drop_meter: BallDropMeter = $CanvasLayer/HUD/BallDropMeter
 
 
 func _ready() -> void:
@@ -16,6 +17,8 @@ func _ready() -> void:
 	table.score_system.doubloons_changed.connect(_on_doubloons_changed)
 	result_label.text = ""
 	_on_doubloons_changed(table.score_system.get_doubloons_total())
+	ball_drop_meter.setup(table.ball_drop_system)
+	table.emit_ready_status_if_needed(status_label.text)
 	debug_overlay.setup(table)
 
 

@@ -30,3 +30,7 @@ exports/
 android/
 
 *.dll
+
+# Local Python helper caches
+__pycache__/
+*.pyc

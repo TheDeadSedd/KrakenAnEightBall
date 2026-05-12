@@ -100,7 +100,7 @@ Does not award Doubloons, show UI, change gameplay outcomes, or alter physics. I
 
 Owns Doubloons reward values, running Doubloons total, scoring breakdown debug logs, HUD total signal, and pocket-side score popup presentation.
 
-Does not own shot event tracking, pocket capture, physics, anomaly behavior, reward spawning, shops, progression, or heavy VFX.
+Does not own shot event tracking, pocket capture, physics, anomaly behavior, reward spawning, score-tied ball drop decisions, shops, progression, or heavy VFX.
 
 Current score presentation notes:
 
@@ -109,11 +109,37 @@ Current score presentation notes:
 - Popups are pocket-centered and consume sink context from `PocketSystem`.
 - Score values should not change during presentation-only passes.
 
+### `scripts/BallDropSystem.gd`
+
+Owns the score-tied ball drop architecture spine: enabled state, Doubloon progress toward earned drops, threshold tuning, deciding how many earned drops to queue after ScoreSystem reports awarded Doubloons, and cue/eight-ball sink penalty amount/message selection.
+
+Does not own object-ball scoring values, score popup presentation, actual ball creation, spawn placement, drop animation, physics, or penalty removal animation. `SpawnSystem.gd` still performs actual drops, and `Table.gd` only coordinates pocket consequences and the placeholder penalty removal.
+
+Current first-pass behavior:
+
+- `ScoreSystem.gd` emits awarded Doubloon amounts.
+- `BallDropSystem.gd` adds those amounts to `drop_progress`.
+- When progress reaches `doubloons_per_drop`, it queues drops through `SpawnSystem.gd`.
+- Leftover progress is preserved.
+- Large scoring events can queue multiple drops.
+- Legacy non-score gameplay reward drops are disabled by default so normal reward drops come from `BallDropSystem.gd`.
+- Score-earned drops choose rotating themed callout messages from `BallDropSystem.gd`; debug/manual spawns can keep direct spawn labels.
+- Cue-ball and eight-ball sinks apply a 25 Doubloon penalty through `BallDropSystem.gd` / `ScoreSystem.gd` without adding to drop progress.
+- Cue-ball and eight-ball sinks reset those special balls, then `Table.gd` removes one eligible object ball as the penalty.
+
 ### `scripts/Main.gd`
 
 Owns small app-shell behavior such as fullscreen toggling and top-level UI wiring.
 
 Does not own table gameplay systems.
+
+### `scripts/BallDropMeter.gd`
+
+Owns player-facing progress presentation for the next score-earned ball drop.
+
+Reads BallDropSystem progress signals/snapshots and renders a vertical right-side HUD meter with lightweight pulse/flash feedback.
+
+Does not own drop rules, scoring, spawn timing, debug overlay counters, or gameplay state.
 
 ## Physics Rules
 
@@ -168,11 +194,11 @@ Possible future anomaly systems:
 
 - `EtherealSystem.gd`
 
-## Future Ball Drop System Boundary
+## Ball Drop System Boundary
 
-The upcoming score-tied ball drop loop should become its own focused system, likely `BallDropSystem.gd`, instead of expanding `ScoreSystem.gd` or `Table.gd`.
+The score-tied ball drop loop should stay in its own focused system, `BallDropSystem.gd`, instead of expanding `ScoreSystem.gd` or `Table.gd`.
 
-Preferred future flow:
+Preferred flow:
 
 - `ShotEventSystem.gd` / `ScoreSystem.gd` report score events.
 - `BallDropSystem.gd` decides drop rewards from those score events.
@@ -191,13 +217,14 @@ Do not bury score-tied reward decisions inside `ScoreSystem.gd`, and do not add 
 - Score popups should remain pocket-side, arcade-readable, and tied to the captured pocket.
 - Drop/spawn notifications may still use top/center callouts; scoring feedback should not return there unless explicitly requested.
 - Do not add coin sprays, shops, progression, or large score VFX without permission.
+- Normal gameplay reward drops should come from score-tied `BallDropSystem.gd` progress, not legacy pocket-count, bank, or multi-pocket reward paths.
 
 ## Performance Rules
 
 - Stopped-ball filtering exists and should be preserved.
 - Ball-vs-ball broad-phase spatial grid exists and should be preserved.
 - Rail checks and pocket checks should run only for moving gameplay-active balls.
-- Performance overlay/debug tools exist in `DebugOverlay.gd` and use snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, and `AnchorBallSystem.gd`.
+- Performance overlay/debug tools exist in `DebugOverlay.gd` and use snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, and `BallDropSystem.gd`.
 - Do not remove counters or make them misleading during optimization.
 - Do not add spatial partition rewrites or alternate physics engines without a focused request.
 - Do not solve chaos by preventing chaos. Large earned chain reactions and high ball counts are intended.
@@ -219,23 +246,60 @@ Do not bury score-tied reward decisions inside `ScoreSystem.gd`, and do not add 
 - Keep exports, APKs, zips, and generated builds out of Git.
 - Commit after stable milestones, especially after playable checkpoints, extractions, and successful tuning passes.
 
+## Implementation Review Expectations
+
+For meaningful gameplay or system changes, include a short implementation review after the change summary. Keep it concise and focused on architecture ownership, feel preservation, scalability, and validation. Prefer explaining why a system owns behavior, not only what changed.
+
+Suggested review structure:
+
+1. Ownership / boundaries
+- List which systems/files were touched.
+- Explain why those systems were the correct owners.
+- Name systems intentionally not expanded, especially `Table.gd`, `ScoreSystem.gd`, physics, cue, prediction, pockets, or anomaly systems when relevant.
+
+2. Behavior changes
+- State what gameplay/player-visible behavior changed.
+- State what behavior was intentionally preserved.
+
+3. Performance implications
+- Note any new counters/debug info added.
+- State whether the change adds continuous per-frame work.
+- State whether the change degrades gracefully under chaos/high ball counts.
+
+4. Risks / future watch items
+- Call out possible edge cases.
+- Call out scalability concerns.
+- Name areas likely to need future tuning.
+
+5. Validation
+- Report static validation.
+- Report gameplay validation.
+- Report overlay/debug observations when available.
+- State whether Godot was actually launched.
+
+Avoid generic filler summaries. The review should reinforce Kraken An Eight Ball's ownership boundaries, preservation rules, and "support chaos gracefully" performance philosophy.
+
 ## Next Major Goal
 
 Implement score-tied ball drops:
 
 better play -> more score events/Doubloons -> more balls -> more interactions -> higher score before the table empties.
 
-Ball drop messaging should rotate instead of saying only "Ball Dropped." Candidate lines include:
+The first architecture spine now exists in `BallDropSystem.gd`. Next passes should add presentation polish without moving reward decisions into `ScoreSystem.gd` or `Table.gd`.
+
+Ball drop messaging now rotates for score-earned drops. Current lines include:
 
 - "The Kraken provides..."
 - "There's another one here somewhere..."
 - "Austin's got it going on!"
 
-Cue ball and eight ball sinking should no longer end the game as this loop comes online:
+The first player-facing Ball Drop progress meter exists in `BallDropMeter.gd` as a vertical right-side rising gauge. It should remain a lightweight UI reader of `BallDropSystem.gd`, not a gameplay decision-maker.
 
-- Each should cost 25 Doubloons.
-- Each should remove a ball from the table.
-- Use a reversed ball-drop animation as the placeholder removal animation.
+Cue ball and eight ball sinking no longer end the game as this loop comes online:
+
+- Each costs 25 Doubloons.
+- Each removes one eligible object ball from the table as the penalty.
+- Current first pass uses a simple scale/fade removal animation; a true reversed ball-drop animation can replace it later.
 
 ## Current Architecture Direction
 

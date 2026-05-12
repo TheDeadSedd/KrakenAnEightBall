@@ -18,8 +18,6 @@ class ResultCallout:
 # Central tuning for the current prototype. Future extractions should copy only
 # their own values into CueController, AimPreview, BallPhysics, SpawnSystem, etc.
 # Debug and testing helpers.
-# Pre-alpha testing mode: cue-ball and 8-ball sinks reset instead of ending the run.
-const DEBUG_NO_GAME_OVER := true
 const DEBUG_DRAW_BOUNDARY_RECTS := false
 const DEBUG_PHYSICS_PANEL_ENABLED := true
 const DEBUG_SHOT_POWER := false
@@ -50,8 +48,12 @@ const PRESENTATION_MARGIN_TOP := 80.0
 const PRESENTATION_MARGIN_BOTTOM := 120.0
 const TABLE_FRAME_VISIBLE_BOUNDS := Rect2(311, 130, 1294, 794)
 const KRAKEN_ART_ALPHA := 0.18
+const READY_STATUS_TEXT := "The Kraken waits with payment."
+const LOADING_STATUS_TEXT := "Loading table..."
 
-# Escalation loop. Stylish shots immediately queue new ball drops.
+# Legacy pre-BallDrop reward triggers. Normal gameplay reward drops now flow
+# through BallDropSystem progress from awarded Doubloons.
+const LEGACY_NON_SCORE_REWARD_DROPS_ENABLED := false
 const MULTI_POCKET_BONUS_THRESHOLD := 2
 const CHAIN_EVENT_SPEED_GAIN_MIN := 6.0
 
@@ -67,6 +69,7 @@ const CALLOUT_MAX_ACTIVE := 4
 const CALLOUT_SHIFT_TIME := 0.12
 const CALLOUT_START_SCALE := 0.88
 const CALLOUT_PEAK_SCALE := 1.08
+const SPECIAL_BALL_PENALTY_REMOVAL_TIME := 0.18
 
 # Shot controls and cue aim input.
 const MAX_DRAG_DISTANCE := 210.0
@@ -92,6 +95,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var boundary_system: BoundarySystem = $BoundarySystem
 @onready var shot_event_system: ShotEventSystem = $ShotEventSystem
 @onready var score_system: ScoreSystem = $ScoreSystem
+@onready var ball_drop_system: BallDropSystem = $BallDropSystem
 @onready var aim_preview: AimPreview = $AimPreview
 @onready var spawn_system: SpawnSystem = $SpawnSystem
 @onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
@@ -144,6 +148,8 @@ func _ready() -> void:
 	boundary_system.setup(self)
 	shot_event_system.setup(self)
 	score_system.setup(self)
+	ball_drop_system.setup(self)
+	_connect_score_drop_events()
 	aim_preview.setup(self)
 	spawn_system.setup(self)
 	wayfinder_system.setup(self)
@@ -160,8 +166,24 @@ func _ready() -> void:
 	cue_ball = starting_balls.cue_ball
 	eight_ball = starting_balls.eight_ball
 	eight_start = starting_balls.eight_start
-	status_text_changed.emit("Drag backward from the cue ball and release to shoot.")
+	status_text_changed.emit(READY_STATUS_TEXT)
 	queue_redraw()
+
+
+func _connect_score_drop_events() -> void:
+	if not score_system.doubloons_awarded.is_connected(ball_drop_system.handle_doubloons_awarded):
+		score_system.doubloons_awarded.connect(ball_drop_system.handle_doubloons_awarded)
+
+
+func emit_ready_status_if_needed(current_status_text: String) -> void:
+	if not _is_loading_status_text(current_status_text):
+		return
+	if _can_shoot():
+		status_text_changed.emit(READY_STATUS_TEXT)
+
+
+func _is_loading_status_text(status_text: String) -> bool:
+	return status_text.strip_edges().to_lower() in ["", LOADING_STATUS_TEXT.to_lower()]
 
 
 func _physics_process(delta: float) -> void:
@@ -686,19 +708,11 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 	_note_actual_cue_pocketed(ball)
 
 	if ball == cue_ball:
-		if DEBUG_NO_GAME_OVER:
-			_reset_ball(ball, spawn_system.get_cue_start(), "Cue ball reset.")
-			return
-		ball.sink()
-		_finish_game("Cue ball sunk. Game over.")
+		_handle_special_ball_pocketed(ball, spawn_system.get_cue_start(), "Cue ball")
 		return
 
 	if ball == eight_ball:
-		if DEBUG_NO_GAME_OVER:
-			_reset_ball(ball, eight_start, "8 ball reset.")
-			return
-		ball.sink()
-		_finish_game("8 ball sunk. Game over.")
+		_handle_special_ball_pocketed(ball, eight_start, "8 ball")
 		return
 
 	var score_context: Dictionary = _make_sink_score_context(ball)
@@ -708,6 +722,88 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 	var score_snapshot: Dictionary = shot_event_system.get_sunk_ball_score_snapshot(int(score_context["ball_id"]))
 	score_system.score_sunk_ball_snapshot(score_snapshot, score_context)
 	status_text_changed.emit("Ball %s sunk." % ball.ball_number)
+
+
+func _handle_special_ball_pocketed(ball: Ball, reset_origin: Vector2, ball_label: String) -> void:
+	var sink_position: Vector2 = ball.global_position
+	var penalty_result: Dictionary = ball_drop_system.apply_special_ball_sink_penalty()
+	var penalty_amount: int = int(penalty_result.get("penalty", 0))
+	var penalty_message: String = str(penalty_result.get("message", ""))
+	if not penalty_message.is_empty():
+		_queue_result_message(penalty_message)
+
+	var removed_penalty_ball: bool = _remove_penalty_object_ball(sink_position)
+	_reset_ball(ball, reset_origin, _get_special_ball_penalty_status(ball_label, penalty_amount, removed_penalty_ball))
+
+
+func _get_special_ball_penalty_status(ball_label: String, penalty_amount: int, removed_penalty_ball: bool) -> String:
+	var removal_text: String = " A ball was taken." if removed_penalty_ball else ""
+	return "%s recovered. -%s Doubloons.%s" % [ball_label, penalty_amount, removal_text]
+
+
+func _remove_penalty_object_ball(origin: Vector2) -> bool:
+	var penalty_ball: Ball = _get_penalty_object_ball(origin)
+	if penalty_ball == null:
+		return false
+
+	_animate_penalty_ball_removal(penalty_ball)
+	return true
+
+
+func _get_penalty_object_ball(origin: Vector2) -> Ball:
+	var closest_stopped_ball: Ball = null
+	var closest_stopped_distance_sq: float = INF
+	var closest_any_ball: Ball = null
+	var closest_any_distance_sq: float = INF
+	for child in balls.get_children():
+		var candidate: Ball = child as Ball
+		if not _can_remove_as_special_ball_penalty(candidate):
+			continue
+
+		var distance_sq: float = candidate.global_position.distance_squared_to(origin)
+		if distance_sq < closest_any_distance_sq:
+			closest_any_distance_sq = distance_sq
+			closest_any_ball = candidate
+		if not candidate.is_moving() and distance_sq < closest_stopped_distance_sq:
+			closest_stopped_distance_sq = distance_sq
+			closest_stopped_ball = candidate
+
+	# Prefer a settled ball so the penalty does not casually interrupt active chains.
+	if closest_stopped_ball != null:
+		return closest_stopped_ball
+	return closest_any_ball
+
+
+func _can_remove_as_special_ball_penalty(ball: Ball) -> bool:
+	return (
+		ball != null
+		and ball != cue_ball
+		and ball != eight_ball
+		and ball.visible
+		and ball.gameplay_enabled
+		and ball.ball_type == Ball.BallType.OBJECT
+	)
+
+
+func _animate_penalty_ball_removal(ball: Ball) -> void:
+	ball.velocity = Vector2.ZERO
+	ball.gameplay_enabled = false
+	ball.suppress_trail_for(SPECIAL_BALL_PENALTY_REMOVAL_TIME)
+	ball.clear_anchor_influence_marker()
+
+	var tween: Tween = create_tween()
+	tween.set_parallel(true)
+	tween.tween_property(ball, "scale", Vector2.ZERO, SPECIAL_BALL_PENALTY_REMOVAL_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	tween.tween_property(ball, "modulate:a", 0.0, SPECIAL_BALL_PENALTY_REMOVAL_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tween.chain().tween_callback(_finish_penalty_ball_removal.bind(ball))
+
+
+func _finish_penalty_ball_removal(ball: Ball) -> void:
+	if not is_instance_valid(ball):
+		return
+
+	ball.sink()
+	ball.queue_free()
 
 
 func _note_actual_cue_pocketed(ball: Ball) -> void:
@@ -844,6 +940,7 @@ func get_physics_debug_snapshot() -> Dictionary:
 func get_performance_debug_snapshot() -> Dictionary:
 	var counts: Dictionary = _get_performance_ball_counts()
 	var anchor_snapshot: Dictionary = anchor_ball_system.get_debug_snapshot()
+	var ball_drop_snapshot: Dictionary = ball_drop_system.get_debug_snapshot()
 	return {
 		"total_balls": counts["total"],
 		"moving_balls": counts["moving"],
@@ -866,6 +963,12 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"anchor_max_visible_field_auras": anchor_snapshot["max_visible_field_auras"],
 		"anchor_spawn_cap_enabled": anchor_snapshot["spawn_cap_enabled"],
 		"anchor_spawn_cap": anchor_snapshot["max_anchor_balls_on_table"],
+		"ball_drop_progress": ball_drop_snapshot["drop_progress"],
+		"ball_drop_threshold": ball_drop_snapshot["doubloons_per_drop"],
+		"ball_drop_enabled": ball_drop_snapshot["enabled"],
+		"ball_drop_last_score_queued": ball_drop_snapshot["last_score_drops_queued"],
+		"ball_drop_total_queued": ball_drop_snapshot["total_drops_queued"],
+		"ball_drop_pending_spawns": ball_drop_snapshot["pending_spawn_drops"],
 		"trail_points": counts["trail_points"],
 		"balls_with_trails": counts["balls_with_trails"],
 		"trail_redraws": counts["trail_redraws"],
@@ -952,7 +1055,16 @@ func get_debug_spawn_hotkey_data() -> Dictionary:
 #region Callouts / Notifications
 # Center/top callouts are now reserved for spawn/drop-flow messages.
 # Future extraction candidate: HUD/CalloutSystem.
-func queue_spawn_reward_message(is_wayfinder: bool, is_powder_keg: bool = false, is_anchor_ball: bool = false) -> void:
+func queue_spawn_reward_message(
+	is_wayfinder: bool,
+	is_powder_keg: bool = false,
+	is_anchor_ball: bool = false,
+	override_message: String = ""
+) -> void:
+	if not override_message.is_empty():
+		_queue_result_message(override_message)
+		return
+
 	if is_wayfinder:
 		_queue_result_message("WAYFINDER BALL DROPPED")
 	elif is_powder_keg:
@@ -1102,13 +1214,20 @@ func _all_balls_stopped() -> bool:
 #endregion
 
 
-#region Spawn Reward Rules
-# Shot rules decide when rewards are earned; SpawnSystem owns queueing and drops.
+#region Legacy Spawn Reward Rules
+# Disabled pre-BallDrop reward triggers. Keep these small wrappers as reference
+# while BallDropSystem becomes the normal gameplay source of earned drops.
 func _award_base_spawn_progress() -> void:
+	if not LEGACY_NON_SCORE_REWARD_DROPS_ENABLED:
+		return
+
 	spawn_system.award_base_spawn_progress()
 
 
 func _try_award_multi_pocket_bonus() -> void:
+	if not LEGACY_NON_SCORE_REWARD_DROPS_ENABLED:
+		return
+
 	if shot_multi_pocket_bonus_awarded:
 		return
 
@@ -1120,6 +1239,9 @@ func _try_award_multi_pocket_bonus() -> void:
 
 
 func _try_award_bank_bonus() -> void:
+	if not LEGACY_NON_SCORE_REWARD_DROPS_ENABLED:
+		return
+
 	if shot_bank_bonus_awarded:
 		return
 

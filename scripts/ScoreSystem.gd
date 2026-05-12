@@ -3,6 +3,7 @@ extends Node
 class_name ScoreSystem
 
 signal doubloons_changed(total: int)
+signal doubloons_awarded(amount: int, total: int)
 
 # Converts ShotEventSystem histories into Doubloon rewards.
 # This owns lightweight score presentation, but not coin sprays or pocket VFX.
@@ -110,6 +111,16 @@ func get_doubloons_total() -> int:
 	return doubloons_total
 
 
+func apply_doubloons_penalty(amount: int) -> int:
+	var penalty_amount: int = max(amount, 0)
+	if penalty_amount <= 0:
+		return 0
+
+	doubloons_total -= penalty_amount
+	doubloons_changed.emit(doubloons_total)
+	return penalty_amount
+
+
 func get_active_popup_label_count() -> int:
 	var label_count := 0
 	for popup_value in active_score_popups:
@@ -144,6 +155,7 @@ func _score_sunk_ball_snapshot(snapshot: Dictionary) -> void:
 	var gained_total: int = _sum_line_items(line_items)
 	doubloons_total += gained_total
 	doubloons_changed.emit(doubloons_total)
+	doubloons_awarded.emit(gained_total, doubloons_total)
 	var ball_label: String = str(snapshot.get("label", "Ball"))
 	_add_line_items_to_score_popup(ball_id, ball_label, line_items)
 	_print_score_breakdown(ball_label, line_items, gained_total, includes_base_reward)

@@ -34,7 +34,8 @@ const RACK_ORIGIN := Vector2(1150.0, 540.0)
 const RACK_ROWS := 5
 const RACK_SPACING_MULTIPLIER := 2.12
 
-# Reward spawn cadence.
+# Legacy sink-count reward cadence. Normal gameplay drop rewards now come from
+# BallDropSystem; this remains for the disabled legacy Table path.
 const BALLS_PER_REWARD_DROP := 3
 
 # Regular reward anomaly pool. Anchor is intentionally not part of this pool.
@@ -56,7 +57,7 @@ const SPAWN_RANDOM_RADIUS_MIN := 40.0
 const SPAWN_RANDOM_RADIUS_MAX := 180.0
 const SPAWN_BALL_NUMBERS := [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]
 
-# Safe reset search used when DEBUG_NO_GAME_OVER respawns cue/8 balls.
+# Safe reset search used when cue/eight penalties return special balls to play.
 const RESET_SEARCH_STEP := 22.0
 const RESET_SEARCH_RINGS := 8
 
@@ -108,6 +109,7 @@ func try_handle_debug_spawn_input(event: InputEvent) -> bool:
 
 
 func award_base_spawn_progress() -> void:
+	# Legacy helper retained for reference; Table gates normal gameplay use.
 	pocketed_object_ball_spawn_progress += 1
 	if pocketed_object_ball_spawn_progress < BALLS_PER_REWARD_DROP:
 		return
@@ -116,11 +118,11 @@ func award_base_spawn_progress() -> void:
 	queue_spawn_reward(1)
 
 
-func queue_spawn_reward(spawn_count: int) -> void:
+func queue_spawn_reward(spawn_count: int, callout_message: String = "") -> void:
 	for _spawn_index in range(spawn_count):
 		var request: SpawnBallRequest = _make_reward_spawn_request()
 		pending_spawn_requests.append(request)
-		table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball)
+		table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, callout_message)
 
 
 func queue_debug_wayfinder_spawn() -> void:
@@ -168,6 +170,10 @@ func reset_ball(ball: Ball, origin: Vector2) -> void:
 
 func has_pending_spawns() -> bool:
 	return not pending_spawn_requests.is_empty()
+
+
+func get_pending_spawn_count() -> int:
+	return pending_spawn_requests.size()
 
 
 func get_cue_start() -> Vector2:
