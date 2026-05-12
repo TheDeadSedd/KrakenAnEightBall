@@ -179,10 +179,11 @@ func _on_powder_keg_suppress_trails_toggled(enabled: bool) -> void:
 
 func _make_debug_hotkey_text() -> String:
 	var hotkeys: Dictionary = table.get_debug_spawn_hotkey_data()
-	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Spawn Anchor Ball\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
+	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Spawn Anchor Ball\n%s: Spawn Cannon Ball\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
 		OS.get_keycode_string(int(hotkeys["wayfinder_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["powder_keg_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["anchor_ball_spawn_key"])),
+		OS.get_keycode_string(int(hotkeys["cannon_ball_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["normal_spawn_key"])),
 		OS.get_keycode_string(PERFORMANCE_OVERLAY_TOGGLE_KEY),
 	]
@@ -261,6 +262,11 @@ func _make_performance_debug_text() -> String:
 			_debug_bool_text(bool(snapshot["anchor_spawn_cap_enabled"])),
 			snapshot["anchor_spawn_cap"],
 		],
+		"Cannon: %s active / %s collisions / %s heavy impacts" % [
+			snapshot["cannon_balls"],
+			snapshot["cannon_collisions"],
+			snapshot["cannon_heavy_impacts"],
+		],
 		"",
 		"VISUAL COST",
 		"Trails: %s points / %s balls / %s redraws" % [
@@ -338,6 +344,8 @@ func _get_ball_debug_name(ball_data: Dictionary) -> String:
 		return "Powder Keg"
 	if bool(ball_data["is_anchor_ball"]):
 		return "Anchor Ball"
+	if bool(ball_data["is_cannon_ball"]):
+		return "Cannon Ball"
 	return "Ball %s" % ball_data["ball_number"]
 
 

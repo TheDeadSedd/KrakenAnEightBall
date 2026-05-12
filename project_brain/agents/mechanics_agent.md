@@ -15,6 +15,7 @@ Do not change gameplay based only on this report; check real source files and `A
 - `scripts/Ball.gd` - Individual ball state, visuals, friction helpers, trails, and anomaly identity flags.
 - `scripts/BallDropMeter.gd` - Vertical right-side HUD meter for progress toward the next score-earned ball drop.
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
+- `scripts/CannonBallSystem.gd` - Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning.
 - `scripts/CueController.gd` - Owns cue visuals, grab-zone hit testing, pullback, and strike presentation.
 - `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons and pocket-side score popup presentation.
 - `scripts/ShotEventSystem.gd` - Tracks causal per-shot scoring events for sunk balls.

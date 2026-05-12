@@ -13,7 +13,7 @@ Do not change gameplay based only on this report; check real source files and `A
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
 - `scripts/DebugOverlay.gd` - Formats debug menu, performance overlay, toggles, and physics debug text.
 - `scripts/PocketSystem.gd` - Loads authored pocket geometry and detects pocket captures.
-- `scripts/PowderKegSystem.gd` - Handles Powder Keg cue-contact explosions, radial pushes, and particle bursts.
+- `scripts/PowderKegSystem.gd` - Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.
 
 ## Current Notes
 

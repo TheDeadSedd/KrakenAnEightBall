@@ -9,6 +9,7 @@ class SpawnBallRequest:
 	var is_wayfinder := false
 	var is_powder_keg := false
 	var is_anchor_ball := false
+	var is_cannon_ball := false
 
 class StartingBallData:
 	var cue_ball: Ball
@@ -22,6 +23,8 @@ const DEBUG_SPAWN_POWDER_KEG_ENABLED := true
 const DEBUG_SPAWN_POWDER_KEG_KEY := KEY_H
 const DEBUG_SPAWN_ANCHOR_BALL_ENABLED := true
 const DEBUG_SPAWN_ANCHOR_BALL_KEY := KEY_J
+const DEBUG_SPAWN_CANNON_BALL_ENABLED := true
+const DEBUG_SPAWN_CANNON_BALL_KEY := KEY_K
 const DEBUG_SPAWN_NORMAL_BALL_ENABLED := true
 const DEBUG_SPAWN_NORMAL_BALL_KEY := KEY_G
 
@@ -101,6 +104,10 @@ func try_handle_debug_spawn_input(event: InputEvent) -> bool:
 		queue_debug_anchor_ball_spawn()
 		return true
 
+	if DEBUG_SPAWN_CANNON_BALL_ENABLED and key_event.keycode == DEBUG_SPAWN_CANNON_BALL_KEY:
+		queue_debug_cannon_ball_spawn()
+		return true
+
 	if DEBUG_SPAWN_NORMAL_BALL_ENABLED and key_event.keycode == DEBUG_SPAWN_NORMAL_BALL_KEY:
 		queue_debug_normal_ball_spawn()
 		return true
@@ -123,31 +130,43 @@ func queue_spawn_reward(spawn_count: int, callout_message: String = "") -> void:
 	for _spawn_index in range(spawn_count):
 		var request: SpawnBallRequest = _make_reward_spawn_request()
 		pending_spawn_requests.append(request)
-		table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, callout_message)
+		table.queue_spawn_reward_message(
+			request.is_wayfinder,
+			request.is_powder_keg,
+			request.is_anchor_ball,
+			request.is_cannon_ball,
+			callout_message
+		)
 
 
 func queue_debug_wayfinder_spawn() -> void:
-	var request: SpawnBallRequest = _make_specific_spawn_request(true, false, false)
+	var request: SpawnBallRequest = _make_specific_spawn_request(true, false, false, false)
 	pending_spawn_requests.append(request)
-	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball)
+	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, request.is_cannon_ball)
 
 
 func queue_debug_powder_keg_spawn() -> void:
-	var request: SpawnBallRequest = _make_specific_spawn_request(false, true, false)
+	var request: SpawnBallRequest = _make_specific_spawn_request(false, true, false, false)
 	pending_spawn_requests.append(request)
-	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball)
+	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, request.is_cannon_ball)
 
 
 func queue_debug_anchor_ball_spawn() -> void:
-	var request: SpawnBallRequest = _make_specific_spawn_request(false, false, true)
+	var request: SpawnBallRequest = _make_specific_spawn_request(false, false, true, false)
 	pending_spawn_requests.append(request)
-	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball)
+	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, request.is_cannon_ball)
+
+
+func queue_debug_cannon_ball_spawn() -> void:
+	var request: SpawnBallRequest = _make_specific_spawn_request(false, false, false, true)
+	pending_spawn_requests.append(request)
+	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, request.is_cannon_ball)
 
 
 func queue_debug_normal_ball_spawn() -> void:
-	var request: SpawnBallRequest = _make_specific_spawn_request(false, false, false)
+	var request: SpawnBallRequest = _make_specific_spawn_request(false, false, false, false)
 	pending_spawn_requests.append(request)
-	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball)
+	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, request.is_cannon_ball)
 
 
 func process_spawn_queue(delta: float) -> void:
@@ -186,6 +205,7 @@ func get_debug_spawn_hotkey_data() -> Dictionary:
 		"wayfinder_spawn_key": DEBUG_SPAWN_WAYFINDER_KEY,
 		"powder_keg_spawn_key": DEBUG_SPAWN_POWDER_KEG_KEY,
 		"anchor_ball_spawn_key": DEBUG_SPAWN_ANCHOR_BALL_KEY,
+		"cannon_ball_spawn_key": DEBUG_SPAWN_CANNON_BALL_KEY,
 		"normal_spawn_key": DEBUG_SPAWN_NORMAL_BALL_KEY,
 	}
 
@@ -258,6 +278,14 @@ func _create_anchor_ball(number: int, color: Color, position: Vector2) -> Ball:
 	return ball
 
 
+func _create_cannon_ball(number: int, color: Color, position: Vector2) -> Ball:
+	var ball := BALL_SCENE.instantiate() as Ball
+	table.balls.add_child(ball)
+	ball.global_position = position
+	ball.setup(Ball.BallType.OBJECT, number, color, false, false, false, true)
+	return ball
+
+
 func _ball_type_from_number(number: int) -> int:
 	if number == 8:
 		return Ball.BallType.EIGHT
@@ -306,12 +334,18 @@ func _apply_regular_anomaly_pool_roll(request: SpawnBallRequest) -> void:
 	request.is_powder_keg = anomaly_roll > WAYFINDER_SPAWN_CHANCE and anomaly_roll <= powder_keg_threshold
 
 
-func _make_specific_spawn_request(is_wayfinder: bool, is_powder_keg: bool, is_anchor_ball: bool) -> SpawnBallRequest:
+func _make_specific_spawn_request(
+	is_wayfinder: bool,
+	is_powder_keg: bool,
+	is_anchor_ball: bool,
+	is_cannon_ball: bool
+) -> SpawnBallRequest:
 	var request: SpawnBallRequest = SpawnBallRequest.new()
 	request.ball_number = _get_next_spawn_ball_number()
 	request.is_wayfinder = is_wayfinder
 	request.is_powder_keg = is_powder_keg
 	request.is_anchor_ball = is_anchor_ball
+	request.is_cannon_ball = is_cannon_ball
 	if request.is_anchor_ball and not _can_spawn_anchor_ball():
 		request.is_anchor_ball = false
 	return request
@@ -326,6 +360,8 @@ func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
 		ball = _create_powder_keg_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
 	elif request.is_anchor_ball and _can_spawn_anchor_ball():
 		ball = _create_anchor_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
+	elif request.is_cannon_ball:
+		ball = _create_cannon_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
 	else:
 		ball = _create_ball(Ball.BallType.OBJECT, request.ball_number, _ball_color(request.ball_number), spawn_position)
 	ball.begin_spawn_drop(spawn_position)

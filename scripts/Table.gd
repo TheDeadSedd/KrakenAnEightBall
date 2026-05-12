@@ -101,6 +101,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
 @onready var powder_keg_system: PowderKegSystem = $PowderKegSystem
 @onready var anchor_ball_system: AnchorBallSystem = $AnchorBallSystem
+@onready var cannon_ball_system: CannonBallSystem = $CannonBallSystem
 @onready var cue_controller: CueController = $CuePivot
 #endregion
 
@@ -155,6 +156,7 @@ func _ready() -> void:
 	wayfinder_system.setup(self)
 	powder_keg_system.setup(self)
 	anchor_ball_system.setup(self)
+	cannon_ball_system.setup(self)
 	_cache_table_geometry()
 	cue_controller.setup()
 	if Engine.is_editor_hint():
@@ -493,6 +495,9 @@ func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2)
 	var impulse_strength: float = (1.0 + BALL_COLLISION_RESTITUTION) * speed_along_normal * 0.5
 	impulse_strength *= BALL_VELOCITY_TRANSFER
 	var impulse: Vector2 = normal * impulse_strength
+	if cannon_ball_system.try_apply_collision_response(ball_a, ball_b, normal, impulse):
+		return true
+
 	ball_a.velocity -= impulse
 	ball_b.velocity += impulse
 	return true
@@ -567,6 +572,7 @@ func _reset_performance_frame_stats() -> void:
 	perf_rail_collision_ms = 0.0
 	perf_pocket_check_ms = 0.0
 	anchor_ball_system.reset_frame_stats()
+	cannon_ball_system.reset_frame_stats()
 
 
 func _reset_ball_debug_frame_stats() -> void:
@@ -940,6 +946,7 @@ func get_physics_debug_snapshot() -> Dictionary:
 func get_performance_debug_snapshot() -> Dictionary:
 	var counts: Dictionary = _get_performance_ball_counts()
 	var anchor_snapshot: Dictionary = anchor_ball_system.get_debug_snapshot()
+	var cannon_snapshot: Dictionary = cannon_ball_system.get_debug_snapshot()
 	var ball_drop_snapshot: Dictionary = ball_drop_system.get_debug_snapshot()
 	return {
 		"total_balls": counts["total"],
@@ -963,6 +970,9 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"anchor_max_visible_field_auras": anchor_snapshot["max_visible_field_auras"],
 		"anchor_spawn_cap_enabled": anchor_snapshot["spawn_cap_enabled"],
 		"anchor_spawn_cap": anchor_snapshot["max_anchor_balls_on_table"],
+		"cannon_balls": cannon_snapshot["active_cannon_balls"],
+		"cannon_collisions": cannon_snapshot["collisions"],
+		"cannon_heavy_impacts": cannon_snapshot["heavy_impacts"],
 		"ball_drop_progress": ball_drop_snapshot["drop_progress"],
 		"ball_drop_threshold": ball_drop_snapshot["doubloons_per_drop"],
 		"ball_drop_enabled": ball_drop_snapshot["enabled"],
@@ -1029,6 +1039,7 @@ func _get_ball_debug_snapshot(ball: Ball) -> Dictionary:
 		"is_wayfinder": ball.is_wayfinder,
 		"is_powder_keg": ball.is_powder_keg,
 		"is_anchor_ball": ball.is_anchor_ball,
+		"is_cannon_ball": ball.is_cannon_ball,
 		"wayfinder_active": ball.is_wayfinder and ball.wayfinder_active,
 		"guided": wayfinder_system.is_ball_guided(ball),
 		"gameplay_enabled": ball.gameplay_enabled,
@@ -1059,6 +1070,7 @@ func queue_spawn_reward_message(
 	is_wayfinder: bool,
 	is_powder_keg: bool = false,
 	is_anchor_ball: bool = false,
+	is_cannon_ball: bool = false,
 	override_message: String = ""
 ) -> void:
 	if not override_message.is_empty():
@@ -1071,6 +1083,8 @@ func queue_spawn_reward_message(
 		_queue_result_message("POWDER KEG DROPPED")
 	elif is_anchor_ball:
 		_queue_result_message("ANCHOR BALL DROPPED")
+	elif is_cannon_ball:
+		_queue_result_message("CANNON BALL DROPPED")
 	else:
 		_queue_result_message("+1 BALL DROPPED")
 

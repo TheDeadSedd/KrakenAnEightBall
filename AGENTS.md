@@ -12,7 +12,7 @@ Core pillars:
 - Pirate/kraken table presentation and in-engine charm.
 - Doubloons scoring driven by trick-shot event history.
 - Pocket-side score celebrations instead of generic center-screen scoring spam.
-- Occasional anomaly balls: Wayfinder Ball, Powder Keg, and Anchor Ball.
+- Occasional anomaly balls: Wayfinder Ball, Powder Keg, Anchor Ball, and Cannon Ball.
 - Fast iteration over broad systems.
 
 Target platforms:
@@ -32,7 +32,7 @@ Does not own large new feature systems unless there is no cleaner option. New ga
 
 ### `scripts/Ball.gd`
 
-Owns individual ball identity, velocity/friction state, generated ball visuals, spawn/drop presentation state, trails, and minimal anomaly identity/state flags such as `is_wayfinder`, `is_powder_keg`, `is_anchor_ball`, and `wayfinder_active`.
+Owns individual ball identity, velocity/friction state, generated ball visuals, spawn/drop presentation state, trails, and minimal anomaly identity/state flags such as `is_wayfinder`, `is_powder_keg`, `is_anchor_ball`, `is_cannon_ball`, and `wayfinder_active`.
 
 Does not own table-wide gameplay rules, scoring, spawning decisions, pocket logic, or anomaly systems beyond per-ball state that must live on the ball.
 
@@ -70,7 +70,7 @@ Does not own ball-to-ball collision response, pocket geometry, spawn chance, or 
 
 ### `scripts/PowderKegSystem.gd`
 
-Owns Powder Keg cue-ball contact explosions, radial push falloff, explosion particle bursts, one-shot explosion state, and Powder Keg debug/performance toggles.
+Owns Powder Keg cue-ball/Cannon contact explosions, radial push falloff, explosion particle bursts, one-shot explosion state, and Powder Keg debug/performance toggles.
 
 Does not own ball-to-ball collision response, spawn chance, scoring values, pocket geometry, or general physics feel.
 
@@ -79,6 +79,14 @@ Does not own ball-to-ball collision response, spawn chance, scoring values, pock
 Owns Anchor Ball cursed-tide pull behavior, Anchor source/target rules, contact-loop cooldowns, affected-ball marker reporting, Anchor debug visuals, visual aura caps, and Anchor performance counters.
 
 Does not own ball-to-ball collision response, cue input, scoring values, prediction, pocket geometry, or SpawnSystem's reward-roll decisions.
+
+### `scripts/CannonBallSystem.gd`
+
+Owns the Cannon Ball anomaly boundary, first-pass heavy collision behavior, and Cannon-specific Powder Keg launch tuning. Cannon Ball is currently debug-spawnable, visually heavy, harder to accelerate from normal/cue impacts, more forceful/persistent when it hits non-anomaly balls, and amplified when launched by Powder Keg explosions.
+
+Future Cannon Ball passes may own Anchor pull tuning, Wayfinder guidance safeguards, wake visuals, regular spawn odds, and heavy-impact feedback, but those are not active yet.
+
+Does not own global ball-to-ball collision constants, spawn odds, scoring values, cue input, prediction, pocket geometry, screen shake, or interactions with Anchor or Wayfinder.
 
 ### `scripts/PocketSystem.gd`
 
@@ -169,6 +177,7 @@ Anomaly balls should generally get their own system scripts. Current active anom
 - `WayfinderSystem.gd`
 - `PowderKegSystem.gd`
 - `AnchorBallSystem.gd`
+- `CannonBallSystem.gd` currently owns debug-spawnable Cannon identity, first-pass heavy collision behavior, and Powder Keg launch tuning.
 
 Pattern:
 
@@ -182,8 +191,9 @@ Pattern:
 Current anomaly rules:
 
 - Wayfinder activates from cue-ball contact, then can guide eligible object balls toward reachable pockets during collision-driven redirects.
-- Powder Keg explodes on cue-ball contact only.
+- Powder Keg explodes on cue-ball or Cannon Ball contact only; normal balls still do not trigger it.
 - Powder Keg pushes nearby balls outward with falloff, then removes itself from the table.
+- Powder Keg launches Cannon Balls with Cannon-owned impulse amplification and a conservative Cannon launch speed cap.
 - Powder Keg particle bursts should look juicy and readable, but debug/quality controls should allow particles to degrade safely under load.
 - Anchor pulls object balls only. It does not affect the cue ball.
 - Anchor does not pull other Anchor balls, though Anchor balls still physically collide normally.
@@ -191,6 +201,10 @@ Current anomaly rules:
 - Stationary Anchor balls remain active field sources but use half pull strength.
 - Anchor has an inner dead zone and a per Anchor/target post-collision pull cooldown to prevent gravity-loop chase bumps.
 - Anchor uses independent reward spawn logic before the regular anomaly pool: 3% when the table has 40 or fewer balls, and 30% when the table has more than 40 balls.
+- Cannon Ball is currently debug-spawn only and visually reads as dark heavy iron with ember detail.
+- Cannon Ball has first-pass collision modifiers against non-anomaly balls only: it gains reduced velocity when hit, retains more velocity when driving into a ball, and transfers stronger force above a minimum impact speed.
+- Cannon Ball can trigger Powder Keg explosions and receives amplified Powder Keg launch impulse.
+- Cannon Ball currently has no regular spawn odds, no screen shake, and no Cannon-specific special interactions with Anchor or Wayfinder.
 
 Possible future anomaly systems:
 

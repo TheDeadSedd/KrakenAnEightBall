@@ -193,4 +193,6 @@ func _get_ball_label(ball: Ball) -> String:
 		return "Powder Keg"
 	if ball.is_anchor_ball:
 		return "Anchor Ball"
+	if ball.is_cannon_ball:
+		return "Cannon Ball"
 	return "Ball %s" % ball.ball_number

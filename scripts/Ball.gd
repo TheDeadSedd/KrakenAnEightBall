@@ -31,6 +31,11 @@ const ANCHOR_INFLUENCE_COLOR := Color("8ff7e4")
 const ANCHOR_INFLUENCE_WAKE_COLOR := Color("d3fff8")
 const ANCHOR_INFLUENCE_FADE_TIME := 0.18
 const ANCHOR_INFLUENCE_RELEASE_STRENGTH := 0.22
+const CANNON_BALL_BASE_COLOR := Color("17191b")
+const CANNON_BALL_RIM_COLOR := Color("050607")
+const CANNON_BALL_DENT_COLOR := Color("070809")
+const CANNON_BALL_EDGE_COLOR := Color("3a3f42")
+const CANNON_BALL_EMBER_COLOR := Color("ff8a2d")
 const DEBUG_WAYFINDER := false
 
 @export var ball_type := BallType.OBJECT
@@ -84,6 +89,7 @@ var is_wayfinder := false
 var wayfinder_active := false
 var is_powder_keg := false
 var is_anchor_ball := false
+var is_cannon_ball := false
 var anchor_visual_effect_strength := 0.7
 var anchor_field_visual_radius := 230.0
 var anchor_visuals_enabled := true
@@ -239,7 +245,8 @@ func setup(
 	new_color: Color,
 	new_is_wayfinder: bool = false,
 	new_is_powder_keg: bool = false,
-	new_is_anchor_ball: bool = false
+	new_is_anchor_ball: bool = false,
+	new_is_cannon_ball: bool = false
 ) -> void:
 	ball_type = new_type
 	ball_number = new_number
@@ -247,6 +254,7 @@ func setup(
 	is_wayfinder = new_is_wayfinder
 	is_powder_keg = new_is_powder_keg
 	is_anchor_ball = new_is_anchor_ball
+	is_cannon_ball = new_is_cannon_ball
 	_reset_wayfinder_state()
 	_update_label()
 	_update_number_color()
@@ -611,7 +619,7 @@ func _update_label_layout() -> void:
 
 
 func _update_label() -> void:
-	if ball_type == BallType.CUE or is_wayfinder or is_powder_keg or is_anchor_ball:
+	if ball_type == BallType.CUE or is_wayfinder or is_powder_keg or is_anchor_ball or is_cannon_ball:
 		number_label.text = ""
 	else:
 		number_label.text = str(ball_number)
@@ -624,6 +632,8 @@ func _update_number_color() -> void:
 		number_label.add_theme_color_override("font_color", Color("f9edd2"))
 	elif is_anchor_ball:
 		number_label.add_theme_color_override("font_color", Color("d9e2df"))
+	elif is_cannon_ball:
+		number_label.add_theme_color_override("font_color", Color("f1c28a"))
 	elif ball_type == BallType.EIGHT:
 		number_label.add_theme_color_override("font_color", Color.WHITE)
 	else:
@@ -693,7 +703,7 @@ func _draw() -> void:
 	draw_circle(origin + Vector2(-radius * 0.18, -radius * 0.22), radius * 0.72, display_color.lightened(0.16))
 	draw_arc(origin, radius - rim_width * 0.5, 0.0, TAU, 40, rim_color, rim_width)
 
-	if not is_wayfinder and not is_anchor_ball and (ball_type == BallType.OBJECT or ball_type == BallType.EIGHT):
+	if not is_wayfinder and not is_anchor_ball and not is_cannon_ball and (ball_type == BallType.OBJECT or ball_type == BallType.EIGHT):
 		var number_spot_color := Color.WHITE
 		draw_circle(origin, radius * number_spot_scale, number_spot_color)
 		draw_arc(
@@ -715,11 +725,16 @@ func _draw() -> void:
 		_draw_powder_keg_mark(origin)
 	elif is_anchor_ball:
 		_draw_anchor_mark(origin)
+	elif is_cannon_ball:
+		_draw_cannon_ball_mark(origin)
 
 	draw_circle(origin + Vector2(-radius * 0.32, -radius * 0.36), radius * highlight_scale, shine_color)
 
 
 func _get_display_color() -> Color:
+	if is_cannon_ball:
+		return CANNON_BALL_BASE_COLOR
+
 	if is_anchor_ball:
 		return ANCHOR_BALL_BASE_COLOR
 
@@ -821,6 +836,33 @@ func _draw_anchor_mark(origin: Vector2) -> void:
 		2.0
 	)
 	draw_arc(origin, radius - 3.0, 0.0, TAU, 40, ANCHOR_BALL_RIM_COLOR, 1.5)
+
+
+func _draw_cannon_ball_mark(origin: Vector2) -> void:
+	draw_arc(origin, radius - 2.0, 0.0, TAU, 44, CANNON_BALL_RIM_COLOR, 2.4)
+	draw_arc(origin, radius - 5.0, deg_to_rad(210.0), deg_to_rad(330.0), 18, CANNON_BALL_EDGE_COLOR, 1.4)
+
+	var dent_positions: Array[Vector2] = [
+		Vector2(-radius * 0.32, -radius * 0.10),
+		Vector2(radius * 0.20, radius * 0.22),
+		Vector2(radius * 0.42, -radius * 0.34),
+	]
+	var dent_sizes: Array[float] = [radius * 0.13, radius * 0.10, radius * 0.08]
+	for dent_index in range(dent_positions.size()):
+		draw_circle(origin + dent_positions[dent_index], dent_sizes[dent_index], CANNON_BALL_DENT_COLOR)
+		draw_arc(origin + dent_positions[dent_index], dent_sizes[dent_index], 0.0, TAU, 14, CANNON_BALL_EDGE_COLOR.darkened(0.18), 0.7)
+
+	var ember_center: Vector2 = origin + Vector2(radius * 0.05, -radius * 0.42)
+	var ember_glow := CANNON_BALL_EMBER_COLOR
+	ember_glow.a = 0.18
+	draw_circle(ember_center, radius * 0.30, ember_glow)
+	draw_line(
+		ember_center + Vector2(-radius * 0.18, radius * 0.06),
+		ember_center + Vector2(radius * 0.20, -radius * 0.08),
+		CANNON_BALL_EMBER_COLOR,
+		1.3
+	)
+	draw_circle(ember_center + Vector2(radius * 0.20, -radius * 0.08), radius * 0.07, Color(1.0, 0.58, 0.18, 0.76))
 
 
 func _draw_wayfinder_aura(origin: Vector2) -> void:

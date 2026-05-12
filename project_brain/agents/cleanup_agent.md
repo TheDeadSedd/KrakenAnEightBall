@@ -15,9 +15,10 @@ Do not change gameplay based only on this report; check real source files and `A
 - `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
+- `scripts/CannonBallSystem.gd` - Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning.
 - `scripts/DebugOverlay.gd` - Formats debug menu, performance overlay, toggles, and physics debug text.
 - `scripts/PocketSystem.gd` - Loads authored pocket geometry and detects pocket captures.
-- `scripts/PowderKegSystem.gd` - Handles Powder Keg cue-contact explosions, radial pushes, and particle bursts.
+- `scripts/PowderKegSystem.gd` - Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.
 - `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons and pocket-side score popup presentation.
 - `scripts/ShotEventSystem.gd` - Tracks causal per-shot scoring events for sunk balls.
 - `scripts/SpawnSystem.gd` - Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.

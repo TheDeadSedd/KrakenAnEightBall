@@ -56,6 +56,7 @@ KNOWN_CATEGORY_HINTS = {
     "scripts/BallDropSystem.gd": ["Mechanics", "Systems", "UI", "Performance Concerns", "In Progress"],
     "scripts/Ball.gd": ["Mechanics", "Physics", "Performance Concerns"],
     "scripts/BoundarySystem.gd": ["Physics", "Systems", "Performance Concerns"],
+    "scripts/CannonBallSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns", "In Progress"],
     "scripts/CueController.gd": ["Mechanics", "UI"],
     "scripts/DebugOverlay.gd": ["UI", "Debug Tools"],
     "scripts/Main.gd": ["Systems", "UI"],
@@ -110,10 +111,10 @@ AGENT_DEFINITIONS = {
     },
     "anomaly_ball_agent": {
         "display": "Anomaly Ball Agent",
-        "responsibility": "Tracks Wayfinder, Powder Keg, Anchor Ball, and future anomaly behavior boundaries.",
-        "watch_keywords": ["wayfinder", "powder", "anchor", "anomaly", "ball"],
+        "responsibility": "Tracks Wayfinder, Powder Keg, Anchor Ball, Cannon Ball, and future anomaly behavior boundaries.",
+        "watch_keywords": ["wayfinder", "powder", "anchor", "cannon", "anomaly", "ball"],
         "notes": [
-            "Wayfinder, Powder Keg, and Anchor are active anomaly systems.",
+            "Wayfinder, Powder Keg, and Anchor are active anomaly systems; Cannon Ball has first-pass heavy collision and Powder Keg launch behavior.",
             "Anchor has independent priority spawn odds and object-ball-only pull.",
         ],
         "questions": [
@@ -324,6 +325,7 @@ def guess_owner(rel_path: str) -> str:
     name = Path(rel_path).name
     exact_owners = {
         "AnchorBallSystem.gd": "anomaly_ball_agent",
+        "CannonBallSystem.gd": "anomaly_ball_agent",
         "PowderKegSystem.gd": "anomaly_ball_agent",
         "WayfinderSystem.gd": "anomaly_ball_agent",
         "Ball.gd": "mechanics_agent",
@@ -376,9 +378,11 @@ def guess_summary(rel_path: str) -> str:
     if name == "WayfinderSystem.gd":
         return "Handles Wayfinder activation and temporary guided-ball redirects."
     if name == "PowderKegSystem.gd":
-        return "Handles Powder Keg cue-contact explosions, radial pushes, and particle bursts."
+        return "Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts."
     if name == "AnchorBallSystem.gd":
         return "Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters."
+    if name == "CannonBallSystem.gd":
+        return "Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning."
     if name == "DebugOverlay.gd":
         return "Formats debug menu, performance overlay, toggles, and physics debug text."
     if name == "AimPreview.gd":

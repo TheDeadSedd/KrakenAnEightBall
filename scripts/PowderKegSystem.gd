@@ -2,7 +2,7 @@
 extends Node
 class_name PowderKegSystem
 
-# Owns Powder Keg cue-contact explosions, radial push falloff, and one-shot burst cleanup.
+# Owns Powder Keg trigger-contact explosions, radial push falloff, and one-shot burst cleanup.
 # Table.gd still owns collision response, the ball list, and the shot lifecycle.
 const EXPLOSION_SPARK_COLOR := Color(1.0, 0.86, 0.38, 1.0)
 const EXPLOSION_SMOKE_COLOR := Color(0.34, 0.24, 0.16, 0.72)
@@ -35,16 +35,16 @@ func setup(table_ref) -> void:
 
 
 func handle_collision(ball_a: Ball, ball_b: Ball) -> void:
-	_try_explode_from_cue_contact(ball_a, ball_b)
-	_try_explode_from_cue_contact(ball_b, ball_a)
+	_try_explode_from_trigger_contact(ball_a, ball_b)
+	_try_explode_from_trigger_contact(ball_b, ball_a)
 
 
 func get_active_particle_burst_count() -> int:
 	return active_particle_bursts
 
 
-func _try_explode_from_cue_contact(striker: Ball, target: Ball) -> void:
-	if striker != table.cue_ball or target == null or not target.is_powder_keg:
+func _try_explode_from_trigger_contact(striker: Ball, target: Ball) -> void:
+	if not _can_trigger_powder_keg(striker) or target == null or not target.is_powder_keg:
 		return
 	if not target.is_gameplay_active():
 		return
@@ -55,6 +55,14 @@ func _try_explode_from_cue_contact(striker: Ball, target: Ball) -> void:
 
 	exploded_ball_ids[powder_keg_id] = true
 	_explode_powder_keg(target)
+
+
+func _can_trigger_powder_keg(striker: Ball) -> bool:
+	if striker == null:
+		return false
+	if striker == table.cue_ball:
+		return true
+	return table.cannon_ball_system.can_trigger_powder_keg(striker)
 
 
 func _explode_powder_keg(powder_keg: Ball) -> void:
@@ -78,7 +86,15 @@ func _push_nearby_balls(powder_keg: Ball, explosion_center: Vector2) -> void:
 		var distance_ratio: float = 1.0 - clamp(distance / explosion_radius, 0.0, 1.0)
 		var applied_ratio: float = lerp(min_force_ratio, 1.0, distance_ratio)
 		var push_direction: Vector2 = _get_push_direction(powder_keg, other_ball, offset)
-		other_ball.velocity += push_direction * explosion_force * applied_ratio
+		var explosion_delta: Vector2 = push_direction * explosion_force * applied_ratio
+		if other_ball.is_cannon_ball:
+			other_ball.velocity = table.cannon_ball_system.get_powder_keg_launch_velocity(
+				other_ball,
+				other_ball.velocity,
+				explosion_delta
+			)
+		else:
+			other_ball.velocity += explosion_delta
 		if suppress_trails_after_explosion:
 			other_ball.suppress_trail_for(trail_suppression_duration)
 		if _is_anomaly_scoring_target(other_ball):
