@@ -4,11 +4,17 @@ class_name AimPreview
 
 # Owns cue aim prediction, bank preview drawing, and shot-path debug overlays.
 # Table.gd owns real balls/gameplay state; BoundarySystem owns boundary queries.
+
+# Debug-only comparison tools.
 const DEBUG_AIM_PATH_COMPARISON_DEFAULT := false
 const DEBUG_BANK_PREDICTION := false
+
+# Cue-ball guide simulation and rendering.
 const AIM_GUIDE_LENGTH := 180.0
 const AIM_PREDICTION_ENABLED := true
 const AIM_PREDICTION_MAX_DISTANCE := 900.0
+const AIM_SIMULATION_FRAME_DELTA := 1.0 / 60.0
+const AIM_SIMULATION_MAX_BOUNCES := 1
 const AIM_LINE_WIDTH := 3.0
 const AIM_LINE_GLOW_WIDTH := 9.0
 const AIM_LINE_MIN_ALPHA := 0.24
@@ -20,6 +26,8 @@ const AIM_POST_BANK_ALPHA_MULTIPLIER := 0.58
 const AIM_END_MARKER_SIZE := 8.0
 const AIM_END_MARKER_LINE_WIDTH := 2.0
 const AIM_END_MARKER_GLOW_WIDTH := 5.0
+
+# Struck-ball guide simulation and rendering.
 const AIM_TARGET_LINE_WIDTH := 2.6
 const AIM_TARGET_LINE_GLOW_WIDTH := 7.0
 const AIM_TARGET_LINE_GLOW_ALPHA := 0.24
@@ -31,8 +39,8 @@ const AIM_TARGET_POCKET_MARKER_RADIUS := 7.0
 const AIM_TARGET_ENDPOINT_MARKER_RADIUS := 5.0
 const AIM_TARGET_PREDICTION_MAX_DISTANCE := 520.0
 const AIM_TARGET_PREDICTION_MAX_STEPS := 320
-const AIM_SIMULATION_FRAME_DELTA := 1.0 / 60.0
-const AIM_SIMULATION_MAX_BOUNCES := 1
+
+# Bank/path comparison debug visuals.
 const BANK_DEBUG_MARKER_LIFETIME := 1.0
 const AIM_PATH_DEBUG_LIFETIME := 3.0
 const AIM_PATH_DEBUG_MAX_POINTS := 240
@@ -96,6 +104,7 @@ var debug_aim_path_comparison_enabled := DEBUG_AIM_PATH_COMPARISON_DEFAULT
 var prediction_ms := 0.0
 
 
+#region Setup / Public API
 func setup(table_ref) -> void:
 	table = table_ref
 
@@ -224,8 +233,10 @@ func is_prediction_enabled() -> bool:
 
 func get_prediction_time_ms() -> float:
 	return prediction_ms
+#endregion
 
 
+#region Drawing
 func _draw() -> void:
 	_draw_bank_debug_markers()
 	_draw_aim_path_comparison_debug()
@@ -490,8 +501,10 @@ func _draw_predicted_rail_comparison_marker(fade: float) -> void:
 	draw_circle(last_predicted_rail_position, 7.0, rail_color)
 	draw_line(last_predicted_rail_position, last_predicted_rail_position + last_predicted_rail_normal * 30.0, normal_color, 2.0)
 	draw_line(last_predicted_rail_position, last_predicted_rail_position + last_predicted_post_bank_direction * 44.0, post_bank_color, 2.2)
+#endregion
 
 
+#region Prediction Simulation
 func _get_first_aim_collision(origin: Vector2, initial_velocity: Vector2) -> AimPrediction:
 	var prediction: AimPrediction = AimPrediction.new()
 	prediction.path_points = [origin]
@@ -620,6 +633,7 @@ func _get_first_target_pocket_hit_on_segment(segment_start: Vector2, segment_end
 
 
 func _get_prediction_pocket_catch_radius(pocket_radius: float, ball_radius: float) -> float:
+	# Match PocketSystem's capture radius without mutating real pocket state.
 	return pocket_radius + ball_radius * 0.5 + PocketSystem.POCKET_CATCH_BONUS
 
 
@@ -809,8 +823,10 @@ func _set_prediction_rail_debug(prediction: AimPrediction, step_result: BallMoti
 	prediction.rail_position = step_result.rail_position
 	prediction.rail_normal = step_result.rail_normal
 	prediction.post_bank_direction = step_result.velocity.normalized()
+#endregion
 
 
+#region Debug Path Comparison
 func _update_bank_debug_markers(delta: float) -> void:
 	if not _bank_debug_visuals_enabled():
 		bank_debug_markers.clear()
@@ -852,8 +868,10 @@ func _should_redraw_debug(is_dragging: bool) -> bool:
 
 func _bank_debug_visuals_enabled() -> bool:
 	return DEBUG_BANK_PREDICTION or debug_aim_path_comparison_enabled
+#endregion
 
 
+#region Color / Timing / Debug Print Helpers
 func _get_aim_power_color(power_ratio: float) -> Color:
 	if power_ratio <= 0.35:
 		return Color("67d97d")
@@ -897,3 +915,4 @@ func _print_predicted_bank_debug(prediction: AimPrediction) -> void:
 			prediction.path_points.size(),
 		]
 	)
+#endregion

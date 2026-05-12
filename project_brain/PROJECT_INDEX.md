@@ -12,9 +12,9 @@ This is a fast project map, not a substitute for reading source files and `AGENT
 
 ## Next Major Goal
 
-- Implement score-tied ball drops: better play creates more score events/Doubloons, more balls, more interactions, and higher score before the table empties.
-- Score-earned drop messages now rotate; keep expanding/tuning the message pool as the loop gets juicier.
-- Cue-ball and eight-ball sinks now cost 25 Doubloons and remove one eligible object ball.
+- Continue stabilizing the score-tied ball drop loop: better play creates more score events/Doubloons, more balls, more interactions, and higher score before the table empties.
+- Score-earned drop messages rotate now; keep expanding/tuning the message pool as the loop gets juicier.
+- Cue-ball and eight-ball sinks cost 25 Doubloons and remove one eligible object ball.
 - Current penalty removal uses a simple scale/fade placeholder; a reversed ball-drop animation can replace it later.
 - System boundary: `BallDropSystem.gd` decides score-tied drop rewards, then `SpawnSystem.gd` performs drops while `Table.gd` coordinates only.
 
@@ -123,10 +123,15 @@ The scanner understands optional comments in source files:
 ## Recently Changed
 
 Changed scanned files:
+- `AGENTS.md` - AGENTS. Project documentation or checkpoint notes.; owner: cleanup_agent
 - `scripts/AimPreview.gd` - AimPreview. Draws aim preview and side-effect-free cue-ball prediction.; owner: performance_agent
+- `scripts/BallDropMeter.gd` - Ball Drop Meter. Vertical right-side HUD meter for progress toward the next score-earned ball drop.; status: In Progress; owner: ui_agent; notes: Vertical right-side meter for score progress toward the next earned ball drop.
+- `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
+- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.; owner: systems_agent
+- `scripts/Table.gd` - Table. High-level table coordinator and current home of authoritative arcade ball physics.; owner: mechanics_agent
 
 Changed files outside scanner set:
-- `export_presets.cfg` - Recently changed but outside the scanned file set.
+- `tools/build_project_brain.py` - Recently changed but outside the scanned file set.
 
 ## Unclassified
 

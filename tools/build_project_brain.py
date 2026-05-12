@@ -481,9 +481,9 @@ def build_project_index(files: list[FileInfo], changed_paths: list[str]) -> str:
         "",
         "## Next Major Goal",
         "",
-        "- Implement score-tied ball drops: better play creates more score events/Doubloons, more balls, more interactions, and higher score before the table empties.",
-        "- Score-earned drop messages now rotate; keep expanding/tuning the message pool as the loop gets juicier.",
-        "- Cue-ball and eight-ball sinks now cost 25 Doubloons and remove one eligible object ball.",
+        "- Continue stabilizing the score-tied ball drop loop: better play creates more score events/Doubloons, more balls, more interactions, and higher score before the table empties.",
+        "- Score-earned drop messages rotate now; keep expanding/tuning the message pool as the loop gets juicier.",
+        "- Cue-ball and eight-ball sinks cost 25 Doubloons and remove one eligible object ball.",
         "- Current penalty removal uses a simple scale/fade placeholder; a reversed ball-drop animation can replace it later.",
         "- System boundary: `BallDropSystem.gd` decides score-tied drop rewards, then `SpawnSystem.gd` performs drops while `Table.gd` coordinates only.",
         "",
@@ -692,7 +692,7 @@ def format_planned_systems(planned: Iterable[tuple[str, dict[str, object]]], age
 def risks_for_agent(agent_id: str) -> list[str]:
     risks = {
         "mechanics_agent": [
-            "BallDropSystem.gd is still early; drop tuning and penalty presentation need playtesting.",
+            "BallDropSystem.gd is first-pass playable; drop tuning and penalty presentation still need playtesting.",
             "Cue/eight-ball sink penalties should not accidentally feed score-tied drop progress.",
         ],
         "systems_agent": [

@@ -109,7 +109,8 @@ func try_handle_debug_spawn_input(event: InputEvent) -> bool:
 
 
 func award_base_spawn_progress() -> void:
-	# Legacy helper retained for reference; Table gates normal gameplay use.
+	# Legacy helper retained for reference. Normal gameplay should only reach
+	# this when Table's legacy reward gate is intentionally re-enabled.
 	pocketed_object_ball_spawn_progress += 1
 	if pocketed_object_ball_spawn_progress < BALLS_PER_REWARD_DROP:
 		return
@@ -331,7 +332,7 @@ func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
 
 
 func _can_spawn_anchor_ball() -> bool:
-	# Disabled by default; this is a debug safety valve, not normal-play optimization.
+	# Anchor spawn caps are debug/quality safety valves, not normal-play tuning.
 	return table != null and table.anchor_ball_system.can_spawn_anchor_ball()
 
 

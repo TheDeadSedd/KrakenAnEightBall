@@ -28,7 +28,7 @@ Do not change gameplay based only on this report; check real source files and `A
 
 ## Risks Or TODOs
 
-- BallDropSystem.gd is still early; drop tuning and penalty presentation need playtesting.
+- BallDropSystem.gd is first-pass playable; drop tuning and penalty presentation still need playtesting.
 - Cue/eight-ball sink penalties should not accidentally feed score-tied drop progress.
 
 ## Questions

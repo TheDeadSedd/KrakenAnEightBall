@@ -51,8 +51,8 @@ const KRAKEN_ART_ALPHA := 0.18
 const READY_STATUS_TEXT := "The Kraken waits with payment."
 const LOADING_STATUS_TEXT := "Loading table..."
 
-# Legacy pre-BallDrop reward triggers. Normal gameplay reward drops now flow
-# through BallDropSystem progress from awarded Doubloons.
+# Legacy pre-BallDrop reward triggers. Keep disabled for normal gameplay so
+# earned drops flow only through ScoreSystem -> BallDropSystem -> SpawnSystem.
 const LEGACY_NON_SCORE_REWARD_DROPS_ENABLED := false
 const MULTI_POCKET_BONUS_THRESHOLD := 2
 const CHAIN_EVENT_SPEED_GAIN_MIN := 6.0
@@ -1215,8 +1215,8 @@ func _all_balls_stopped() -> bool:
 
 
 #region Legacy Spawn Reward Rules
-# Disabled pre-BallDrop reward triggers. Keep these small wrappers as reference
-# while BallDropSystem becomes the normal gameplay source of earned drops.
+# Disabled pre-BallDrop reward triggers. Keep these wrappers as reference only;
+# the active normal reward path is ScoreSystem -> BallDropSystem -> SpawnSystem.
 func _award_base_spawn_progress() -> void:
 	if not LEGACY_NON_SCORE_REWARD_DROPS_ENABLED:
 		return

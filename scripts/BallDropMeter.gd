@@ -7,7 +7,8 @@ class_name BallDropMeter
 # index:owner ui_agent
 # index:notes Vertical right-side meter for score progress toward the next earned ball drop.
 
-# Player-facing progress display only. BallDropSystem owns the real state.
+# Player-facing progress display only. BallDropSystem owns the real state,
+# signals, thresholds, and earned-drop decisions.
 const UI_FONT := preload("res://assets/fonts/Gothic Pixels.ttf")
 const PANEL_COLOR := Color(0.035, 0.052, 0.052, 0.82)
 const PANEL_FLASH_COLOR := Color(0.32, 0.22, 0.07, 0.92)

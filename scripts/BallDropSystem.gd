@@ -12,8 +12,8 @@ signal drop_earned(drops_earned: int)
 # index:owner systems_agent
 # index:notes Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
 
-# Owns score-tied drop decisions. ScoreSystem reports Doubloons gained;
-# SpawnSystem still owns actual ball creation, placement, and drop animation.
+# Owns the working score-tied drop loop. ScoreSystem reports Doubloons gained;
+# this system tracks progress and asks SpawnSystem to perform earned drops.
 const SCORE_DROP_MESSAGES := [
 	"The Kraken provides...",
 	"There's another one here somewhere...",
@@ -85,6 +85,7 @@ func get_progress_percent() -> float:
 
 
 func apply_special_ball_sink_penalty() -> Dictionary:
+	# Penalties subtract Doubloons only; they intentionally do not touch drop_progress.
 	var applied_penalty := 0
 	if table != null and table.score_system != null:
 		applied_penalty = table.score_system.apply_doubloons_penalty(special_ball_sink_penalty)

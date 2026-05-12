@@ -26,7 +26,7 @@ What it appears to do:
 - Score-tied ball drops and cue/eight-ball sink penalties now flow through BallDropSystem.gd boundaries.
 
 Known risks or TODOs:
-- BallDropSystem.gd is still early; drop tuning and penalty presentation need playtesting.
+- BallDropSystem.gd is first-pass playable; drop tuning and penalty presentation still need playtesting.
 - Cue/eight-ball sink penalties should not accidentally feed score-tied drop progress.
 
 Questions for the developer:

@@ -50,9 +50,11 @@ Does not own shot power, shot velocity, aim prediction, or real ball movement.
 
 ### `scripts/AimPreview.gd`
 
-Owns aim line rendering, shot-power color, ghost cue-ball prediction, one-bank preview, and predicted-vs-actual shot path debug visualization.
+Owns polished cue-ball aim line presentation, shot-power color, swept cue-ball preview collision checks, ghost cue-ball prediction, one-bank preview, hit-ball prediction line presentation, hit-ball first-collision stopping against rails/balls/pockets, visual-only endpoint markers, and predicted-vs-actual shot path debug visualization.
 
-Does not mutate real gameplay state. Prediction must stay side-effect-free and should use shared boundary helpers so preview stays aligned with real movement.
+Does not mutate real gameplay state. Prediction must stay side-effect-free and should use shared boundary/pocket helpers so preview stays aligned with real movement.
+
+AimPreview.gd must remain prediction/presentation only. It must not change real physics, shot power, cue feel, scoring, anomalies, or spawn systems.
 
 ### `scripts/SpawnSystem.gd`
 
@@ -281,11 +283,11 @@ Avoid generic filler summaries. The review should reinforce Kraken An Eight Ball
 
 ## Next Major Goal
 
-Implement score-tied ball drops:
+Continue stabilizing score-tied ball drops:
 
 better play -> more score events/Doubloons -> more balls -> more interactions -> higher score before the table empties.
 
-The first architecture spine now exists in `BallDropSystem.gd`. Next passes should add presentation polish without moving reward decisions into `ScoreSystem.gd` or `Table.gd`.
+The first playable loop now exists in `BallDropSystem.gd`. Next passes should focus on presentation polish, tuning, and placeholder removal-animation replacement without moving reward decisions into `ScoreSystem.gd` or `Table.gd`.
 
 Ball drop messaging now rotates for score-earned drops. Current lines include:
 
