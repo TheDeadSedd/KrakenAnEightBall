@@ -123,23 +123,10 @@ The scanner understands optional comments in source files:
 ## Recently Changed
 
 Changed scanned files:
-- `AGENTS.md` - AGENTS. Project documentation or checkpoint notes.; owner: cleanup_agent
-- `scenes/Main.tscn` - Main. Godot scene file used for authored node layout and scene wiring.; owner: ui_agent
-- `scenes/Table.tscn` - Table. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
-- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
-- `scripts/BallDropMeter.gd` - Ball Drop Meter. Vertical right-side HUD meter for progress toward the next score-earned ball drop.; status: In Progress; owner: ui_agent; notes: Vertical right-side meter for score progress toward the next earned ball drop.
-- `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
-- `scripts/DebugOverlay.gd` - DebugOverlay. Formats debug menu, performance overlay, toggles, and physics debug text.; owner: ui_agent
-- `scripts/Main.gd` - Main. Small app shell and top-level scene wiring.; owner: systems_agent
-- `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and pocket-side score popup presentation.; owner: ui_agent
-- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.; owner: systems_agent
-- `scripts/Table.gd` - Table. High-level table coordinator and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/AimPreview.gd` - AimPreview. Draws aim preview and side-effect-free cue-ball prediction.; owner: performance_agent
 
 Changed files outside scanner set:
-- `.gitignore` - Recently changed but outside the scanned file set.
-- `scripts/BallDropMeter.gd.uid` - Recently changed but outside the scanned file set.
-- `scripts/BallDropSystem.gd.uid` - Recently changed but outside the scanned file set.
-- `tools/build_project_brain.py` - Recently changed but outside the scanned file set.
+- `export_presets.cfg` - Recently changed but outside the scanned file set.
 
 ## Unclassified
 
