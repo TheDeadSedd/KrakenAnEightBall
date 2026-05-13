@@ -10,7 +10,7 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 
 ## Files Watched
 
-- `scripts/AimPreview.gd` - Draws aim preview and side-effect-free cue-ball prediction.
+- `scripts/AimPreview.gd` - Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, and AimPreview broad-phase counters.
 - `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
 - `scripts/DebugOverlay.gd` - Formats debug menu, performance overlay, toggles, and physics debug text.
@@ -23,6 +23,7 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 - Do not solve chaos by preventing chaos; degrade visuals first.
 - High ball counts and large earned chain reactions are intended.
 - BallDropSystem.gd exists as the score-tied drop spine and should be watched for high-count visual scaling pressure.
+- AimPreview.gd uses broad-phase filtering and debug counters to keep swept prediction affordable.
 
 ## Risks Or TODOs
 

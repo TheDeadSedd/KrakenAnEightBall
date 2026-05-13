@@ -26,6 +26,7 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 - Score popups are pocket-side arcade celebrations, not generic UI spam.
 - Debug labels should stay clearly marked and not leak temporary test wording into player-facing strings.
 - BallDropSystem.gd owns rotating score-earned drop-message selection; SpawnSystem/Table carry those messages to callouts.
+- TableImpactShakeSystem.gd owns fake-3D table impact shake and draw-only ball shimmy presentation.
 
 ## Risks Or TODOs
 

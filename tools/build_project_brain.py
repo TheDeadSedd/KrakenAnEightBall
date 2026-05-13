@@ -50,7 +50,7 @@ KNOWN_CATEGORY_HINTS = {
     "scenes/CueBall.tscn": ["Mechanics", "Systems", "UI"],
     "scenes/Main.tscn": ["Systems", "UI"],
     "scenes/Table.tscn": ["Physics", "Systems"],
-    "scripts/AimPreview.gd": ["Physics", "Performance Concerns"],
+    "scripts/AimPreview.gd": ["Physics", "UI", "Performance Concerns"],
     "scripts/AnchorBallSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns", "In Progress"],
     "scripts/BallDropMeter.gd": ["UI", "Systems", "In Progress"],
     "scripts/BallDropSystem.gd": ["Mechanics", "Systems", "UI", "Performance Concerns", "In Progress"],
@@ -70,18 +70,7 @@ KNOWN_CATEGORY_HINTS = {
     "scripts/WayfinderSystem.gd": ["Anomaly Balls", "Systems"],
 }
 
-PLANNED_SYSTEMS = {
-    "BallDropSystem.gd": {
-        "status": "Planned",
-        "summary": "Next major system for score-tied ball drops, drop rewards, rotating drop messages, and sink-penalty removal flow.",
-        "agents": {
-            "mechanics_agent": "Watches the score-to-more-balls escalation loop and cue/eight-ball sink consequences.",
-            "systems_agent": "Should sit between ShotEventSystem/ScoreSystem and SpawnSystem so Table.gd stays a coordinator.",
-            "ui_agent": "Watches rotating drop messages and reversed drop animation used as placeholder removal feedback.",
-            "performance_agent": "Watches high-ball-count escalation, popup pressure, particle/trail load, and graceful visual degradation.",
-        },
-    },
-}
+PLANNED_SYSTEMS = {}
 
 AGENT_DEFINITIONS = {
     "mechanics_agent": {
@@ -104,6 +93,7 @@ AGENT_DEFINITIONS = {
         "notes": [
             "Table.gd should coordinate systems without absorbing new feature logic.",
             "Scene-authored geometry remains the source of truth.",
+            "TableImpactShakeSystem.gd owns presentation-only fake-3D table shake so gameplay geometry and HUD stay stable.",
         ],
         "questions": [
             "What reward decisions should BallDropSystem.gd own before tuning starts?",
@@ -131,6 +121,7 @@ AGENT_DEFINITIONS = {
             "Score popups are pocket-side arcade celebrations, not generic UI spam.",
             "Debug labels should stay clearly marked and not leak temporary test wording into player-facing strings.",
             "BallDropSystem.gd owns rotating score-earned drop-message selection; SpawnSystem/Table carry those messages to callouts.",
+            "TableImpactShakeSystem.gd owns fake-3D table impact shake and draw-only ball shimmy presentation.",
         ],
         "questions": [
             "Should ball drop callouts get themed variants now that the BallDropSystem spine exists?",
@@ -145,6 +136,7 @@ AGENT_DEFINITIONS = {
             "Do not solve chaos by preventing chaos; degrade visuals first.",
             "High ball counts and large earned chain reactions are intended.",
             "BallDropSystem.gd exists as the score-tied drop spine and should be watched for high-count visual scaling pressure.",
+            "AimPreview.gd uses broad-phase filtering and debug counters to keep swept prediction affordable.",
         ],
         "questions": [
             "What visual-quality tiers should exist for trails, particles, aura effects, and score labels?",
@@ -390,7 +382,7 @@ def guess_summary(rel_path: str) -> str:
     if name == "DebugOverlay.gd":
         return "Formats debug menu, performance overlay, toggles, and physics debug text."
     if name == "AimPreview.gd":
-        return "Draws aim preview and side-effect-free cue-ball prediction."
+        return "Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, and AimPreview broad-phase counters."
     if name == "BoundarySystem.gd":
         return "Loads authored rail/boundary geometry and shared boundary helpers."
     if name == "PocketSystem.gd":

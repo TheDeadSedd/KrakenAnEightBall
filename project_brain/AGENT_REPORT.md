@@ -55,6 +55,7 @@ What it appears to do:
 - Tracks module boundaries, ownership rules, scene wiring, and coordinator responsibilities.
 - Table.gd should coordinate systems without absorbing new feature logic.
 - Scene-authored geometry remains the source of truth.
+- TableImpactShakeSystem.gd owns presentation-only fake-3D table shake so gameplay geometry and HUD stay stable.
 
 Known risks or TODOs:
 - Table.gd still owns BallPhysics; do not extract casually.
@@ -109,6 +110,7 @@ What it appears to do:
 - Score popups are pocket-side arcade celebrations, not generic UI spam.
 - Debug labels should stay clearly marked and not leak temporary test wording into player-facing strings.
 - BallDropSystem.gd owns rotating score-earned drop-message selection; SpawnSystem/Table carry those messages to callouts.
+- TableImpactShakeSystem.gd owns fake-3D table impact shake and draw-only ball shimmy presentation.
 
 Known risks or TODOs:
 - Score popup readability can regress when many events happen at once.
@@ -121,7 +123,7 @@ Questions for the developer:
 ## Performance Agent
 
 Relevant files:
-- `scripts/AimPreview.gd` - Draws aim preview and side-effect-free cue-ball prediction.
+- `scripts/AimPreview.gd` - Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, and AimPreview broad-phase counters.
 - `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
 - `scripts/DebugOverlay.gd` - Formats debug menu, performance overlay, toggles, and physics debug text.
@@ -134,6 +136,7 @@ What it appears to do:
 - Do not solve chaos by preventing chaos; degrade visuals first.
 - High ball counts and large earned chain reactions are intended.
 - BallDropSystem.gd exists as the score-tied drop spine and should be watched for high-count visual scaling pressure.
+- AimPreview.gd uses broad-phase filtering and debug counters to keep swept prediction affordable.
 
 Known risks or TODOs:
 - Visual effects should degrade before gameplay chaos is limited.

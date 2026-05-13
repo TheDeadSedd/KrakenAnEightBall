@@ -31,6 +31,7 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 
 - Table.gd should coordinate systems without absorbing new feature logic.
 - Scene-authored geometry remains the source of truth.
+- TableImpactShakeSystem.gd owns presentation-only fake-3D table shake so gameplay geometry and HUD stay stable.
 
 ## Risks Or TODOs
 
