@@ -6,7 +6,7 @@ class_name CannonBallSystem
 # index:category Mechanics / Anomaly Balls / Systems / Performance Concerns / In Progress
 # index:status In Progress
 # index:owner anomaly_ball_agent
-# index:notes Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers and Powder Keg launch tuning.
+# index:notes Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 
 # Owns Cannon Ball anomaly behavior. Table.gd still owns the main collision
 # loop and asks this system to adjust only Cannon-involved ball impulses.
@@ -16,10 +16,24 @@ class_name CannonBallSystem
 @export var minimum_heavy_impact_speed := 80.0
 @export_range(1.0, 3.0, 0.05) var powder_keg_explosion_impulse_multiplier := 1.75
 @export var powder_keg_launch_speed_cap := 900.0
+@export var cannon_impact_shake_enabled := true
+@export var cannon_impact_shake_strength := 2.1
+@export var cannon_impact_shake_speed_bonus := 1.3
+@export var cannon_impact_shake_max_strength := 3.6
+@export var cannon_impact_shake_cooldown := 0.16
+@export var cannon_presence_visuals_enabled := true
+@export var cannon_presence_speed_threshold := 120.0
+@export var cannon_presence_short_trail_speed := 220.0
+@export var cannon_presence_medium_trail_speed := 340.0
+@export var cannon_presence_long_trail_speed := 460.0
+@export var max_active_cannon_presence_effects := 5
+@export var cannon_presence_impact_flash_strength := 0.45
+@export var cannon_presence_impact_flash_duration := 0.22
 
 var table
 var collisions_this_frame := 0
 var heavy_impacts_this_frame := 0
+var _next_cannon_impact_shake_time_msec := 0
 
 
 func setup(table_ref) -> void:
@@ -49,6 +63,40 @@ func get_active_cannon_ball_count() -> int:
 		if ball != null and ball.is_cannon_ball and ball.is_gameplay_active():
 			cannon_ball_count += 1
 	return cannon_ball_count
+
+
+func update_presence_visuals() -> void:
+	if table == null:
+		return
+
+	var candidates: Array[Dictionary] = []
+	for child in table.balls.get_children():
+		var ball := child as Ball
+		if not _is_cannon_ball(ball):
+			continue
+		var speed: float = ball.velocity.length()
+		if not cannon_presence_visuals_enabled or not ball.is_gameplay_active() or speed < cannon_presence_speed_threshold:
+			ball.set_cannon_presence_visual(0.0, Vector2.ZERO)
+			continue
+		candidates.append({
+			"ball": ball,
+			"speed": speed,
+		})
+
+	candidates.sort_custom(_sort_cannon_presence_candidates_by_speed)
+	var visible_count: int = mini(maxi(max_active_cannon_presence_effects, 0), candidates.size())
+	for index in range(candidates.size()):
+		var candidate: Dictionary = candidates[index]
+		var ball := candidate["ball"] as Ball
+		if ball == null:
+			continue
+		if index >= visible_count:
+			ball.set_cannon_presence_visual(0.0, Vector2.ZERO)
+			continue
+		ball.set_cannon_presence_visual(
+			_get_cannon_presence_tier(float(candidate["speed"])),
+			ball.velocity.normalized()
+		)
 
 
 func can_trigger_powder_keg(ball: Ball) -> bool:
@@ -100,6 +148,7 @@ func _apply_cannon_collision(
 		)
 		if impact_multiplier > 1.0:
 			heavy_impacts_this_frame += 1
+			_try_request_cannon_impact_feedback(cannon_ball, cannon_pre_collision_velocity, cannon_to_other_normal)
 		return
 
 	other_ball.velocity += base_other_delta
@@ -121,6 +170,56 @@ func _get_outgoing_impact_multiplier(cannon_ball: Ball) -> float:
 	if cannon_ball.velocity.length() < minimum_heavy_impact_speed:
 		return 1.0
 	return outgoing_impact_multiplier
+
+
+func _sort_cannon_presence_candidates_by_speed(candidate_a: Dictionary, candidate_b: Dictionary) -> bool:
+	return float(candidate_a["speed"]) > float(candidate_b["speed"])
+
+
+func _get_cannon_presence_tier(speed: float) -> float:
+	if speed >= cannon_presence_long_trail_speed:
+		return 4.0
+	if speed >= cannon_presence_medium_trail_speed:
+		return 3.0
+	if speed >= cannon_presence_short_trail_speed:
+		return 2.0
+	if speed >= cannon_presence_speed_threshold:
+		return 1.0
+	return 0.0
+
+
+func _try_request_cannon_impact_feedback(cannon_ball: Ball, cannon_velocity: Vector2, impact_normal: Vector2) -> void:
+	if table == null:
+		return
+
+	var impact_speed: float = cannon_velocity.dot(impact_normal)
+	if impact_speed < minimum_heavy_impact_speed:
+		return
+
+	if cannon_presence_visuals_enabled and cannon_ball != null:
+		cannon_ball.add_cannon_presence_flash(
+			cannon_presence_impact_flash_strength,
+			cannon_presence_impact_flash_duration
+		)
+
+	if not cannon_impact_shake_enabled:
+		return
+
+	var current_time_msec: int = Time.get_ticks_msec()
+	if current_time_msec < _next_cannon_impact_shake_time_msec:
+		return
+
+	_next_cannon_impact_shake_time_msec = current_time_msec + int(cannon_impact_shake_cooldown * 1000.0)
+	var speed_ratio: float = clamp(impact_speed / max(minimum_heavy_impact_speed, 1.0) - 1.0, 0.0, 1.0)
+	var shake_strength: float = clamp(
+		cannon_impact_shake_strength + speed_ratio * cannon_impact_shake_speed_bonus,
+		0.0,
+		cannon_impact_shake_max_strength
+	)
+	var impact_direction: Vector2 = cannon_velocity.normalized()
+	if impact_direction.length_squared() <= 0.001:
+		impact_direction = impact_normal
+	table.table_impact_shake_system.request_cannon_heavy_impact(impact_direction, shake_strength)
 
 
 func _is_cannon_collision_partner(ball: Ball) -> bool:

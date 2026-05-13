@@ -14,7 +14,7 @@ Do not change gameplay based only on this report; check real source files and `A
 - `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
-- `scripts/CannonBallSystem.gd` - Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning.
+- `scripts/CannonBallSystem.gd` - Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.
 - `scripts/Main.gd` - Small app shell and top-level scene wiring.
 - `scripts/PocketSystem.gd` - Loads authored pocket geometry and detects pocket captures.
 - `scripts/PowderKegSystem.gd` - Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.
@@ -22,6 +22,7 @@ Do not change gameplay based only on this report; check real source files and `A
 - `scripts/ShotEventSystem.gd` - Tracks causal per-shot scoring events for sunk balls.
 - `scripts/SpawnSystem.gd` - Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.
 - `scripts/Table.gd` - High-level table coordinator and current home of authoritative arcade ball physics.
+- `scripts/TableImpactShakeSystem.gd` - Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.
 - `scripts/WayfinderSystem.gd` - Handles Wayfinder activation and temporary guided-ball redirects.
 
 ## Current Notes

@@ -36,6 +36,10 @@ const CANNON_BALL_RIM_COLOR := Color("050607")
 const CANNON_BALL_DENT_COLOR := Color("070809")
 const CANNON_BALL_EDGE_COLOR := Color("3a3f42")
 const CANNON_BALL_EMBER_COLOR := Color("ff8a2d")
+const CANNON_HEAT_GLOW_COLOR := Color("ff3218")
+const CANNON_HEAT_TRAIL_COLOR := Color("ff7a22")
+const CANNON_HEAT_HOT_COLOR := Color("ffd26a")
+const CANNON_PRESENCE_FADE_TIME := 0.18
 const DEBUG_WAYFINDER := false
 
 @export var ball_type := BallType.OBJECT
@@ -100,6 +104,7 @@ var _spawn_drop_elapsed := 0.0
 var _spawn_drop_target := Vector2.ZERO
 var _spawn_drop_settle_velocity := Vector2.ZERO
 var _spawn_drop_visual_offset := Vector2.ZERO
+var _impact_shimmy_visual_offset := Vector2.ZERO
 var _spawn_drop_visual_lean_direction := Vector2.ZERO
 var _spawn_drop_horizontal_offset := Vector2.ZERO
 var _spawn_landing_damping_remaining := 0.0
@@ -110,6 +115,12 @@ var _trail_redraws_this_frame := 0
 var _anchor_influence_visual_strength := 0.0
 var _anchor_influence_fade_remaining := 0.0
 var _anchor_influence_direction := Vector2.ZERO
+var _cannon_presence_visual_strength := 0.0
+var _cannon_presence_target_strength := 0.0
+var _cannon_presence_direction := Vector2.RIGHT
+var _cannon_presence_flash_strength := 0.0
+var _cannon_presence_flash_remaining := 0.0
+var _cannon_presence_flash_fade_time := 0.24
 
 
 func _ready() -> void:
@@ -129,6 +140,7 @@ func _process(delta: float) -> void:
 		_update_spawn_drop(delta)
 
 	_update_anchor_influence_visual(delta)
+	_update_cannon_presence_visual(delta)
 
 	if is_wayfinder and wayfinder_active and gameplay_enabled:
 		queue_redraw()
@@ -239,6 +251,39 @@ func reset_trail_redraw_count() -> void:
 	_trail_redraws_this_frame = 0
 
 
+func set_impact_shimmy_visual_offset(offset: Vector2) -> void:
+	if _impact_shimmy_visual_offset.distance_squared_to(offset) < 0.01:
+		return
+	_impact_shimmy_visual_offset = offset
+	_update_label_layout()
+	queue_redraw()
+
+
+func set_cannon_presence_visual(strength: float, direction: Vector2) -> void:
+	var clamped_strength: float = clamp(strength, 0.0, 4.0)
+	var next_direction: Vector2 = _cannon_presence_direction
+	if direction.length_squared() > 0.001:
+		next_direction = direction.normalized()
+
+	var should_redraw: bool = (
+		absf(_cannon_presence_target_strength - clamped_strength) > 0.01
+		or _cannon_presence_direction.distance_squared_to(next_direction) > 0.01
+	)
+	_cannon_presence_target_strength = clamped_strength
+	if clamped_strength > _cannon_presence_visual_strength:
+		_cannon_presence_visual_strength = clamped_strength
+	_cannon_presence_direction = next_direction
+	if should_redraw:
+		queue_redraw()
+
+
+func add_cannon_presence_flash(strength: float, duration: float) -> void:
+	_cannon_presence_flash_strength = max(_cannon_presence_flash_strength, clamp(strength, 0.0, 1.0))
+	_cannon_presence_flash_remaining = max(_cannon_presence_flash_remaining, duration)
+	_cannon_presence_flash_fade_time = max(duration, 0.01)
+	queue_redraw()
+
+
 func setup(
 	new_type: int,
 	new_number: int,
@@ -255,6 +300,10 @@ func setup(
 	is_powder_keg = new_is_powder_keg
 	is_anchor_ball = new_is_anchor_ball
 	is_cannon_ball = new_is_cannon_ball
+	set_cannon_presence_visual(0.0, Vector2.RIGHT)
+	_cannon_presence_visual_strength = 0.0
+	_cannon_presence_flash_strength = 0.0
+	_cannon_presence_flash_remaining = 0.0
 	_reset_wayfinder_state()
 	_update_label()
 	_update_number_color()
@@ -608,6 +657,35 @@ func _clear_anchor_influence_visual() -> void:
 		queue_redraw()
 
 
+func _update_cannon_presence_visual(delta: float) -> void:
+	var had_visual: bool = _get_cannon_presence_draw_strength() > 0.0
+	if _cannon_presence_target_strength <= 0.0 and _cannon_presence_visual_strength > 0.0:
+		_cannon_presence_visual_strength = move_toward(
+			_cannon_presence_visual_strength,
+			0.0,
+			delta / CANNON_PRESENCE_FADE_TIME
+		)
+	elif _cannon_presence_target_strength > 0.0:
+		_cannon_presence_visual_strength = _cannon_presence_target_strength
+
+	if _cannon_presence_flash_remaining > 0.0:
+		_cannon_presence_flash_remaining = max(_cannon_presence_flash_remaining - delta, 0.0)
+		_cannon_presence_flash_strength = move_toward(
+			_cannon_presence_flash_strength,
+			0.0,
+			delta / _cannon_presence_flash_fade_time
+		)
+	else:
+		_cannon_presence_flash_strength = 0.0
+
+	if had_visual or _get_cannon_presence_draw_strength() > 0.0:
+		queue_redraw()
+
+
+func _get_cannon_presence_draw_strength() -> float:
+	return clamp(_cannon_presence_visual_strength + _cannon_presence_flash_strength, 0.0, 4.45)
+
+
 func _queue_trail_redraw() -> void:
 	_trail_redraws_this_frame += 1
 	queue_redraw()
@@ -615,7 +693,11 @@ func _queue_trail_redraw() -> void:
 
 func _update_label_layout() -> void:
 	number_label.size = Vector2(radius * 2.0, radius * 2.0)
-	number_label.position = _spawn_drop_visual_offset + Vector2(-radius, -radius - 1.0)
+	number_label.position = _get_visual_draw_origin() + Vector2(-radius, -radius - 1.0)
+
+
+func _get_visual_draw_origin() -> Vector2:
+	return _spawn_drop_visual_offset + _impact_shimmy_visual_offset
 
 
 func _update_label() -> void:
@@ -683,7 +765,7 @@ func _print_wayfinder_debug(message: String) -> void:
 func _draw() -> void:
 	_draw_trail()
 
-	var origin: Vector2 = _spawn_drop_visual_offset
+	var origin: Vector2 = _get_visual_draw_origin()
 	var display_color: Color = _get_display_color()
 	var rim_color: Color = display_color.darkened(0.45)
 	var shadow_color: Color = Color(0, 0, 0, 0.22)
@@ -691,6 +773,9 @@ func _draw() -> void:
 
 	if anchor_visuals_enabled and _anchor_influence_visual_strength > 0.0:
 		_draw_anchor_influence_indicator(origin)
+
+	if is_cannon_ball and _get_cannon_presence_draw_strength() > 0.0:
+		_draw_cannon_presence(origin)
 
 	if is_wayfinder:
 		_draw_wayfinder_aura(origin)
@@ -863,6 +948,92 @@ func _draw_cannon_ball_mark(origin: Vector2) -> void:
 		1.3
 	)
 	draw_circle(ember_center + Vector2(radius * 0.20, -radius * 0.08), radius * 0.07, Color(1.0, 0.58, 0.18, 0.76))
+	if _get_cannon_presence_draw_strength() > 0.0:
+		_draw_cannon_motion_ember(ember_center)
+
+
+func _draw_cannon_presence(origin: Vector2) -> void:
+	var strength: float = _get_cannon_presence_draw_strength()
+	var tier_strength: float = min(strength, 4.0)
+	var forward: Vector2 = _cannon_presence_direction.normalized()
+	if forward.length_squared() <= 0.001:
+		forward = Vector2.RIGHT
+	var trail_direction: Vector2 = -forward
+
+	var outer_glow := CANNON_HEAT_GLOW_COLOR
+	outer_glow.a = 0.09 + tier_strength * 0.052
+	draw_circle(origin, radius * (1.16 + tier_strength * 0.13), outer_glow)
+
+	var inner_glow := CANNON_HEAT_TRAIL_COLOR
+	inner_glow.a = 0.10 + tier_strength * 0.045
+	draw_circle(origin, radius * (0.96 + tier_strength * 0.055), inner_glow)
+
+	var rim_glow := CANNON_HEAT_HOT_COLOR
+	rim_glow.a = 0.14 + tier_strength * 0.042
+	draw_arc(origin, radius + 2.2 + tier_strength * 0.85, 0.0, TAU, 40, rim_glow, 1.2 + tier_strength * 0.26)
+
+	if strength < 1.75:
+		return
+
+	var trail_segments := 3
+	var trail_length: float = radius * 2.80
+	var trail_scale := 1.15
+	var start_alpha := 0.30
+	var end_alpha := 0.075
+	if strength >= 3.75:
+		trail_segments = 5
+		trail_length = radius * 5.90
+		trail_scale = 1.85
+		start_alpha = 0.46
+		end_alpha = 0.115
+	elif strength >= 2.75:
+		trail_segments = 4
+		trail_length = radius * 4.15
+		trail_scale = 1.45
+		start_alpha = 0.38
+		end_alpha = 0.090
+
+	for trail_index in range(trail_segments):
+		var ratio: float = float(trail_index) / float(trail_segments)
+		var fade_ratio: float = float(trail_index + 1) / float(trail_segments)
+		var ember_position: Vector2 = origin + trail_direction * trail_length * ratio
+		if trail_index == 0:
+			ember_position += trail_direction * radius * 0.35
+		var ember_radius: float = radius * lerp(1.05, 0.34, fade_ratio) * trail_scale
+
+		var outer_trail_glow := CANNON_HEAT_GLOW_COLOR
+		outer_trail_glow.a = lerp(start_alpha * 0.58, end_alpha * 0.42, fade_ratio)
+		draw_circle(ember_position, ember_radius * 1.85, outer_trail_glow)
+
+		var ember_color := CANNON_HEAT_TRAIL_COLOR
+		ember_color.a = lerp(start_alpha, end_alpha, fade_ratio)
+		draw_circle(ember_position, ember_radius, ember_color)
+
+		var hot_core := CANNON_HEAT_HOT_COLOR
+		hot_core.a = lerp(start_alpha * 0.78, end_alpha * 0.55, fade_ratio)
+		draw_circle(ember_position, ember_radius * 0.48, hot_core)
+
+	var rear_heat := CANNON_HEAT_HOT_COLOR
+	rear_heat.a = 0.16 + tier_strength * 0.046
+	draw_circle(origin + trail_direction * radius * 0.86, radius * (0.24 + tier_strength * 0.045), rear_heat)
+
+
+func _draw_cannon_motion_ember(ember_center: Vector2) -> void:
+	var strength: float = _get_cannon_presence_draw_strength()
+	var tier_strength: float = min(strength, 4.0)
+	var ember_glow := CANNON_BALL_EMBER_COLOR
+	ember_glow.a = 0.16 + tier_strength * 0.095
+	draw_circle(ember_center, radius * (0.34 + tier_strength * 0.095), ember_glow)
+
+	var hot_color := CANNON_HEAT_HOT_COLOR
+	hot_color.a = 0.22 + tier_strength * 0.095
+	draw_line(
+		ember_center + Vector2(-radius * 0.34, radius * 0.13),
+		ember_center + Vector2(radius * 0.36, -radius * 0.18),
+		hot_color,
+		1.1 + tier_strength * 0.36
+	)
+	draw_circle(ember_center + Vector2(radius * 0.28, -radius * 0.12), radius * (0.065 + tier_strength * 0.043), hot_color)
 
 
 func _draw_wayfinder_aura(origin: Vector2) -> void:

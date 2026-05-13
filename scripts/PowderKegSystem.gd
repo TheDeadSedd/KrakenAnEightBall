@@ -67,12 +67,17 @@ func _can_trigger_powder_keg(striker: Ball) -> bool:
 
 func _explode_powder_keg(powder_keg: Ball) -> void:
 	var explosion_center: Vector2 = powder_keg.global_position
-	_push_nearby_balls(powder_keg, explosion_center)
+	var impact_data: Dictionary = _push_nearby_balls(powder_keg, explosion_center)
+	_request_table_impact_shake(explosion_center, impact_data)
 	_spawn_explosion_particles(explosion_center)
 	_remove_powder_keg(powder_keg)
 
 
-func _push_nearby_balls(powder_keg: Ball, explosion_center: Vector2) -> void:
+func _push_nearby_balls(powder_keg: Ball, explosion_center: Vector2) -> Dictionary:
+	var impact_data := {
+		"affected_balls": 0,
+		"cannon_balls": 0,
+	}
 	for child in table.balls.get_children():
 		var other_ball := child as Ball
 		if other_ball == null or other_ball == powder_keg or not other_ball.is_gameplay_active():
@@ -87,7 +92,9 @@ func _push_nearby_balls(powder_keg: Ball, explosion_center: Vector2) -> void:
 		var applied_ratio: float = lerp(min_force_ratio, 1.0, distance_ratio)
 		var push_direction: Vector2 = _get_push_direction(powder_keg, other_ball, offset)
 		var explosion_delta: Vector2 = push_direction * explosion_force * applied_ratio
+		impact_data["affected_balls"] = int(impact_data["affected_balls"]) + 1
 		if other_ball.is_cannon_ball:
+			impact_data["cannon_balls"] = int(impact_data["cannon_balls"]) + 1
 			other_ball.velocity = table.cannon_ball_system.get_powder_keg_launch_velocity(
 				other_ball,
 				other_ball.velocity,
@@ -99,6 +106,16 @@ func _push_nearby_balls(powder_keg: Ball, explosion_center: Vector2) -> void:
 			other_ball.suppress_trail_for(trail_suppression_duration)
 		if _is_anomaly_scoring_target(other_ball):
 			table.shot_event_system.record_anomaly_touch(other_ball)
+
+	return impact_data
+
+
+func _request_table_impact_shake(explosion_center: Vector2, impact_data: Dictionary) -> void:
+	table.table_impact_shake_system.request_powder_keg_impact(
+		explosion_center,
+		int(impact_data["affected_balls"]),
+		int(impact_data["cannon_balls"])
+	)
 
 
 func _get_push_direction(powder_keg: Ball, other_ball: Ball, offset: Vector2) -> Vector2:

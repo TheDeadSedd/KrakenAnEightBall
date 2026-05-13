@@ -35,7 +35,7 @@ The scanner understands optional comments in source files:
 - `scenes/CueBall.tscn` - CueBall. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
 - `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, and anomaly identity flags.; owner: mechanics_agent
 - `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
-- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers and Powder Keg launch tuning.
+- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/CueController.gd` - CueController. Owns cue visuals, grab-zone hit testing, pullback, and strike presentation.; owner: mechanics_agent
 - `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and pocket-side score popup presentation.; owner: ui_agent
 - `scripts/ShotEventSystem.gd` - ShotEventSystem. Tracks causal per-shot scoring events for sunk balls.; owner: mechanics_agent
@@ -54,7 +54,7 @@ The scanner understands optional comments in source files:
 ## Anomaly Balls
 
 - `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
-- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers and Powder Keg launch tuning.
+- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/PowderKegSystem.gd` - PowderKegSystem. Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.; owner: anomaly_ball_agent
 - `scripts/WayfinderSystem.gd` - WayfinderSystem. Handles Wayfinder activation and temporary guided-ball redirects.; owner: anomaly_ball_agent
 
@@ -69,7 +69,7 @@ The scanner understands optional comments in source files:
 - `scripts/BallDropMeter.gd` - Ball Drop Meter. Vertical right-side HUD meter for progress toward the next score-earned ball drop.; status: In Progress; owner: ui_agent; notes: Vertical right-side meter for score progress toward the next earned ball drop.
 - `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
 - `scripts/BoundarySystem.gd` - BoundarySystem. Loads authored rail/boundary geometry and shared boundary helpers.; owner: systems_agent
-- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers and Powder Keg launch tuning.
+- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/Main.gd` - Main. Small app shell and top-level scene wiring.; owner: systems_agent
 - `scripts/PocketSystem.gd` - PocketSystem. Loads authored pocket geometry and detects pocket captures.; owner: systems_agent
 - `scripts/PowderKegSystem.gd` - PowderKegSystem. Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.; owner: anomaly_ball_agent
@@ -77,6 +77,7 @@ The scanner understands optional comments in source files:
 - `scripts/ShotEventSystem.gd` - ShotEventSystem. Tracks causal per-shot scoring events for sunk balls.; owner: mechanics_agent
 - `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.; owner: systems_agent
 - `scripts/Table.gd` - Table. High-level table coordinator and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
 - `scripts/WayfinderSystem.gd` - WayfinderSystem. Handles Wayfinder activation and temporary guided-ball redirects.; owner: anomaly_ball_agent
 
 ## UI
@@ -89,6 +90,7 @@ The scanner understands optional comments in source files:
 - `scripts/DebugOverlay.gd` - DebugOverlay. Formats debug menu, performance overlay, toggles, and physics debug text.; owner: ui_agent
 - `scripts/Main.gd` - Main. Small app shell and top-level scene wiring.; owner: systems_agent
 - `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and pocket-side score popup presentation.; owner: ui_agent
+- `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
 
 ## Debug Tools
 
@@ -102,10 +104,11 @@ The scanner understands optional comments in source files:
 - `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, and anomaly identity flags.; owner: mechanics_agent
 - `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
 - `scripts/BoundarySystem.gd` - BoundarySystem. Loads authored rail/boundary geometry and shared boundary helpers.; owner: systems_agent
-- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers and Powder Keg launch tuning.
+- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/PocketSystem.gd` - PocketSystem. Loads authored pocket geometry and detects pocket captures.; owner: systems_agent
 - `scripts/PowderKegSystem.gd` - PowderKegSystem. Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.; owner: anomaly_ball_agent
 - `scripts/Table.gd` - Table. High-level table coordinator and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
 
 ## In Progress
 
@@ -113,9 +116,10 @@ The scanner understands optional comments in source files:
 - `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
 - `scripts/BallDropMeter.gd` - Ball Drop Meter. Vertical right-side HUD meter for progress toward the next score-earned ball drop.; status: In Progress; owner: ui_agent; notes: Vertical right-side meter for score progress toward the next earned ball drop.
 - `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
-- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers and Powder Keg launch tuning.
+- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and pocket-side score popup presentation.; owner: ui_agent
 - `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.; owner: systems_agent
+- `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
 
 ## Needs Review
 
@@ -129,18 +133,15 @@ The scanner understands optional comments in source files:
 
 Changed scanned files:
 - `AGENTS.md` - AGENTS. Project documentation or checkpoint notes.; owner: cleanup_agent
-- `scenes/Main.tscn` - Main. Godot scene file used for authored node layout and scene wiring.; owner: ui_agent
 - `scenes/Table.tscn` - Table. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
 - `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, and anomaly identity flags.; owner: mechanics_agent
-- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers and Powder Keg launch tuning.
-- `scripts/DebugOverlay.gd` - DebugOverlay. Formats debug menu, performance overlay, toggles, and physics debug text.; owner: ui_agent
+- `scripts/CannonBallSystem.gd` - Cannon Ball System. Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/PowderKegSystem.gd` - PowderKegSystem. Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.; owner: anomaly_ball_agent
-- `scripts/ShotEventSystem.gd` - ShotEventSystem. Tracks causal per-shot scoring events for sunk balls.; owner: mechanics_agent
-- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.; owner: systems_agent
 - `scripts/Table.gd` - Table. High-level table coordinator and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
 
 Changed files outside scanner set:
-- `scripts/CannonBallSystem.gd.uid` - Recently changed but outside the scanned file set.
+- `scripts/TableImpactShakeSystem.gd.uid` - Recently changed but outside the scanned file set.
 - `tools/build_project_brain.py` - Recently changed but outside the scanned file set.
 
 ## Unclassified

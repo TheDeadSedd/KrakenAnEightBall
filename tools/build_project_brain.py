@@ -66,6 +66,7 @@ KNOWN_CATEGORY_HINTS = {
     "scripts/ShotEventSystem.gd": ["Mechanics", "Systems"],
     "scripts/SpawnSystem.gd": ["Mechanics", "Systems", "In Progress"],
     "scripts/Table.gd": ["Mechanics", "Physics", "Systems", "Performance Concerns"],
+    "scripts/TableImpactShakeSystem.gd": ["UI", "Systems", "Performance Concerns", "In Progress"],
     "scripts/WayfinderSystem.gd": ["Anomaly Balls", "Systems"],
 }
 
@@ -114,7 +115,7 @@ AGENT_DEFINITIONS = {
         "responsibility": "Tracks Wayfinder, Powder Keg, Anchor Ball, Cannon Ball, and future anomaly behavior boundaries.",
         "watch_keywords": ["wayfinder", "powder", "anchor", "cannon", "anomaly", "ball"],
         "notes": [
-            "Wayfinder, Powder Keg, and Anchor are active anomaly systems; Cannon Ball has first-pass heavy collision and Powder Keg launch behavior.",
+            "Wayfinder, Powder Keg, and Anchor are active anomaly systems; Cannon Ball has first-pass heavy collision, Powder Keg launch, heavy-impact shake, and high-speed heat presence.",
             "Anchor has independent priority spawn odds and object-ball-only pull.",
         ],
         "questions": [
@@ -125,7 +126,7 @@ AGENT_DEFINITIONS = {
     "ui_agent": {
         "display": "UI Agent",
         "responsibility": "Tracks HUD, debug panels, score popups, callouts, cue presentation, and player-facing text.",
-        "watch_keywords": ["debug", "score", "ui", "main", "cue", "popup", "label", "scene"],
+        "watch_keywords": ["debug", "score", "ui", "main", "cue", "popup", "label", "scene", "shake"],
         "notes": [
             "Score popups are pocket-side arcade celebrations, not generic UI spam.",
             "Debug labels should stay clearly marked and not leak temporary test wording into player-facing strings.",
@@ -139,7 +140,7 @@ AGENT_DEFINITIONS = {
     "performance_agent": {
         "display": "Performance Agent",
         "responsibility": "Tracks visual cost, broad-phase health, trail redraws, particle load, and stress-test readiness.",
-        "watch_keywords": ["performance", "debug", "trail", "particle", "anchor", "powder", "boundary", "pocket", "aim"],
+        "watch_keywords": ["performance", "debug", "trail", "particle", "anchor", "powder", "boundary", "pocket", "aim", "shake"],
         "notes": [
             "Do not solve chaos by preventing chaos; degrade visuals first.",
             "High ball counts and large earned chain reactions are intended.",
@@ -334,6 +335,7 @@ def guess_owner(rel_path: str) -> str:
         "Table.gd": "mechanics_agent",
         "AimPreview.gd": "performance_agent",
         "BoundarySystem.gd": "systems_agent",
+        "TableImpactShakeSystem.gd": "ui_agent",
         "PocketSystem.gd": "systems_agent",
         "SpawnSystem.gd": "systems_agent",
         "Main.gd": "systems_agent",
@@ -371,6 +373,8 @@ def guess_summary(rel_path: str) -> str:
         return "Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties."
     if name == "BallDropMeter.gd":
         return "Vertical right-side HUD meter for progress toward the next score-earned ball drop."
+    if name == "TableImpactShakeSystem.gd":
+        return "Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts."
     if name == "ScoreSystem.gd":
         return "Converts shot-event history into Doubloons and pocket-side score popup presentation."
     if name == "ShotEventSystem.gd":
@@ -382,7 +386,7 @@ def guess_summary(rel_path: str) -> str:
     if name == "AnchorBallSystem.gd":
         return "Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters."
     if name == "CannonBallSystem.gd":
-        return "Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, and Powder Keg launch tuning."
+        return "Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence."
     if name == "DebugOverlay.gd":
         return "Formats debug menu, performance overlay, toggles, and physics debug text."
     if name == "AimPreview.gd":

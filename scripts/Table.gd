@@ -102,6 +102,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var powder_keg_system: PowderKegSystem = $PowderKegSystem
 @onready var anchor_ball_system: AnchorBallSystem = $AnchorBallSystem
 @onready var cannon_ball_system: CannonBallSystem = $CannonBallSystem
+@onready var table_impact_shake_system: TableImpactShakeSystem = $TableImpactShakeSystem
 @onready var cue_controller: CueController = $CuePivot
 #endregion
 
@@ -157,6 +158,7 @@ func _ready() -> void:
 	powder_keg_system.setup(self)
 	anchor_ball_system.setup(self)
 	cannon_ball_system.setup(self)
+	table_impact_shake_system.setup(self)
 	_cache_table_geometry()
 	cue_controller.setup()
 	if Engine.is_editor_hint():
@@ -220,6 +222,7 @@ func _physics_process(delta: float) -> void:
 		_apply_ball_friction(step_delta)
 
 	anchor_ball_system.finish_frame()
+	cannon_ball_system.update_presence_visuals()
 	spawn_system.process_spawn_queue(delta)
 	_process_callout_queue(delta)
 	_try_finish_shot()
@@ -276,22 +279,28 @@ func _draw() -> void:
 
 func _draw_table_art() -> void:
 	var presentation_rect: Rect2 = get_presentation_rect()
-	draw_texture_rect(SHIP_FLOOR_TEXTURE, presentation_rect, false)
-	draw_rect(presentation_rect, Color(0, 0, 0, 0.18), true)
-	draw_texture_rect(TABLE_FRAME_TEXTURE, table_frame_art_rect, false)
-	_draw_kraken_felt_art()
+	var floor_offset: Vector2 = table_impact_shake_system.get_floor_visual_offset()
+	var table_art_offset: Vector2 = table_impact_shake_system.get_table_art_visual_offset()
+	draw_texture_rect(SHIP_FLOOR_TEXTURE, _offset_rect(presentation_rect, floor_offset), false)
+	draw_rect(_offset_rect(presentation_rect, floor_offset), Color(0, 0, 0, 0.18), true)
+	draw_texture_rect(TABLE_FRAME_TEXTURE, _offset_rect(table_frame_art_rect, table_art_offset), false)
+	_draw_kraken_felt_art(table_art_offset)
 
 
-func _draw_kraken_felt_art() -> void:
+func _draw_kraken_felt_art(table_art_offset: Vector2 = Vector2.ZERO) -> void:
 	# The felt is baked into the table frame, so the center symbol draws as
 	# its own overlay above the frame while still staying below balls/cue.
 	var kraken_rect: Rect2 = _fit_texture_rect_inside(KRAKEN_SILHOUETTE_TEXTURE, playfield_rect.grow(-54.0))
 	draw_texture_rect(
 		KRAKEN_SILHOUETTE_TEXTURE,
-		kraken_rect,
+		_offset_rect(kraken_rect, table_art_offset),
 		false,
 		Color(0.88, 0.94, 0.92, KRAKEN_ART_ALPHA)
 	)
+
+
+func _offset_rect(rect: Rect2, offset: Vector2) -> Rect2:
+	return Rect2(rect.position + offset, rect.size)
 
 
 func _draw_collision_debug() -> void:

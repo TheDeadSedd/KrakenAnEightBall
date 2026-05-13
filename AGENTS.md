@@ -82,9 +82,9 @@ Does not own ball-to-ball collision response, cue input, scoring values, predict
 
 ### `scripts/CannonBallSystem.gd`
 
-Owns the Cannon Ball anomaly boundary, first-pass heavy collision behavior, and Cannon-specific Powder Keg launch tuning. Cannon Ball is currently debug-spawnable, visually heavy, harder to accelerate from normal/cue impacts, more forceful/persistent when it hits non-anomaly balls, and amplified when launched by Powder Keg explosions.
+Owns the Cannon Ball anomaly boundary, first-pass heavy collision behavior, Cannon-specific Powder Keg launch tuning, Cannon heavy-impact shake eligibility/cooldown, and moving Cannon heat-presence thresholds. Cannon Ball is currently debug-spawnable, visually heavy, harder to accelerate from normal/cue impacts, more forceful/persistent when it hits non-anomaly balls, amplified when launched by Powder Keg explosions, able to request subtle table thumps on qualifying heavy impacts, and visually marked by a draw-only red/orange heat glow and ember trail at high speed.
 
-Future Cannon Ball passes may own Anchor pull tuning, Wayfinder guidance safeguards, wake visuals, regular spawn odds, and heavy-impact feedback, but those are not active yet.
+Future Cannon Ball passes may own Anchor pull tuning, Wayfinder guidance safeguards, regular spawn odds, and additional heat-presence polish, but those are not active yet.
 
 Does not own global ball-to-ball collision constants, spawn odds, scoring values, cue input, prediction, pocket geometry, screen shake, or interactions with Anchor or Wayfinder.
 
@@ -151,6 +151,12 @@ Reads BallDropSystem progress signals/snapshots and renders a vertical right-sid
 
 Does not own drop rules, scoring, spawn timing, debug overlay counters, or gameplay state.
 
+### `scripts/TableImpactShakeSystem.gd`
+
+Owns presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon Ball heavy impacts, including table-art draw offsets and temporary ball shimmy offsets.
+
+Does not own gameplay positions, physics velocities, camera movement, HUD/debug UI, scoring, spawn timing, or anomaly force tuning. It should stay inactive when no shake is playing and must never move authoritative ball/table geometry.
+
 ## Physics Rules
 
 - Preserve shot feel, pocket feel, rail feel, cue feel, and collision liveliness unless explicitly asked to tune them.
@@ -177,7 +183,7 @@ Anomaly balls should generally get their own system scripts. Current active anom
 - `WayfinderSystem.gd`
 - `PowderKegSystem.gd`
 - `AnchorBallSystem.gd`
-- `CannonBallSystem.gd` currently owns debug-spawnable Cannon identity, first-pass heavy collision behavior, and Powder Keg launch tuning.
+- `CannonBallSystem.gd` currently owns debug-spawnable Cannon identity, first-pass heavy collision behavior, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat-presence thresholds.
 
 Pattern:
 
@@ -194,6 +200,7 @@ Current anomaly rules:
 - Powder Keg explodes on cue-ball or Cannon Ball contact only; normal balls still do not trigger it.
 - Powder Keg pushes nearby balls outward with falloff, then removes itself from the table.
 - Powder Keg launches Cannon Balls with Cannon-owned impulse amplification and a conservative Cannon launch speed cap.
+- Powder Keg requests a short presentation-only table impact shake; table art shakes most, balls receive draw-only shimmy, and HUD/debug UI stays still.
 - Powder Keg particle bursts should look juicy and readable, but debug/quality controls should allow particles to degrade safely under load.
 - Anchor pulls object balls only. It does not affect the cue ball.
 - Anchor does not pull other Anchor balls, though Anchor balls still physically collide normally.
@@ -204,7 +211,9 @@ Current anomaly rules:
 - Cannon Ball is currently debug-spawn only and visually reads as dark heavy iron with ember detail.
 - Cannon Ball has first-pass collision modifiers against non-anomaly balls only: it gains reduced velocity when hit, retains more velocity when driving into a ball, and transfers stronger force above a minimum impact speed.
 - Cannon Ball can trigger Powder Keg explosions and receives amplified Powder Keg launch impulse.
-- Cannon Ball currently has no regular spawn odds, no screen shake, and no Cannon-specific special interactions with Anchor or Wayfinder.
+- Cannon Ball qualifying heavy impacts can request short, subtle table-impact shake through `TableImpactShakeSystem.gd`, with cooldown to prevent shake spam.
+- Cannon Ball high-speed heat presence is draw-only in `Ball.gd`, tuned by `CannonBallSystem.gd`, and visually capped so chaos degrades presentation before gameplay.
+- Cannon Ball currently has no regular spawn odds and no Cannon-specific special interactions with Anchor or Wayfinder.
 
 Possible future anomaly systems:
 
