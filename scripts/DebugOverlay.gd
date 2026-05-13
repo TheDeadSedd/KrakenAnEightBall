@@ -218,6 +218,12 @@ func _make_performance_debug_text() -> String:
 			snapshot["moving_balls"],
 			snapshot["stopped_balls"],
 		],
+		"Cue reclaim: eligible %s / granted %s / movers %s" % [
+			_debug_bool_text(bool(snapshot["cue_reclaim_eligible"])),
+			_debug_bool_text(bool(snapshot["cue_reclaim_granted"])),
+			snapshot["cue_reclaim_moving_non_cue_balls"],
+		],
+		"Reclaim blocker: %s" % snapshot["cue_reclaim_blocker_reason"],
 		"",
 		"BALL DROPS",
 		"Ball drop progress: %s/%s Doubloons" % [

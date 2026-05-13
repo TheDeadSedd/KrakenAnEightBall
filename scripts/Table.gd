@@ -76,6 +76,11 @@ const MAX_DRAG_DISTANCE := 210.0
 const MIN_SHOT_DISTANCE := 12.0
 const SHOT_POWER := 9.4
 const CUE_AIM_DEADZONE_RADIUS := 20.0
+const EARLY_CUE_RECLAIM_DELAY := 0.35
+const EARLY_CUE_RECLAIM_LOW_SPEED := 85.0
+const EARLY_CUE_RECLAIM_MEDIUM_SPEED := 180.0
+const EARLY_CUE_RECLAIM_THREAT_LOOKAHEAD := 0.45
+const EARLY_CUE_RECLAIM_THREAT_MARGIN := 8.0
 
 # Arcade physics tuning.
 const BALL_COLLISION_RESTITUTION := 0.86
@@ -128,6 +133,19 @@ var shot_had_bank_pocket := false
 var shot_multi_pocket_bonus_awarded := false
 var shot_bank_bonus_awarded := false
 var shot_bank_eligible_ball_ids: Dictionary = {}
+var shot_elapsed_time := 0.0
+var cue_control_reclaimed := false
+var cue_reclaim_eligible := false
+var cue_reclaim_blocker_reason := "No active shot"
+var cue_reclaim_moving_non_cue_count := 0
+var cue_reclaim_low_speed_count := 0
+var cue_reclaim_medium_speed_count := 0
+var cue_reclaim_high_speed_count := 0
+var cue_reclaim_has_cue_collision_threat := false
+var cue_reclaim_motion_snapshot_updated := false
+var cue_reclaim_cached_signature := ""
+var cue_reclaim_cached_eligible := false
+var cue_reclaim_cached_blocker_reason := "No active shot"
 var table_frame_art_rect := Rect2()
 var playfield_rect := Rect2()
 var perf_ball_pair_checks := 0
@@ -202,8 +220,9 @@ func _physics_process(delta: float) -> void:
 	wayfinder_system.update_redirect_cooldowns(delta)
 	aim_preview.update_debug(delta, is_dragging)
 
+	_begin_cue_reclaim_motion_snapshot()
 	var step_delta: float = delta / float(PHYSICS_SUBSTEPS)
-	for _step in range(PHYSICS_SUBSTEPS):
+	for step_index in range(PHYSICS_SUBSTEPS):
 		wayfinder_system.update_guidance(step_delta)
 		anchor_ball_system.update_pull(step_delta)
 		_move_balls(step_delta)
@@ -219,8 +238,11 @@ func _physics_process(delta: float) -> void:
 		_resolve_rail_collisions()
 		perf_rail_collision_ms += _elapsed_ms_since(phase_start_usec)
 		aim_preview.record_actual_path_step()
-		_apply_ball_friction(step_delta)
+		_apply_ball_friction(step_delta, step_index == PHYSICS_SUBSTEPS - 1)
 
+	if not cue_reclaim_motion_snapshot_updated:
+		_rebuild_cue_reclaim_motion_snapshot()
+	_update_cue_reclaim_state(delta)
 	anchor_ball_system.finish_frame()
 	cannon_ball_system.update_presence_visuals()
 	spawn_system.process_spawn_queue(delta)
@@ -372,11 +394,19 @@ func _move_balls(delta: float) -> void:
 			ball.move_ball(delta)
 
 
-func _apply_ball_friction(delta: float) -> void:
+func _apply_ball_friction(delta: float, track_cue_reclaim_motion: bool = false) -> void:
+	if track_cue_reclaim_motion:
+		_reset_cue_reclaim_motion_snapshot()
+
 	for child in balls.get_children():
 		var ball := child as Ball
 		if ball != null and ball.is_gameplay_active():
 			ball.apply_friction(delta)
+			if track_cue_reclaim_motion:
+				_capture_cue_reclaim_motion(ball)
+
+	if track_cue_reclaim_motion:
+		cue_reclaim_motion_snapshot_updated = true
 
 
 func _resolve_ball_collisions() -> void:
@@ -620,6 +650,13 @@ func _release_shot(_mouse_position: Vector2) -> void:
 	if not is_dragging:
 		return
 
+	if not _can_shoot():
+		is_dragging = false
+		cue_controller.stop_recoil()
+		_refresh_aim_preview()
+		queue_redraw()
+		return
+
 	var release_position: Vector2 = drag_mouse_position
 	var drag_vector: Vector2 = _get_drag_vector(release_position)
 	var release_pullback: float = cue_controller.get_pullback_for_drag_vector(drag_vector, MAX_DRAG_DISTANCE)
@@ -706,11 +743,14 @@ func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) ->
 # Owns shot lifecycle, pocket outcomes, and reward triggers after pocket captures.
 # Future extraction candidate: PocketSystem. Spawn rewards delegate to SpawnSystem.
 func _can_shoot() -> bool:
-	if game_over or not is_instance_valid(cue_ball) or not cue_ball.visible:
+	if game_over or not is_instance_valid(cue_ball) or not cue_ball.visible or not cue_ball.gameplay_enabled:
 		return false
 
 	if spawn_system.has_pending_spawns():
 		return false
+
+	if shot_active:
+		return cue_control_reclaimed and not cue_ball.is_moving()
 
 	for child in balls.get_children():
 		var ball := child as Ball
@@ -828,6 +868,13 @@ func _note_actual_cue_pocketed(ball: Ball) -> void:
 
 func _start_shot_tracking() -> void:
 	shot_active = true
+	shot_elapsed_time = 0.0
+	cue_control_reclaimed = false
+	cue_reclaim_eligible = false
+	cue_reclaim_blocker_reason = "Post-shot delay"
+	cue_reclaim_cached_signature = ""
+	cue_reclaim_cached_eligible = false
+	cue_reclaim_cached_blocker_reason = "Post-shot delay"
 	shot_pocketed_object_balls = 0
 	shot_cue_touched_rail = false
 	shot_had_bank_pocket = false
@@ -929,6 +976,9 @@ func _try_finish_shot() -> void:
 		return
 
 	shot_active = false
+	cue_control_reclaimed = false
+	cue_reclaim_eligible = false
+	cue_reclaim_blocker_reason = "No active shot"
 	aim_preview.stop_actual_path_recording()
 	shot_event_system.finish_shot()
 #endregion
@@ -963,6 +1013,10 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"total_balls": counts["total"],
 		"moving_balls": counts["moving"],
 		"stopped_balls": counts["stopped"],
+		"cue_reclaim_eligible": cue_reclaim_eligible,
+		"cue_reclaim_granted": cue_control_reclaimed,
+		"cue_reclaim_moving_non_cue_balls": cue_reclaim_moving_non_cue_count,
+		"cue_reclaim_blocker_reason": cue_reclaim_blocker_reason,
 		"active_wayfinders": counts["active_wayfinders"],
 		"guided_wayfinder_targets": wayfinder_system.get_guided_target_count(),
 		"anchor_balls": anchor_snapshot["active_anchor_balls"],
@@ -1240,6 +1294,143 @@ func _remove_result_callout(callout: ResultCallout) -> void:
 
 #region Shot Helpers
 # Small shot-state checks that do not yet justify a separate system file.
+func _begin_cue_reclaim_motion_snapshot() -> void:
+	cue_reclaim_motion_snapshot_updated = false
+	_reset_cue_reclaim_motion_snapshot()
+
+
+func _reset_cue_reclaim_motion_snapshot() -> void:
+	cue_reclaim_moving_non_cue_count = 0
+	cue_reclaim_low_speed_count = 0
+	cue_reclaim_medium_speed_count = 0
+	cue_reclaim_high_speed_count = 0
+	cue_reclaim_has_cue_collision_threat = false
+
+
+func _capture_cue_reclaim_motion(ball: Ball) -> void:
+	if ball == null or ball == cue_ball or not ball.is_gameplay_active() or not ball.is_moving():
+		return
+
+	cue_reclaim_moving_non_cue_count += 1
+	var speed: float = ball.velocity.length()
+	if speed <= EARLY_CUE_RECLAIM_LOW_SPEED:
+		cue_reclaim_low_speed_count += 1
+	elif speed <= EARLY_CUE_RECLAIM_MEDIUM_SPEED:
+		cue_reclaim_medium_speed_count += 1
+	else:
+		cue_reclaim_high_speed_count += 1
+
+	if _is_ball_likely_to_hit_cue_soon(ball):
+		cue_reclaim_has_cue_collision_threat = true
+
+
+func _rebuild_cue_reclaim_motion_snapshot() -> void:
+	_reset_cue_reclaim_motion_snapshot()
+	for child in balls.get_children():
+		_capture_cue_reclaim_motion(child as Ball)
+	cue_reclaim_motion_snapshot_updated = true
+
+
+func _update_cue_reclaim_state(delta: float) -> void:
+	if not shot_active:
+		cue_reclaim_eligible = false
+		cue_reclaim_blocker_reason = "No active shot"
+		return
+
+	shot_elapsed_time += delta
+	if cue_control_reclaimed:
+		var base_blocker: String = _get_cue_reclaim_base_blocker()
+		cue_reclaim_eligible = base_blocker == ""
+		cue_reclaim_blocker_reason = "Granted" if cue_reclaim_eligible else base_blocker
+		return
+
+	var signature: String = _get_cue_reclaim_motion_signature()
+	if signature != cue_reclaim_cached_signature:
+		var result: Dictionary = _evaluate_cue_reclaim_eligibility()
+		cue_reclaim_cached_signature = signature
+		cue_reclaim_cached_eligible = bool(result["eligible"])
+		cue_reclaim_cached_blocker_reason = str(result["reason"])
+
+	cue_reclaim_eligible = cue_reclaim_cached_eligible
+	cue_reclaim_blocker_reason = cue_reclaim_cached_blocker_reason
+	if cue_reclaim_eligible:
+		cue_control_reclaimed = true
+		cue_reclaim_blocker_reason = "Granted"
+		status_text_changed.emit(READY_STATUS_TEXT)
+
+
+func _get_cue_reclaim_motion_signature() -> String:
+	return "%s|%s|%s|%s|%s|%s|%s|%s" % [
+		_get_cue_reclaim_base_blocker(),
+		shot_elapsed_time >= EARLY_CUE_RECLAIM_DELAY,
+		cue_reclaim_moving_non_cue_count,
+		cue_reclaim_low_speed_count,
+		cue_reclaim_medium_speed_count,
+		cue_reclaim_high_speed_count,
+		cue_reclaim_has_cue_collision_threat,
+		spawn_system.has_pending_spawns(),
+	]
+
+
+func _evaluate_cue_reclaim_eligibility() -> Dictionary:
+	var base_blocker: String = _get_cue_reclaim_base_blocker()
+	if not base_blocker.is_empty():
+		return {"eligible": false, "reason": base_blocker}
+
+	if shot_elapsed_time < EARLY_CUE_RECLAIM_DELAY:
+		return {"eligible": false, "reason": "Post-shot delay"}
+
+	if cue_reclaim_has_cue_collision_threat:
+		return {"eligible": false, "reason": "Cue collision threat"}
+
+	if cue_reclaim_moving_non_cue_count <= 1:
+		return {"eligible": true, "reason": "Safe motion"}
+
+	if cue_reclaim_moving_non_cue_count == 2:
+		if cue_reclaim_high_speed_count > 0:
+			return {"eligible": false, "reason": "2 balls: high speed"}
+		return {"eligible": true, "reason": "Safe motion"}
+
+	if cue_reclaim_moving_non_cue_count <= 4:
+		if cue_reclaim_medium_speed_count > 0 or cue_reclaim_high_speed_count > 0:
+			return {"eligible": false, "reason": "3-4 balls above low speed"}
+		return {"eligible": true, "reason": "Safe motion"}
+
+	return {"eligible": false, "reason": "5+ moving balls"}
+
+
+func _get_cue_reclaim_base_blocker() -> String:
+	if game_over:
+		return "Game over"
+	if not is_instance_valid(cue_ball) or not cue_ball.visible or not cue_ball.gameplay_enabled:
+		return "Cue unavailable"
+	if spawn_system.has_pending_spawns():
+		return "Pending drops"
+	if cue_ball.is_moving():
+		return "Cue ball moving"
+	return ""
+
+
+func _is_ball_likely_to_hit_cue_soon(ball: Ball) -> bool:
+	if not is_instance_valid(cue_ball) or cue_ball.is_moving():
+		return false
+
+	var velocity: Vector2 = ball.velocity
+	var speed_squared: float = velocity.length_squared()
+	if speed_squared <= 0.001:
+		return false
+
+	var ball_to_cue: Vector2 = cue_ball.global_position - ball.global_position
+	var time_to_closest: float = clamp(
+		ball_to_cue.dot(velocity) / speed_squared,
+		0.0,
+		EARLY_CUE_RECLAIM_THREAT_LOOKAHEAD
+	)
+	var closest_position: Vector2 = ball.global_position + velocity * time_to_closest
+	var threat_radius: float = ball.radius + cue_ball.radius + BALL_COLLISION_SKIN + EARLY_CUE_RECLAIM_THREAT_MARGIN
+	return closest_position.distance_squared_to(cue_ball.global_position) <= threat_radius * threat_radius
+
+
 func _all_balls_stopped() -> bool:
 	if spawn_system.has_pending_spawns():
 		return false

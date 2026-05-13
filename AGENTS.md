@@ -24,7 +24,7 @@ Target platforms:
 
 ### `scripts/Table.gd`
 
-Owns high-level coordination, shot lifecycle, authoritative ball list, current main physics loop, run state, callout queue, and event routing between systems.
+Owns high-level coordination, shot lifecycle, early cue-control reclaim gating, authoritative ball list, current main physics loop, run state, callout queue, and event routing between systems.
 
 Does not own large new feature systems unless there is no cleaner option. New gameplay clusters should usually become system scripts and be coordinated from `Table.gd`.
 
