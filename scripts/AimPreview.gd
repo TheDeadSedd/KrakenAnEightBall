@@ -14,7 +14,9 @@ const AIM_GUIDE_LENGTH := 180.0
 const AIM_PREDICTION_ENABLED := true
 const AIM_PREDICTION_MAX_DISTANCE := 900.0
 const AIM_SIMULATION_FRAME_DELTA := 1.0 / 60.0
+const AIM_PREDICTION_STEP_SUBSTEPS := 2
 const AIM_SIMULATION_MAX_BOUNCES := 1
+const AIM_BALL_HIT_GRAZE_MARGIN := 1.25
 const AIM_LINE_WIDTH := 3.0
 const AIM_LINE_GLOW_WIDTH := 9.0
 const AIM_LINE_MIN_ALPHA := 0.24
@@ -37,8 +39,9 @@ const AIM_TARGET_CURSED_GLOW_COLOR := Color(0.16, 0.92, 0.72, 0.28)
 const AIM_TARGET_POCKET_MARKER_COLOR := Color(0.78, 1.0, 0.82, 0.42)
 const AIM_TARGET_POCKET_MARKER_RADIUS := 7.0
 const AIM_TARGET_ENDPOINT_MARKER_RADIUS := 5.0
-const AIM_TARGET_PREDICTION_MAX_DISTANCE := 520.0
-const AIM_TARGET_PREDICTION_MAX_STEPS := 320
+const AIM_TARGET_PREDICTION_MAX_DISTANCE := 360.0
+const AIM_TARGET_PREDICTION_MAX_STEPS := 120
+const AIM_TARGET_PREDICTION_STEP_SUBSTEPS := 2
 
 # Bank/path comparison debug visuals.
 const BANK_DEBUG_MARKER_LIFETIME := 1.0
@@ -102,6 +105,25 @@ var aim_path_debug_timer := 0.0
 var actual_cue_path_recording := false
 var debug_aim_path_comparison_enabled := DEBUG_AIM_PATH_COMPARISON_DEFAULT
 var prediction_ms := 0.0
+var prediction_frame_ms := 0.0
+var prediction_recalculations_this_frame := 0
+var cue_prediction_steps_this_frame := 0
+var target_prediction_steps_this_frame := 0
+var ball_collision_checks_this_frame := 0
+var pocket_checks_this_frame := 0
+var rail_checks_this_frame := 0
+var aim_spatial_cells := 0
+var aim_spatial_balls := 0
+var aim_spatial_query_cells_this_frame := 0
+var aim_spatial_candidates_this_frame := 0
+var draw_ms_last_draw := 0.0
+var draw_segments_last_draw := 0
+var draw_calls_last_draw := 0
+var _draw_segments_in_progress := 0
+var _draw_calls_in_progress := 0
+var _aim_ball_spatial_grid: Dictionary = {}
+var _aim_spatial_cell_size := 56.0
+var _aim_spatial_max_ball_radius := 0.0
 
 
 #region Setup / Public API
@@ -112,6 +134,12 @@ func setup(table_ref) -> void:
 func update_preview(active: bool, origin: Vector2, drag_vector: Vector2, shot_power: float, power_ratio: float) -> void:
 	if not active:
 		prediction_ms = 0.0
+		_aim_ball_spatial_grid.clear()
+		aim_spatial_cells = 0
+		aim_spatial_balls = 0
+		draw_ms_last_draw = 0.0
+		draw_segments_last_draw = 0
+		draw_calls_last_draw = 0
 		if preview_active or current_prediction != null:
 			preview_active = false
 			current_prediction = null
@@ -124,8 +152,11 @@ func update_preview(active: bool, origin: Vector2, drag_vector: Vector2, shot_po
 	preview_power_ratio = power_ratio
 
 	var aim_start_usec: int = Time.get_ticks_usec()
+	_rebuild_aim_ball_spatial_grid()
 	current_prediction = _get_first_aim_collision(origin, drag_vector * shot_power)
 	prediction_ms = _elapsed_ms_since(aim_start_usec)
+	prediction_frame_ms += prediction_ms
+	prediction_recalculations_this_frame += 1
 	queue_redraw()
 
 
@@ -140,6 +171,7 @@ func start_path_comparison(origin: Vector2, initial_velocity: Vector2) -> void:
 	if not debug_aim_path_comparison_enabled:
 		return
 
+	_rebuild_aim_ball_spatial_grid()
 	var prediction: AimPrediction = _get_first_aim_collision(origin, initial_velocity)
 	last_predicted_aim_path = prediction.path_points.duplicate()
 	last_predicted_rail_position = prediction.rail_position
@@ -233,20 +265,57 @@ func is_prediction_enabled() -> bool:
 
 func get_prediction_time_ms() -> float:
 	return prediction_ms
+
+
+func reset_frame_stats() -> void:
+	prediction_frame_ms = 0.0
+	prediction_recalculations_this_frame = 0
+	cue_prediction_steps_this_frame = 0
+	target_prediction_steps_this_frame = 0
+	ball_collision_checks_this_frame = 0
+	pocket_checks_this_frame = 0
+	rail_checks_this_frame = 0
+	aim_spatial_query_cells_this_frame = 0
+	aim_spatial_candidates_this_frame = 0
+
+
+func get_debug_snapshot() -> Dictionary:
+	return {
+		"prediction_ms": prediction_ms,
+		"prediction_frame_ms": prediction_frame_ms,
+		"prediction_recalculations": prediction_recalculations_this_frame,
+		"cue_prediction_steps": cue_prediction_steps_this_frame,
+		"target_prediction_steps": target_prediction_steps_this_frame,
+		"ball_collision_checks": ball_collision_checks_this_frame,
+		"pocket_checks": pocket_checks_this_frame,
+		"rail_checks": rail_checks_this_frame,
+		"spatial_cells": aim_spatial_cells,
+		"spatial_balls": aim_spatial_balls,
+		"spatial_query_cells": aim_spatial_query_cells_this_frame,
+		"spatial_candidates": aim_spatial_candidates_this_frame,
+		"draw_ms": draw_ms_last_draw,
+		"draw_segments": draw_segments_last_draw,
+		"draw_calls": draw_calls_last_draw,
+	}
 #endregion
 
 
 #region Drawing
 func _draw() -> void:
+	var draw_start_usec: int = Time.get_ticks_usec()
+	_draw_segments_in_progress = 0
+	_draw_calls_in_progress = 0
 	_draw_bank_debug_markers()
 	_draw_aim_path_comparison_debug()
 	if not preview_active:
+		_store_draw_stats(draw_start_usec)
 		return
 
 	if AIM_PREDICTION_ENABLED and current_prediction != null:
 		_draw_prediction(current_prediction)
 	else:
 		_draw_basic_guide_line()
+	_store_draw_stats(draw_start_usec)
 
 
 func _draw_prediction(prediction: AimPrediction) -> void:
@@ -326,6 +395,8 @@ func _draw_guidance_line_segment(
 	var glow_color := Color(glow_base_color.r, glow_base_color.g, glow_base_color.b, glow_alpha * fade_alpha * alpha_multiplier)
 	var inner_width: float = max(1.25, inner_base_width * lerp(1.0, 0.62, clamped_fade))
 
+	_draw_segments_in_progress += 1
+	_draw_calls_in_progress += 2
 	draw_line(start, end, glow_color, glow_width)
 	draw_line(start, end, inner_color, inner_width)
 
@@ -339,6 +410,7 @@ func _draw_aim_end_marker(position: Vector2, direction: Vector2, base_color: Col
 	var glow_color := Color(base_color.r, base_color.g, base_color.b, 0.36 + _get_high_power_pulse() * 0.18)
 	var core_color := Color(base_color.r, base_color.g, base_color.b, 0.92)
 
+	_draw_calls_in_progress += 4
 	draw_line(position - diagonal_a * marker_size, position + diagonal_a * marker_size, glow_color, AIM_END_MARKER_GLOW_WIDTH)
 	draw_line(position - diagonal_b * marker_size, position + diagonal_b * marker_size, glow_color, AIM_END_MARKER_GLOW_WIDTH)
 	draw_line(position - diagonal_a * marker_size, position + diagonal_a * marker_size, core_color, AIM_END_MARKER_LINE_WIDTH)
@@ -376,6 +448,7 @@ func _draw_target_pocket_marker(position: Vector2) -> void:
 		AIM_TARGET_POCKET_MARKER_COLOR.b,
 		0.16
 	)
+	_draw_calls_in_progress += 2
 	draw_circle(position, AIM_TARGET_POCKET_MARKER_RADIUS * 1.9, glow_color)
 	draw_circle(position, AIM_TARGET_POCKET_MARKER_RADIUS, AIM_TARGET_POCKET_MARKER_COLOR)
 
@@ -393,6 +466,7 @@ func _draw_target_endpoint_marker(position: Vector2) -> void:
 		AIM_TARGET_CURSED_CORE_COLOR.b,
 		0.72
 	)
+	_draw_calls_in_progress += 2
 	draw_circle(position, AIM_TARGET_ENDPOINT_MARKER_RADIUS * 1.85, glow_color)
 	draw_circle(position, AIM_TARGET_ENDPOINT_MARKER_RADIUS, core_color)
 
@@ -450,6 +524,7 @@ func _draw_predicted_bank_debug(prediction: AimPrediction) -> void:
 
 	var predicted_color := Color(0.4, 0.95, 1.0, 0.85)
 	var reflected_color := Color(0.92, 0.5, 1.0, 0.75)
+	_draw_calls_in_progress += 2
 	draw_circle(prediction.rail_position, 6.0, predicted_color)
 	draw_line(prediction.rail_position, prediction.rail_position + prediction.post_bank_direction * 42.0, reflected_color, 2.2)
 
@@ -464,6 +539,7 @@ func _draw_bank_debug_markers() -> void:
 		var incoming_color := Color(1.0, 0.44, 0.32, 0.78 * fade)
 		var outgoing_color := Color(0.4, 1.0, 0.56, 0.78 * fade)
 		var normal_color := Color(1.0, 0.95, 0.42, 0.72 * fade)
+		_draw_calls_in_progress += 4
 		draw_circle(marker.position, 6.0, hit_color)
 		draw_line(marker.position, marker.position - marker.incoming_direction * 34.0, incoming_color, 2.0)
 		draw_line(marker.position, marker.position + marker.outgoing_direction * 34.0, outgoing_color, 2.0)
@@ -485,9 +561,12 @@ func _draw_debug_path(path_points: Array[Vector2], color: Color, width: float) -
 		return
 
 	for point_index in range(path_points.size() - 1):
+		_draw_segments_in_progress += 1
+		_draw_calls_in_progress += 1
 		draw_line(path_points[point_index], path_points[point_index + 1], color, width)
 
 	for point in path_points:
+		_draw_calls_in_progress += 1
 		draw_circle(point, 2.5, color)
 
 
@@ -498,6 +577,7 @@ func _draw_predicted_rail_comparison_marker(fade: float) -> void:
 	var rail_color := Color(0.25, 0.95, 1.0, 0.9 * fade)
 	var normal_color := Color(1.0, 0.95, 0.28, 0.75 * fade)
 	var post_bank_color := Color(0.95, 0.42, 1.0, 0.75 * fade)
+	_draw_calls_in_progress += 3
 	draw_circle(last_predicted_rail_position, 7.0, rail_color)
 	draw_line(last_predicted_rail_position, last_predicted_rail_position + last_predicted_rail_normal * 30.0, normal_color, 2.0)
 	draw_line(last_predicted_rail_position, last_predicted_rail_position + last_predicted_post_bank_direction * 44.0, post_bank_color, 2.2)
@@ -516,9 +596,10 @@ func _get_first_aim_collision(origin: Vector2, initial_velocity: Vector2) -> Aim
 	var simulated_velocity: Vector2 = initial_velocity
 	var traveled_distance := 0.0
 	var bounce_count := 0
-	var step_delta: float = AIM_SIMULATION_FRAME_DELTA / float(table.PHYSICS_SUBSTEPS)
+	var step_delta: float = _get_prediction_step_delta(AIM_PREDICTION_STEP_SUBSTEPS)
 
 	while traveled_distance < AIM_PREDICTION_MAX_DISTANCE and simulated_velocity.length() > table.cue_ball.stop_threshold:
+		cue_prediction_steps_this_frame += 1
 		var previous_position: Vector2 = simulated_position
 		var movement_end: Vector2 = simulated_position + simulated_velocity * step_delta
 		var ball_hit: AimBallHit = _get_first_aim_ball_hit_on_segment(previous_position, movement_end)
@@ -544,12 +625,19 @@ func _get_first_aim_collision(origin: Vector2, initial_velocity: Vector2) -> Aim
 	return prediction
 
 
+func _get_prediction_step_delta(step_substeps: int) -> float:
+	# AimPreview uses coarser visual-prediction steps than real physics, while
+	# swept ball/pocket checks keep fast paths from skipping collision targets.
+	return AIM_SIMULATION_FRAME_DELTA / float(maxi(step_substeps, 1))
+
+
 func _simulate_aim_cue_step(moved_position: Vector2, velocity: Vector2, delta: float) -> BallMotionState:
 	var step_result: BallMotionState = BallMotionState.new()
 	step_result.position = moved_position
 	step_result.velocity = velocity
 
 	for boundary_shape in table.boundary_system.get_boundary_shapes():
+		rail_checks_this_frame += 1
 		table.boundary_system.resolve_motion_state_against_shape(
 			step_result,
 			boundary_shape,
@@ -567,6 +655,7 @@ func _simulate_aim_target_step(target_ball: Ball, moved_position: Vector2, veloc
 	step_result.velocity = velocity
 
 	for boundary_shape in table.boundary_system.get_boundary_shapes():
+		rail_checks_this_frame += 1
 		table.boundary_system.resolve_motion_state_against_shape(
 			step_result,
 			boundary_shape,
@@ -613,6 +702,7 @@ func _get_first_target_pocket_hit_on_segment(segment_start: Vector2, segment_end
 		return nearest_hit
 
 	for pocket_index in range(pocket_count):
+		pocket_checks_this_frame += 1
 		var catch_radius: float = _get_prediction_pocket_catch_radius(pocket_radii[pocket_index], target_ball.radius)
 		var hit_fraction: float = _get_segment_circle_hit_fraction(
 			segment_start,
@@ -637,6 +727,77 @@ func _get_prediction_pocket_catch_radius(pocket_radius: float, ball_radius: floa
 	return pocket_radius + ball_radius * 0.5 + PocketSystem.POCKET_CATCH_BONUS
 
 
+func _rebuild_aim_ball_spatial_grid() -> void:
+	_aim_ball_spatial_grid.clear()
+	_aim_spatial_cell_size = max(float(table.BALL_COLLISION_GRID_CELL_SIZE), 1.0)
+	_aim_spatial_max_ball_radius = 0.0
+	aim_spatial_balls = 0
+
+	for child in table.balls.get_children():
+		var ball := child as Ball
+		if ball == null or not ball.is_gameplay_active():
+			continue
+
+		var cell: Vector2i = _get_aim_spatial_cell(ball.global_position)
+		if not _aim_ball_spatial_grid.has(cell):
+			_aim_ball_spatial_grid[cell] = []
+		_aim_ball_spatial_grid[cell].append(ball)
+		_aim_spatial_max_ball_radius = max(_aim_spatial_max_ball_radius, ball.radius)
+		aim_spatial_balls += 1
+
+	aim_spatial_cells = _aim_ball_spatial_grid.size()
+
+
+func _get_aim_spatial_candidates_for_segment(
+	segment_start: Vector2,
+	segment_end: Vector2,
+	moving_ball_radius: float
+) -> Array[Ball]:
+	var candidates: Array[Ball] = []
+	if _aim_ball_spatial_grid.is_empty():
+		return candidates
+
+	var query_padding: float = moving_ball_radius + _aim_spatial_max_ball_radius + table.BALL_COLLISION_SKIN
+	var min_position := Vector2(
+		min(segment_start.x, segment_end.x) - query_padding,
+		min(segment_start.y, segment_end.y) - query_padding
+	)
+	var max_position := Vector2(
+		max(segment_start.x, segment_end.x) + query_padding,
+		max(segment_start.y, segment_end.y) + query_padding
+	)
+	var min_cell: Vector2i = _get_aim_spatial_cell(min_position)
+	var max_cell: Vector2i = _get_aim_spatial_cell(max_position)
+	var seen_ball_ids: Dictionary = {}
+
+	for cell_x in range(min_cell.x, max_cell.x + 1):
+		for cell_y in range(min_cell.y, max_cell.y + 1):
+			aim_spatial_query_cells_this_frame += 1
+			var cell := Vector2i(cell_x, cell_y)
+			if not _aim_ball_spatial_grid.has(cell):
+				continue
+
+			for candidate in _aim_ball_spatial_grid[cell]:
+				var ball := candidate as Ball
+				if ball == null:
+					continue
+				var ball_id: int = ball.get_instance_id()
+				if seen_ball_ids.has(ball_id):
+					continue
+				seen_ball_ids[ball_id] = true
+				candidates.append(ball)
+
+	aim_spatial_candidates_this_frame += candidates.size()
+	return candidates
+
+
+func _get_aim_spatial_cell(position: Vector2) -> Vector2i:
+	return Vector2i(
+		floori(position.x / _aim_spatial_cell_size),
+		floori(position.y / _aim_spatial_cell_size)
+	)
+
+
 func _get_first_ball_hit_on_segment(
 	segment_start: Vector2,
 	segment_end: Vector2,
@@ -650,8 +811,7 @@ func _get_first_ball_hit_on_segment(
 	if segment_length <= 0.001:
 		return nearest_hit
 
-	for child in table.balls.get_children():
-		var target_ball: Ball = child as Ball
+	for target_ball in _get_aim_spatial_candidates_for_segment(segment_start, segment_end, moving_ball_radius):
 		if (
 			target_ball == null
 			or target_ball == ignored_ball_a
@@ -660,7 +820,8 @@ func _get_first_ball_hit_on_segment(
 		):
 			continue
 
-		var combined_radius: float = moving_ball_radius + target_ball.radius + table.BALL_COLLISION_SKIN
+		ball_collision_checks_this_frame += 1
+		var combined_radius: float = _get_prediction_ball_hit_radius(moving_ball_radius, target_ball.radius)
 		var hit_fraction: float = _get_segment_circle_hit_fraction(
 			segment_start,
 			segment,
@@ -677,6 +838,13 @@ func _get_first_ball_hit_on_segment(
 			nearest_hit.position = segment_start + segment * hit_fraction
 
 	return nearest_hit
+
+
+func _get_prediction_ball_hit_radius(moving_ball_radius: float, target_ball_radius: float) -> float:
+	# Real ball collisions use BALL_COLLISION_SKIN at discrete physics steps.
+	# The preview sweeps continuously, so edge grazes should underpromise a bit.
+	var preview_skin: float = max(table.BALL_COLLISION_SKIN - AIM_BALL_HIT_GRAZE_MARGIN, 0.0)
+	return moving_ball_radius + target_ball_radius + preview_skin
 
 
 func _get_segment_circle_hit_fraction(
@@ -755,15 +923,20 @@ func _get_predicted_target_path(target_ball: Ball, starting_velocity: Vector2) -
 	var simulated_position: Vector2 = target_ball.global_position
 	var simulated_velocity: Vector2 = starting_velocity
 	var travel_distance := 0.0
-	var step_delta: float = AIM_SIMULATION_FRAME_DELTA / float(table.PHYSICS_SUBSTEPS)
+	var step_delta: float = _get_prediction_step_delta(AIM_TARGET_PREDICTION_STEP_SUBSTEPS)
 
 	for _step_index in range(AIM_TARGET_PREDICTION_MAX_STEPS):
 		var speed: float = simulated_velocity.length()
 		if speed <= target_ball.stop_threshold or travel_distance >= AIM_TARGET_PREDICTION_MAX_DISTANCE:
 			break
 
+		target_prediction_steps_this_frame += 1
 		var previous_position: Vector2 = simulated_position
-		var movement_end: Vector2 = previous_position + simulated_velocity * step_delta
+		var movement_delta: Vector2 = simulated_velocity * step_delta
+		var remaining_distance: float = AIM_TARGET_PREDICTION_MAX_DISTANCE - travel_distance
+		if movement_delta.length() > remaining_distance:
+			movement_delta = movement_delta.limit_length(remaining_distance)
+		var movement_end: Vector2 = previous_position + movement_delta
 		var pocket_hit: AimPocketHit = _get_first_target_pocket_hit_on_segment(previous_position, movement_end, target_ball)
 		var ball_hit: AimBallHit = _get_first_target_ball_hit_on_segment(previous_position, movement_end, target_ball)
 
@@ -872,6 +1045,12 @@ func _bank_debug_visuals_enabled() -> bool:
 
 
 #region Color / Timing / Debug Print Helpers
+func _store_draw_stats(draw_start_usec: int) -> void:
+	draw_ms_last_draw = _elapsed_ms_since(draw_start_usec)
+	draw_segments_last_draw = _draw_segments_in_progress
+	draw_calls_last_draw = _draw_calls_in_progress
+
+
 func _get_aim_power_color(power_ratio: float) -> Color:
 	if power_ratio <= 0.35:
 		return Color("67d97d")

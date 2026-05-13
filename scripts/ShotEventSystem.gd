@@ -4,7 +4,7 @@ class_name ShotEventSystem
 
 # Owns per-shot ball event history for the future Doubloons system.
 # This is passive tracking only; it should not change gameplay outcomes.
-const DEBUG_SHOT_EVENTS := true
+const DEBUG_SHOT_EVENTS := false
 const EVENT_BANK := "BANK"
 const EVENT_CHAIN := "CHAIN"
 const EVENT_MULTI_CHAIN := "MULTI_CHAIN"

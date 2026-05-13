@@ -6,6 +6,8 @@ This file is generated/reference-only. It does not grant autonomous behavior and
 
 Do not change gameplay based only on this report; check real source files and `AGENTS.md` first.
 
+When investigating feel, prediction, anomaly, UI, or performance issues, check relevant `project_brain/debug_media/` clips or screenshots. They are reference material only, not gameplay/source code.
+
 ## Files Watched
 
 - `scripts/AimPreview.gd` - Draws aim preview and side-effect-free cue-ball prediction.

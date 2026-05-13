@@ -115,7 +115,7 @@ AGENT_DEFINITIONS = {
         "responsibility": "Tracks Wayfinder, Powder Keg, Anchor Ball, Cannon Ball, and future anomaly behavior boundaries.",
         "watch_keywords": ["wayfinder", "powder", "anchor", "cannon", "anomaly", "ball"],
         "notes": [
-            "Wayfinder, Powder Keg, and Anchor are active anomaly systems; Cannon Ball has first-pass heavy collision, Powder Keg launch, heavy-impact shake, and high-speed heat presence.",
+            "Wayfinder, Powder Keg, and Anchor are active anomaly systems; Cannon Ball has collision tuning, Powder Keg launch, heavy-impact shake, and high-speed heat presence.",
             "Anchor has independent priority spawn odds and object-ball-only pull.",
         ],
         "questions": [
@@ -386,7 +386,7 @@ def guess_summary(rel_path: str) -> str:
     if name == "AnchorBallSystem.gd":
         return "Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters."
     if name == "CannonBallSystem.gd":
-        return "Stage 3 Cannon Ball anomaly shell for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence."
+        return "Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence."
     if name == "DebugOverlay.gd":
         return "Formats debug menu, performance overlay, toggles, and physics debug text."
     if name == "AimPreview.gd":
@@ -445,6 +445,7 @@ def build_readme() -> str:
             "",
             "- Gameplay source of truth remains the real scripts, scenes, and `AGENTS.md`.",
             "- Generated reports may be imperfect and should not override code review.",
+            "- `project_brain/debug_media/` is reference-only visual evidence, not gameplay/source code.",
             "- The scanner is local-only and should only generate/update files inside `project_brain/`.",
             "- No autonomous agents live here. These are role maps and reports only.",
             "",
@@ -453,6 +454,13 @@ def build_readme() -> str:
             "- `project_brain/` is not source of truth.",
             "- Do not make gameplay changes based only on generated reports.",
             "- Always check real source files and `AGENTS.md` before editing behavior.",
+            "",
+            "## Debug Media",
+            "",
+            "`project_brain/debug_media/` is for visual debugging references, performance captures, feel/polish references, reproduction clips, and comparison screenshots/videos.",
+            "",
+            "- Check relevant debug media when investigating feel, prediction, anomaly, UI, or performance issues.",
+            "- Treat debug media as reference material only; never as gameplay/source code or authoritative behavior.",
             "",
             "Regenerate with:",
             "",
@@ -486,6 +494,12 @@ def build_project_index(files: list[FileInfo], changed_paths: list[str]) -> str:
         "- `project_brain/` is not source of truth.",
         "- Do not make gameplay changes based only on generated reports.",
         "- Always check real source files and `AGENTS.md` before editing behavior.",
+        "",
+        "## Debug Media References",
+        "",
+        "- `project_brain/debug_media/` stores visual debugging references, performance captures, feel/polish references, reproduction clips, and comparison screenshots/videos.",
+        "- Future sessions should check relevant clips/screenshots when investigating feel, prediction, anomaly, UI, or performance issues.",
+        "- Debug media is reference material only and should never be treated as gameplay/source code.",
         "",
         "## Next Major Goal",
         "",
@@ -572,6 +586,8 @@ def build_agent_report(files: list[FileInfo]) -> str:
         "",
         "Do not misuse: this report is not source of truth. Check real source files and `AGENTS.md` before changing gameplay behavior.",
         "",
+        "Reference media: check `project_brain/debug_media/` for relevant clips, captures, or comparison screenshots when investigating feel, prediction, anomaly, UI, or performance issues. Treat those files as evidence only, never as gameplay/source code.",
+        "",
     ]
     for agent_id, definition in AGENT_DEFINITIONS.items():
         watched = files_for_agent(files, agent_id)
@@ -611,6 +627,8 @@ def build_agent_file(agent_id: str, definition: dict[str, object], files: list[F
         "This file is generated/reference-only. It does not grant autonomous behavior and is not source of truth.",
         "",
         "Do not change gameplay based only on this report; check real source files and `AGENTS.md` first.",
+        "",
+        "When investigating feel, prediction, anomaly, UI, or performance issues, check relevant `project_brain/debug_media/` clips or screenshots. They are reference material only, not gameplay/source code.",
         "",
         "## Files Watched",
         "",

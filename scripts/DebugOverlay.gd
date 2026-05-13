@@ -279,6 +279,37 @@ func _make_performance_debug_text() -> String:
 			snapshot["active_score_popup_labels"],
 		],
 		"",
+		"AIM PREVIEW",
+		"Aim: %s / comparison %s / frame %.2f ms / last %.2f ms" % [
+			_debug_bool_text(bool(snapshot["aim_prediction_enabled"])),
+			_debug_bool_text(bool(snapshot["shot_comparison_enabled"])),
+			float(snapshot["aim_prediction_frame_ms"]),
+			float(snapshot["aim_prediction_ms"]),
+		],
+		"Aim recalcs: %s/frame" % [
+			snapshot["aim_prediction_recalculations"],
+		],
+		"Aim steps: %s cue / %s target" % [
+			snapshot["aim_cue_prediction_steps"],
+			snapshot["aim_target_prediction_steps"],
+		],
+		"Aim checks: %s balls / %s pockets / %s rails" % [
+			snapshot["aim_ball_collision_checks"],
+			snapshot["aim_pocket_checks"],
+			snapshot["aim_rail_checks"],
+		],
+		"Aim broadphase: %s cells / %s balls / %s query cells / %s candidates" % [
+			snapshot["aim_spatial_cells"],
+			snapshot["aim_spatial_balls"],
+			snapshot["aim_spatial_query_cells"],
+			snapshot["aim_spatial_candidates"],
+		],
+		"Aim draw: %.2f ms / %s segments / %s calls" % [
+			float(snapshot["aim_draw_ms"]),
+			snapshot["aim_draw_segments"],
+			snapshot["aim_draw_calls"],
+		],
+		"",
 		"PHYSICS",
 		"Substeps: %s" % snapshot["physics_substeps"],
 		"Grid cells: %s / max cell: %s" % [
@@ -305,11 +336,6 @@ func _make_performance_debug_text() -> String:
 			float(snapshot["ball_collision_ms"]),
 			float(snapshot["rail_collision_ms"]),
 			float(snapshot["pocket_check_ms"]),
-		],
-		"Aim: %s / comparison %s / %.2f ms" % [
-			_debug_bool_text(bool(snapshot["aim_prediction_enabled"])),
-			_debug_bool_text(bool(snapshot["shot_comparison_enabled"])),
-			float(snapshot["aim_prediction_ms"]),
 		],
 	]
 	return "\n".join(lines)

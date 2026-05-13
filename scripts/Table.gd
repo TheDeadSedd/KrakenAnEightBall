@@ -576,6 +576,7 @@ func _reset_performance_frame_stats() -> void:
 	perf_ball_collisions_resolved = 0
 	boundary_system.reset_frame_stats()
 	pocket_system.reset_frame_stats()
+	aim_preview.reset_frame_stats()
 	perf_physics_process_ms = 0.0
 	perf_ball_collision_ms = 0.0
 	perf_rail_collision_ms = 0.0
@@ -957,6 +958,7 @@ func get_performance_debug_snapshot() -> Dictionary:
 	var anchor_snapshot: Dictionary = anchor_ball_system.get_debug_snapshot()
 	var cannon_snapshot: Dictionary = cannon_ball_system.get_debug_snapshot()
 	var ball_drop_snapshot: Dictionary = ball_drop_system.get_debug_snapshot()
+	var aim_snapshot: Dictionary = aim_preview.get_debug_snapshot()
 	return {
 		"total_balls": counts["total"],
 		"moving_balls": counts["moving"],
@@ -1009,7 +1011,21 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"ball_collision_ms": perf_ball_collision_ms,
 		"rail_collision_ms": perf_rail_collision_ms,
 		"pocket_check_ms": perf_pocket_check_ms,
-		"aim_prediction_ms": aim_preview.get_prediction_time_ms(),
+		"aim_prediction_ms": aim_snapshot["prediction_ms"],
+		"aim_prediction_frame_ms": aim_snapshot["prediction_frame_ms"],
+		"aim_prediction_recalculations": aim_snapshot["prediction_recalculations"],
+		"aim_cue_prediction_steps": aim_snapshot["cue_prediction_steps"],
+		"aim_target_prediction_steps": aim_snapshot["target_prediction_steps"],
+		"aim_ball_collision_checks": aim_snapshot["ball_collision_checks"],
+		"aim_pocket_checks": aim_snapshot["pocket_checks"],
+		"aim_rail_checks": aim_snapshot["rail_checks"],
+		"aim_spatial_cells": aim_snapshot["spatial_cells"],
+		"aim_spatial_balls": aim_snapshot["spatial_balls"],
+		"aim_spatial_query_cells": aim_snapshot["spatial_query_cells"],
+		"aim_spatial_candidates": aim_snapshot["spatial_candidates"],
+		"aim_draw_ms": aim_snapshot["draw_ms"],
+		"aim_draw_segments": aim_snapshot["draw_segments"],
+		"aim_draw_calls": aim_snapshot["draw_calls"],
 	}
 
 

@@ -7,7 +7,7 @@ signal doubloons_awarded(amount: int, total: int)
 
 # Converts ShotEventSystem histories into Doubloon rewards.
 # This owns lightweight score presentation, but not coin sprays or pocket VFX.
-const DEBUG_SCORE_BREAKDOWNS := true
+const DEBUG_SCORE_BREAKDOWNS := false
 const UI_FONT := preload("res://assets/fonts/Gothic Pixels.ttf")
 const BASE_SINK_REWARD := 10
 const BANK_REWARD := 5

@@ -82,7 +82,7 @@ Does not own ball-to-ball collision response, cue input, scoring values, predict
 
 ### `scripts/CannonBallSystem.gd`
 
-Owns the Cannon Ball anomaly boundary, first-pass heavy collision behavior, Cannon-specific Powder Keg launch tuning, Cannon heavy-impact shake eligibility/cooldown, and moving Cannon heat-presence thresholds. Cannon Ball is currently debug-spawnable, visually heavy, harder to accelerate from normal/cue impacts, more forceful/persistent when it hits non-anomaly balls, amplified when launched by Powder Keg explosions, able to request subtle table thumps on qualifying heavy impacts, and visually marked by a draw-only red/orange heat glow and ember trail at high speed.
+Owns the Cannon Ball anomaly boundary, Cannon-specific collision tuning, Powder Keg launch tuning, Cannon heavy-impact shake eligibility/cooldown, and moving Cannon heat-presence thresholds. Cannon Ball is currently debug-spawnable, visually heavy, harder to accelerate from normal/cue impacts, more forceful/persistent when it hits non-anomaly balls, amplified when launched by Powder Keg explosions, able to request subtle table thumps on qualifying heavy impacts, and visually marked by a draw-only red/orange heat glow and ember trail at high speed.
 
 Future Cannon Ball passes may own Anchor pull tuning, Wayfinder guidance safeguards, regular spawn odds, and additional heat-presence polish, but those are not active yet.
 
@@ -183,7 +183,7 @@ Anomaly balls should generally get their own system scripts. Current active anom
 - `WayfinderSystem.gd`
 - `PowderKegSystem.gd`
 - `AnchorBallSystem.gd`
-- `CannonBallSystem.gd` currently owns debug-spawnable Cannon identity, first-pass heavy collision behavior, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat-presence thresholds.
+- `CannonBallSystem.gd` currently owns debug-spawnable Cannon identity, collision tuning, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat-presence thresholds.
 
 Pattern:
 
@@ -209,7 +209,7 @@ Current anomaly rules:
 - Anchor has an inner dead zone and a per Anchor/target post-collision pull cooldown to prevent gravity-loop chase bumps.
 - Anchor uses independent reward spawn logic before the regular anomaly pool: 3% when the table has 40 or fewer balls, and 30% when the table has more than 40 balls.
 - Cannon Ball is currently debug-spawn only and visually reads as dark heavy iron with ember detail.
-- Cannon Ball has first-pass collision modifiers against non-anomaly balls only: it gains reduced velocity when hit, retains more velocity when driving into a ball, and transfers stronger force above a minimum impact speed.
+- Cannon Ball has collision modifiers against non-anomaly balls only: it gains reduced velocity when hit, retains more velocity when driving into a ball, and transfers stronger force above a minimum impact speed.
 - Cannon Ball can trigger Powder Keg explosions and receives amplified Powder Keg launch impulse.
 - Cannon Ball qualifying heavy impacts can request short, subtle table-impact shake through `TableImpactShakeSystem.gd`, with cooldown to prevent shake spam.
 - Cannon Ball high-speed heat presence is draw-only in `Ball.gd`, tuned by `CannonBallSystem.gd`, and visually capped so chaos degrades presentation before gameplay.
@@ -257,6 +257,14 @@ Do not bury score-tied reward decisions inside `ScoreSystem.gd`, and do not add 
 - Keep physics/gameplay authoritative and correct. Degrade visual effects first under load.
 - Good first optimization targets include particles, trails, aura effects, popup labels, redraw frequency, pooling/reuse, and offscreen or low-priority visual simplification.
 - Debug/stress testing should continue to support 100+ balls.
+
+## Project Brain And Debug Media
+
+- `project_brain/` is generated/reference-only and is not gameplay source of truth.
+- `project_brain/debug_media/` stores visual debugging references, performance captures, feel/polish references, reproduction clips, and comparison screenshots/videos.
+- Future sessions should check relevant `debug_media` clips or screenshots when investigating feel, prediction, anomaly, UI, or performance issues.
+- `debug_media` is reference material only. Do not treat it as gameplay code, scene data, or authoritative behavior.
+- Always verify conclusions from Project Brain or debug media against real source files, scenes, and `AGENTS.md` before changing behavior.
 
 ## Development Rules
 

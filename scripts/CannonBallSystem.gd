@@ -6,7 +6,7 @@ class_name CannonBallSystem
 # index:category Mechanics / Anomaly Balls / Systems / Performance Concerns / In Progress
 # index:status In Progress
 # index:owner anomaly_ball_agent
-# index:notes Stage 3 Cannon Ball collision tuning shell; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
+# index:notes Cannon Ball anomaly system; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 
 # Owns Cannon Ball anomaly behavior. Table.gd still owns the main collision
 # loop and asks this system to adjust only Cannon-involved ball impulses.
