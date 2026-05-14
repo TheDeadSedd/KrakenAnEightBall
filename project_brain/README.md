@@ -8,7 +8,7 @@ Current snapshot:
 
 - Kraken An Eight Ball is a systemic arcade-chaos billiards prototype.
 - The current loop is better play -> more score -> more balls -> more chaos -> survive the escalating table.
-- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, and Treasure perception/hiding are active modern systems.
+- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, and Treasure perception grace/hiding are active modern systems.
 - Generated reports are a project map only; `AGENTS.md` and the real scripts/scenes remain authoritative.
 
 Important rules:

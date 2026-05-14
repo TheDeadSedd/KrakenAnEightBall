@@ -1055,6 +1055,19 @@ func get_performance_debug_snapshot() -> Dictionary:
 	var treasure_snapshot: Dictionary = treasure_ball_system.get_debug_snapshot()
 	var ball_drop_snapshot: Dictionary = ball_drop_system.get_debug_snapshot()
 	var aim_snapshot: Dictionary = aim_preview.get_debug_snapshot()
+
+	var snapshot := {}
+	snapshot.merge(_get_table_performance_snapshot(counts))
+	snapshot.merge(_get_anomaly_performance_snapshot(counts, anchor_snapshot, cannon_snapshot, treasure_snapshot))
+	snapshot.merge(_get_ball_drop_performance_snapshot(ball_drop_snapshot))
+	snapshot.merge(_get_visual_cost_performance_snapshot(counts))
+	snapshot.merge(_get_physics_performance_snapshot())
+	snapshot.merge(_get_aim_performance_snapshot(aim_snapshot))
+	snapshot.merge(_get_timing_performance_snapshot())
+	return snapshot
+
+
+func _get_table_performance_snapshot(counts: Dictionary) -> Dictionary:
 	return {
 		"total_balls": counts["total"],
 		"moving_balls": counts["moving"],
@@ -1063,6 +1076,16 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"cue_reclaim_granted": cue_control_reclaimed,
 		"cue_reclaim_moving_non_cue_balls": cue_reclaim_moving_non_cue_count,
 		"cue_reclaim_blocker_reason": cue_reclaim_blocker_reason,
+	}
+
+
+func _get_anomaly_performance_snapshot(
+	counts: Dictionary,
+	anchor_snapshot: Dictionary,
+	cannon_snapshot: Dictionary,
+	treasure_snapshot: Dictionary
+) -> Dictionary:
+	return {
 		"active_wayfinders": counts["active_wayfinders"],
 		"guided_wayfinder_targets": wayfinder_system.get_guided_target_count(),
 		"anchor_balls": anchor_snapshot["active_anchor_balls"],
@@ -1115,17 +1138,39 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"treasure_perception_checks": treasure_snapshot["perception_checks"],
 		"treasure_perception_epoch": treasure_snapshot["perception_epoch"],
 		"treasure_perception_rebuilds": treasure_snapshot["perception_rebuilds"],
+		"treasure_perception_direct_seen": treasure_snapshot["perception_direct_seen"],
+		"treasure_perception_lost_events": treasure_snapshot["perception_lost_events"],
+		"treasure_perception_reacquired_events": treasure_snapshot["perception_reacquired_events"],
+		"treasure_perception_linger_activations": treasure_snapshot["perception_linger_activations"],
+		"treasure_perception_lingered": treasure_snapshot["perception_lingered"],
+		"treasure_perception_grace_active": treasure_snapshot["perception_grace_active"],
+		"treasure_perception_grace_max_remaining": treasure_snapshot["perception_grace_max_remaining"],
+	}
+
+
+func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dictionary:
+	return {
 		"ball_drop_progress": ball_drop_snapshot["drop_progress"],
 		"ball_drop_threshold": ball_drop_snapshot["doubloons_per_drop"],
 		"ball_drop_enabled": ball_drop_snapshot["enabled"],
 		"ball_drop_last_score_queued": ball_drop_snapshot["last_score_drops_queued"],
 		"ball_drop_total_queued": ball_drop_snapshot["total_drops_queued"],
 		"ball_drop_pending_spawns": ball_drop_snapshot["pending_spawn_drops"],
+	}
+
+
+func _get_visual_cost_performance_snapshot(counts: Dictionary) -> Dictionary:
+	return {
 		"trail_points": counts["trail_points"],
 		"balls_with_trails": counts["balls_with_trails"],
 		"trail_redraws": counts["trail_redraws"],
 		"active_powder_keg_particle_bursts": powder_keg_system.get_active_particle_burst_count(),
 		"active_score_popup_labels": score_system.get_active_popup_label_count(),
+	}
+
+
+func _get_physics_performance_snapshot() -> Dictionary:
+	return {
 		"physics_substeps": PHYSICS_SUBSTEPS,
 		"spatial_grid_cells": perf_spatial_grid_cells,
 		"spatial_grid_max_cell_size": perf_spatial_grid_max_cell_size,
@@ -1136,12 +1181,13 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"rail_collisions_resolved": boundary_system.get_collisions_this_frame(),
 		"pocket_checks": pocket_system.get_checks_this_frame(),
 		"pocket_captures": pocket_system.get_captures_this_frame(),
+	}
+
+
+func _get_aim_performance_snapshot(aim_snapshot: Dictionary) -> Dictionary:
+	return {
 		"aim_prediction_enabled": aim_preview.is_prediction_enabled(),
 		"shot_comparison_enabled": aim_preview.is_shot_path_debug_enabled(),
-		"physics_process_ms": perf_physics_process_ms,
-		"ball_collision_ms": perf_ball_collision_ms,
-		"rail_collision_ms": perf_rail_collision_ms,
-		"pocket_check_ms": perf_pocket_check_ms,
 		"aim_prediction_ms": aim_snapshot["prediction_ms"],
 		"aim_prediction_frame_ms": aim_snapshot["prediction_frame_ms"],
 		"aim_prediction_recalculations": aim_snapshot["prediction_recalculations"],
@@ -1157,6 +1203,15 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"aim_draw_ms": aim_snapshot["draw_ms"],
 		"aim_draw_segments": aim_snapshot["draw_segments"],
 		"aim_draw_calls": aim_snapshot["draw_calls"],
+	}
+
+
+func _get_timing_performance_snapshot() -> Dictionary:
+	return {
+		"physics_process_ms": perf_physics_process_ms,
+		"ball_collision_ms": perf_ball_collision_ms,
+		"rail_collision_ms": perf_rail_collision_ms,
+		"pocket_check_ms": perf_pocket_check_ms,
 	}
 
 

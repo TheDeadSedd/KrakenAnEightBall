@@ -17,7 +17,7 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 - `scripts/PocketSystem.gd` - Loads authored pocket geometry and detects pocket captures.
 - `scripts/PowderKegSystem.gd` - Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.
 - `scripts/TableImpactShakeSystem.gd` - Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.
-- `scripts/TreasureBallSystem.gd` - Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.
+- `scripts/TreasureBallSystem.gd` - Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting.
 
 ## Current Notes
 

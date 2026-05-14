@@ -113,7 +113,7 @@ AGENT_DEFINITIONS = {
         "notes": [
             "Wayfinder, Powder Keg, Anchor, Cannon, and Treasure all have focused system boundaries.",
             "Cannon Ball has collision tuning, Powder Keg launch, heavy-impact shake, and high-speed heat presence.",
-            "Treasure Ball is a debug-spawn perception/hiding/scuttle experiment; it reacts to being watched, not just exact first-hit targeting.",
+            "Treasure Ball is a debug-spawn perception-grace/hiding/scuttle experiment; it reacts to being watched, not just exact first-hit targeting.",
             "Treasure should feel like a cautious sneaky thief, not a shortest-path optimizer.",
             "Anchor has independent priority spawn odds, object-ball-only pull, and one strongest current per target rather than stacked pulls.",
         ],
@@ -393,7 +393,7 @@ def guess_summary(rel_path: str) -> str:
     if name == "CannonBallSystem.gd":
         return "Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence."
     if name == "TreasureBallSystem.gd":
-        return "Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting."
+        return "Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting."
     if name == "DebugOverlay.gd":
         return "Formats debug menu, performance overlay, toggles, and physics debug text."
     if name == "AimPreview.gd":
@@ -452,7 +452,7 @@ def build_readme() -> str:
             "",
             "- Kraken An Eight Ball is a systemic arcade-chaos billiards prototype.",
             "- The current loop is better play -> more score -> more balls -> more chaos -> survive the escalating table.",
-            "- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, and Treasure perception/hiding are active modern systems.",
+            "- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, and Treasure perception grace/hiding are active modern systems.",
             "- Generated reports are a project map only; `AGENTS.md` and the real scripts/scenes remain authoritative.",
             "",
             "Important rules:",
@@ -523,7 +523,7 @@ def build_project_index(files: list[FileInfo], changed_paths: list[str]) -> str:
         "- Early cue reclaim lets players regain control after the cue ball stops under safe motion conditions.",
         "- `TableImpactShakeSystem.gd` owns fake-3D presentation-only impact shake for Powder Keg and Cannon events.",
         "- Cannon Ball is a debug-spawn delayed-chaos future-problem anomaly with heat presence and heavy-impact behavior.",
-        "- Treasure Ball is a debug-spawn perception/hiding experiment that reacts to being watched by the aim guide.",
+        "- Treasure Ball is a debug-spawn perception grace/hiding experiment that reacts to being watched by the aim guide.",
         "- Optimization philosophy: support chaos gracefully, coalesce repeated work, and degrade visuals before limiting gameplay.",
         "",
         "## Next Major Goal",
@@ -606,7 +606,7 @@ def format_file_bullet(info: FileInfo) -> str:
 
 def clean_metadata_notes(notes: str) -> str:
     """Keep generated docs current without editing source metadata comments."""
-    return notes.replace("Stage 4 ", "").strip()
+    return re.sub(r"^Stage\s+\d+\s+", "", notes, flags=re.IGNORECASE).strip()
 
 
 def build_agent_report(files: list[FileInfo]) -> str:

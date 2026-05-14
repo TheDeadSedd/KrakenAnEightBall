@@ -227,7 +227,25 @@ func _make_physics_debug_text() -> String:
 
 func _make_performance_debug_text() -> String:
 	var snapshot: Dictionary = table.get_performance_debug_snapshot()
-	var lines := [
+	var lines: Array = []
+	lines.append_array(_make_performance_summary_lines(snapshot))
+	lines.append("")
+	lines.append_array(_make_ball_drop_performance_lines(snapshot))
+	lines.append("")
+	lines.append_array(_make_anomaly_performance_lines(snapshot))
+	lines.append("")
+	lines.append_array(_make_visual_cost_performance_lines(snapshot))
+	lines.append("")
+	lines.append_array(_make_aim_preview_performance_lines(snapshot))
+	lines.append("")
+	lines.append_array(_make_physics_performance_lines(snapshot))
+	lines.append("")
+	lines.append_array(_make_timing_performance_lines(snapshot))
+	return "\n".join(lines)
+
+
+func _make_performance_summary_lines(snapshot: Dictionary) -> Array:
+	return [
 		"PERFORMANCE",
 		"FPS: %s" % Engine.get_frames_per_second(),
 		"Balls: %s total / %s moving / %s stopped" % [
@@ -241,7 +259,11 @@ func _make_performance_debug_text() -> String:
 			snapshot["cue_reclaim_moving_non_cue_balls"],
 		],
 		"Reclaim blocker: %s" % snapshot["cue_reclaim_blocker_reason"],
-		"",
+	]
+
+
+func _make_ball_drop_performance_lines(snapshot: Dictionary) -> Array:
+	return [
 		"BALL DROPS",
 		"Ball drop progress: %s/%s Doubloons" % [
 			snapshot["ball_drop_progress"],
@@ -253,12 +275,31 @@ func _make_performance_debug_text() -> String:
 			snapshot["ball_drop_last_score_queued"],
 		],
 		"BallDropSystem enabled: %s" % _debug_bool_text(bool(snapshot["ball_drop_enabled"])),
-		"",
+	]
+
+
+func _make_anomaly_performance_lines(snapshot: Dictionary) -> Array:
+	var lines: Array = [
 		"ANOMALIES",
+	]
+	lines.append_array(_make_wayfinder_performance_lines(snapshot))
+	lines.append_array(_make_anchor_performance_lines(snapshot))
+	lines.append_array(_make_cannon_performance_lines(snapshot))
+	lines.append_array(_make_treasure_performance_lines(snapshot))
+	return lines
+
+
+func _make_wayfinder_performance_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Wayfinder: %s active / %s guided" % [
 			snapshot["active_wayfinders"],
 			snapshot["guided_wayfinder_targets"],
 		],
+	]
+
+
+func _make_anchor_performance_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Anchor: %s active / %s affected / %s force apps" % [
 			snapshot["anchor_balls"],
 			snapshot["anchor_affected_balls"],
@@ -291,11 +332,21 @@ func _make_performance_debug_text() -> String:
 			_debug_bool_text(bool(snapshot["anchor_spawn_cap_enabled"])),
 			snapshot["anchor_spawn_cap"],
 		],
+	]
+
+
+func _make_cannon_performance_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Cannon: %s active / %s collisions / %s heavy impacts" % [
 			snapshot["cannon_balls"],
 			snapshot["cannon_collisions"],
 			snapshot["cannon_heavy_impacts"],
 		],
+	]
+
+
+func _make_treasure_performance_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Treasure: %s active / %s seen / steering %s / %s" % [
 			snapshot["treasure_balls"],
 			snapshot["treasure_balls_seen"],
@@ -334,7 +385,22 @@ func _make_performance_debug_text() -> String:
 			snapshot["treasure_perception_epoch"],
 			snapshot["treasure_perception_rebuilds"],
 		],
-		"",
+		"Treasure stability: lost %s / reacq %s / linger %s" % [
+			snapshot["treasure_perception_lost_events"],
+			snapshot["treasure_perception_reacquired_events"],
+			snapshot["treasure_perception_linger_activations"],
+		],
+		"Treasure grace: direct %s / active %s / max %.2fs / frame %s" % [
+			snapshot["treasure_perception_direct_seen"],
+			snapshot["treasure_perception_grace_active"],
+			float(snapshot["treasure_perception_grace_max_remaining"]),
+			snapshot["treasure_perception_lingered"],
+		],
+	]
+
+
+func _make_visual_cost_performance_lines(snapshot: Dictionary) -> Array:
+	return [
 		"VISUAL COST",
 		"Trails: %s points / %s balls / %s redraws" % [
 			snapshot["trail_points"],
@@ -345,7 +411,11 @@ func _make_performance_debug_text() -> String:
 			snapshot["active_powder_keg_particle_bursts"],
 			snapshot["active_score_popup_labels"],
 		],
-		"",
+	]
+
+
+func _make_aim_preview_performance_lines(snapshot: Dictionary) -> Array:
+	return [
 		"AIM PREVIEW",
 		"Aim: %s / comparison %s / frame %.2f ms / last %.2f ms" % [
 			_debug_bool_text(bool(snapshot["aim_prediction_enabled"])),
@@ -376,7 +446,11 @@ func _make_performance_debug_text() -> String:
 			snapshot["aim_draw_segments"],
 			snapshot["aim_draw_calls"],
 		],
-		"",
+	]
+
+
+func _make_physics_performance_lines(snapshot: Dictionary) -> Array:
+	return [
 		"PHYSICS",
 		"Substeps: %s" % snapshot["physics_substeps"],
 		"Grid cells: %s / max cell: %s" % [
@@ -396,7 +470,11 @@ func _make_performance_debug_text() -> String:
 			snapshot["pocket_checks"],
 			snapshot["pocket_captures"],
 		],
-		"",
+	]
+
+
+func _make_timing_performance_lines(snapshot: Dictionary) -> Array:
+	return [
 		"TIMING",
 		"Frame: %.2f ms / ball %.2f / rail %.2f / pocket %.2f" % [
 			float(snapshot["physics_process_ms"]),
@@ -405,7 +483,6 @@ func _make_performance_debug_text() -> String:
 			float(snapshot["pocket_check_ms"]),
 		],
 	]
-	return "\n".join(lines)
 
 
 func _sort_ball_debug_snapshots_by_speed(ball_a: Dictionary, ball_b: Dictionary) -> bool:

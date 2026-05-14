@@ -6,10 +6,11 @@ class_name TreasureBallSystem
 # index:category Mechanics / Anomaly Balls / Systems / Performance Concerns / In Progress
 # index:status In Progress
 # index:owner anomaly_ball_agent
-# index:notes Stage 4 Treasure Ball identity, AimPreview corridor perception, committed hide target selection, threat-scaled hiding movement, and fleeing-leg visual reporting.
+# index:notes Treasure Ball identity, AimPreview corridor perception with grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only legs.
 
-# Owns Treasure Ball tracking, perception state, hide target selection, and
-# gentle self-steering. Perception is read from AimPreview's corridor snapshot.
+# Owns Treasure Ball tracking, read-only AimPreview perception with grace,
+# committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement,
+# self-braking, reduced self-steer shove, and draw-only leg reporting.
 const DEBUG_TARGET_LINE_COLOR := Color(0.30, 1.0, 0.82, 0.72)
 const DEBUG_TARGET_MARKER_COLOR := Color(0.98, 0.84, 0.36, 0.82)
 const DEBUG_FALLBACK_MARKER_COLOR := Color(0.42, 0.76, 1.0, 0.72)
@@ -42,9 +43,11 @@ const DEBUG_COVER_LINE_COLOR := Color(1.0, 0.92, 0.48, 0.56)
 @export var cover_switch_improvement_threshold := 40.0
 @export var minimum_cover_distance_from_cue_origin := 80.0
 @export var prefer_away_from_cue_weight := 2.35
+@export var perception_grace_time := 0.28
 
 var table
 var treasure_balls: Array[Ball] = []
+var direct_seen_treasure_ball_ids: Dictionary = {}
 var seen_treasure_ball_ids: Dictionary = {}
 var hide_targets_by_treasure_id: Dictionary = {}
 var visibility_debug_entries: Array[Dictionary] = []
@@ -59,6 +62,13 @@ var steering_active_this_frame := false
 var last_perception_epoch := -1
 var self_steering_until_by_ball_id: Dictionary = {}
 var self_scuttle_velocity_by_ball_id: Dictionary = {}
+var recent_seen_entries_by_treasure_id: Dictionary = {}
+var perception_grace_remaining_by_treasure_id: Dictionary = {}
+var perception_lost_pending_by_treasure_id: Dictionary = {}
+var perception_lost_events := 0
+var perception_reacquired_events := 0
+var perception_linger_activations := 0
+var perception_lingered_this_frame := 0
 
 
 func setup(table_ref) -> void:
@@ -69,6 +79,7 @@ func reset_frame_stats() -> void:
 	perception_checks_this_frame = 0
 	perception_rebuilds_this_frame = 0
 	hide_selection_checks_this_frame = 0
+	perception_lingered_this_frame = 0
 	steering_applications_this_frame = 0
 	steering_cover_count_this_frame = 0
 	steering_fallback_count_this_frame = 0
@@ -111,9 +122,8 @@ func handle_aim_perception_snapshot(snapshot: Dictionary) -> void:
 	var debug_entries: Array = snapshot.get("visibility_debug_entries", []) as Array
 	for debug_entry_value in debug_entries:
 		visibility_debug_entries.append(debug_entry_value as Dictionary)
-	var seen_ids: Array = snapshot.get("seen_treasure_ball_ids", []) as Array
-	_update_seen_treasure_ids(seen_ids)
-	_update_hide_targets(snapshot)
+	var effective_seen_entries: Array = _update_perceived_treasure_state(snapshot)
+	_update_hide_targets(snapshot, effective_seen_entries)
 	if debug_visual_enabled and table != null:
 		table.queue_redraw()
 
@@ -122,6 +132,7 @@ func update_hiding(delta: float) -> void:
 	if delta <= 0.0:
 		return
 
+	_update_perception_grace_timers(delta)
 	var active_scuttle_ids: Dictionary = {}
 	if hiding_movement_enabled and not hide_targets_by_treasure_id.is_empty():
 		for ball_id in hide_targets_by_treasure_id:
@@ -180,6 +191,13 @@ func get_debug_snapshot() -> Dictionary:
 		"perception_checks": perception_checks_this_frame + hide_selection_checks_this_frame,
 		"perception_epoch": last_perception_epoch,
 		"perception_rebuilds": perception_rebuilds_this_frame,
+		"perception_direct_seen": direct_seen_treasure_ball_ids.size(),
+		"perception_lost_events": perception_lost_events,
+		"perception_reacquired_events": perception_reacquired_events,
+		"perception_linger_activations": perception_linger_activations,
+		"perception_lingered": perception_lingered_this_frame,
+		"perception_grace_active": _get_perception_grace_active_count(),
+		"perception_grace_max_remaining": _get_max_perception_grace_remaining(),
 	}
 
 
@@ -218,17 +236,44 @@ func draw_debug(canvas: Node2D) -> void:
 		canvas.draw_circle(cover_position, 4.0, DEBUG_COVER_LINE_COLOR)
 
 
-func _update_seen_treasure_ids(seen_ids: Array) -> void:
+func _update_perceived_treasure_state(snapshot: Dictionary) -> Array:
 	_prune_tracked_treasure_balls()
+	var path_points: Array = snapshot.get("aim_path_points", []) as Array
+	if path_points.size() < 2:
+		_clear_perception_grace_state()
+		return []
+
+	var direct_seen_entries: Array = snapshot.get("seen_treasure_balls", []) as Array
+	var previous_direct_seen_ids: Dictionary = direct_seen_treasure_ball_ids.duplicate()
+	var direct_seen_ids: Dictionary = {}
+	var effective_seen_entries: Array = []
+
+	direct_seen_treasure_ball_ids.clear()
 	seen_treasure_ball_ids.clear()
-	for seen_id in seen_ids:
-		var ball_id: int = int(seen_id)
-		if _has_active_treasure_ball_id(ball_id):
-			seen_treasure_ball_ids[ball_id] = true
+	for seen_entry_value in direct_seen_entries:
+		var seen_entry: Dictionary = seen_entry_value as Dictionary
+		var ball_id: int = int(seen_entry.get("ball_id", -1))
+		if not _has_active_treasure_ball_id(ball_id):
+			continue
+
+		var stored_entry: Dictionary = seen_entry.duplicate()
+		stored_entry["perception_lingered"] = false
+		direct_seen_ids[ball_id] = true
+		direct_seen_treasure_ball_ids[ball_id] = true
+		seen_treasure_ball_ids[ball_id] = true
+		recent_seen_entries_by_treasure_id[ball_id] = stored_entry
+		perception_grace_remaining_by_treasure_id[ball_id] = max(perception_grace_time, 0.0)
+		effective_seen_entries.append(stored_entry)
+		if perception_lost_pending_by_treasure_id.has(ball_id):
+			perception_reacquired_events += 1
+			perception_lost_pending_by_treasure_id.erase(ball_id)
+
+	_note_direct_perception_losses(previous_direct_seen_ids, direct_seen_ids)
+	_append_lingered_perception_entries(effective_seen_entries, direct_seen_ids)
+	return effective_seen_entries
 
 
-func _update_hide_targets(snapshot: Dictionary) -> void:
-	var seen_entries: Array = snapshot.get("seen_treasure_balls", []) as Array
+func _update_hide_targets(snapshot: Dictionary, seen_entries: Array) -> void:
 	if seen_entries.is_empty():
 		hide_targets_by_treasure_id.clear()
 		last_target_switch_reason = "not_seen"
@@ -273,6 +318,124 @@ func _update_hide_targets(snapshot: Dictionary) -> void:
 			kept_targets[treasure_id] = chosen_target
 
 	hide_targets_by_treasure_id = kept_targets
+
+
+func _note_direct_perception_losses(previous_direct_seen_ids: Dictionary, direct_seen_ids: Dictionary) -> void:
+	for ball_id_value in previous_direct_seen_ids:
+		var ball_id: int = int(ball_id_value)
+		if direct_seen_ids.has(ball_id):
+			continue
+		if not _has_active_treasure_ball_id(ball_id):
+			continue
+
+		perception_lost_events += 1
+		perception_lost_pending_by_treasure_id[ball_id] = true
+		if _get_perception_grace_remaining(ball_id) > 0.0:
+			perception_linger_activations += 1
+
+
+func _append_lingered_perception_entries(effective_seen_entries: Array, direct_seen_ids: Dictionary) -> void:
+	if perception_grace_remaining_by_treasure_id.is_empty():
+		return
+
+	for ball_id_value in perception_grace_remaining_by_treasure_id:
+		var ball_id: int = int(ball_id_value)
+		if direct_seen_ids.has(ball_id):
+			continue
+		if _get_perception_grace_remaining(ball_id) <= 0.0:
+			continue
+
+		var treasure_ball: Ball = _get_active_treasure_ball_by_id(ball_id)
+		if treasure_ball == null:
+			continue
+		if not recent_seen_entries_by_treasure_id.has(ball_id):
+			continue
+
+		var recent_entry: Dictionary = recent_seen_entries_by_treasure_id[ball_id] as Dictionary
+		var lingered_entry: Dictionary = recent_entry.duplicate()
+		_prepare_lingered_perception_entry(lingered_entry, treasure_ball)
+		seen_treasure_ball_ids[ball_id] = true
+		effective_seen_entries.append(lingered_entry)
+		perception_lingered_this_frame += 1
+
+
+func _prepare_lingered_perception_entry(lingered_entry: Dictionary, treasure_ball: Ball) -> void:
+	lingered_entry["position"] = treasure_ball.global_position
+	lingered_entry["perception_lingered"] = true
+	lingered_entry["visibility_reason"] = "recently_seen"
+
+
+func _update_perception_grace_timers(delta: float) -> void:
+	if perception_grace_remaining_by_treasure_id.is_empty():
+		return
+
+	var kept_grace: Dictionary = {}
+	var expired_grace_ids: Array[int] = []
+	for ball_id_value in perception_grace_remaining_by_treasure_id:
+		var ball_id: int = int(ball_id_value)
+		if not _has_active_treasure_ball_id(ball_id):
+			expired_grace_ids.append(ball_id)
+			continue
+
+		var remaining: float = float(perception_grace_remaining_by_treasure_id[ball_id])
+		if direct_seen_treasure_ball_ids.has(ball_id):
+			if perception_grace_time > 0.0:
+				kept_grace[ball_id] = perception_grace_time
+			continue
+		else:
+			remaining -= delta
+
+		if remaining > 0.0:
+			kept_grace[ball_id] = remaining
+		else:
+			expired_grace_ids.append(ball_id)
+
+	perception_grace_remaining_by_treasure_id = kept_grace
+	for ball_id in expired_grace_ids:
+		_clear_perception_grace_for_id(ball_id)
+
+
+func _clear_perception_grace_state() -> void:
+	direct_seen_treasure_ball_ids.clear()
+	seen_treasure_ball_ids.clear()
+	recent_seen_entries_by_treasure_id.clear()
+	perception_grace_remaining_by_treasure_id.clear()
+	perception_lost_pending_by_treasure_id.clear()
+
+
+func _clear_perception_grace_for_id(ball_id: int) -> void:
+	direct_seen_treasure_ball_ids.erase(ball_id)
+	seen_treasure_ball_ids.erase(ball_id)
+	hide_targets_by_treasure_id.erase(ball_id)
+	recent_seen_entries_by_treasure_id.erase(ball_id)
+	perception_lost_pending_by_treasure_id.erase(ball_id)
+
+
+func _get_perception_grace_remaining(ball_id: int) -> float:
+	return float(perception_grace_remaining_by_treasure_id.get(ball_id, 0.0))
+
+
+func _get_perception_grace_active_count() -> int:
+	var grace_count := 0
+	for ball_id_value in perception_grace_remaining_by_treasure_id:
+		var ball_id: int = int(ball_id_value)
+		if direct_seen_treasure_ball_ids.has(ball_id):
+			continue
+		if _get_perception_grace_remaining(ball_id) > 0.0 and _has_active_treasure_ball_id(ball_id):
+			grace_count += 1
+	return grace_count
+
+
+func _get_max_perception_grace_remaining() -> float:
+	var max_remaining := 0.0
+	for ball_id_value in perception_grace_remaining_by_treasure_id:
+		var ball_id: int = int(ball_id_value)
+		if direct_seen_treasure_ball_ids.has(ball_id):
+			continue
+		if not _has_active_treasure_ball_id(ball_id):
+			continue
+		max_remaining = max(max_remaining, _get_perception_grace_remaining(ball_id))
+	return max_remaining
 
 
 func _select_hide_target_for_treasure(
@@ -1012,11 +1175,35 @@ func _prune_tracked_treasure_balls() -> void:
 			kept_seen_ids[ball_id] = true
 	seen_treasure_ball_ids = kept_seen_ids
 
+	var kept_direct_seen_ids: Dictionary = {}
+	for ball_id in direct_seen_treasure_ball_ids:
+		if _has_active_treasure_ball_id(int(ball_id)):
+			kept_direct_seen_ids[ball_id] = true
+	direct_seen_treasure_ball_ids = kept_direct_seen_ids
+
 	var kept_hide_targets: Dictionary = {}
 	for ball_id in hide_targets_by_treasure_id:
 		if _has_active_treasure_ball_id(int(ball_id)):
 			kept_hide_targets[ball_id] = hide_targets_by_treasure_id[ball_id]
 	hide_targets_by_treasure_id = kept_hide_targets
+
+	var kept_recent_entries: Dictionary = {}
+	for ball_id in recent_seen_entries_by_treasure_id:
+		if _has_active_treasure_ball_id(int(ball_id)):
+			kept_recent_entries[ball_id] = recent_seen_entries_by_treasure_id[ball_id]
+	recent_seen_entries_by_treasure_id = kept_recent_entries
+
+	var kept_grace_remaining: Dictionary = {}
+	for ball_id in perception_grace_remaining_by_treasure_id:
+		if _has_active_treasure_ball_id(int(ball_id)):
+			kept_grace_remaining[ball_id] = perception_grace_remaining_by_treasure_id[ball_id]
+	perception_grace_remaining_by_treasure_id = kept_grace_remaining
+
+	var kept_lost_pending: Dictionary = {}
+	for ball_id in perception_lost_pending_by_treasure_id:
+		if _has_active_treasure_ball_id(int(ball_id)):
+			kept_lost_pending[ball_id] = true
+	perception_lost_pending_by_treasure_id = kept_lost_pending
 
 	var kept_visibility_entries: Array[Dictionary] = []
 	for entry_value in visibility_debug_entries:

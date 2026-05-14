@@ -82,14 +82,14 @@ Relevant files:
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
 - `scripts/CannonBallSystem.gd` - Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.
 - `scripts/PowderKegSystem.gd` - Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.
-- `scripts/TreasureBallSystem.gd` - Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.
+- `scripts/TreasureBallSystem.gd` - Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting.
 - `scripts/WayfinderSystem.gd` - Handles Wayfinder activation and temporary guided-ball redirects.
 
 What it appears to do:
 - Tracks Wayfinder, Powder Keg, Anchor Ball, Cannon Ball, Treasure Ball, and future anomaly behavior boundaries.
 - Wayfinder, Powder Keg, Anchor, Cannon, and Treasure all have focused system boundaries.
 - Cannon Ball has collision tuning, Powder Keg launch, heavy-impact shake, and high-speed heat presence.
-- Treasure Ball is a debug-spawn perception/hiding/scuttle experiment; it reacts to being watched, not just exact first-hit targeting.
+- Treasure Ball is a debug-spawn perception-grace/hiding/scuttle experiment; it reacts to being watched, not just exact first-hit targeting.
 - Treasure should feel like a cautious sneaky thief, not a shortest-path optimizer.
 - Anchor has independent priority spawn odds, object-ball-only pull, and one strongest current per target rather than stacked pulls.
 
@@ -142,7 +142,7 @@ Relevant files:
 - `scripts/PocketSystem.gd` - Loads authored pocket geometry and detects pocket captures.
 - `scripts/PowderKegSystem.gd` - Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.
 - `scripts/TableImpactShakeSystem.gd` - Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.
-- `scripts/TreasureBallSystem.gd` - Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.
+- `scripts/TreasureBallSystem.gd` - Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting.
 
 What it appears to do:
 - Tracks visual cost, broad-phase health, trail redraws, particle load, and stress-test readiness.
