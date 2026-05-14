@@ -111,6 +111,22 @@ func get_doubloons_total() -> int:
 	return doubloons_total
 
 
+func can_afford_doubloons(amount: int) -> bool:
+	return doubloons_total >= max(amount, 0)
+
+
+func try_spend_doubloons(amount: int) -> bool:
+	var spend_amount: int = max(amount, 0)
+	if spend_amount <= 0:
+		return true
+	if not can_afford_doubloons(spend_amount):
+		return false
+
+	doubloons_total -= spend_amount
+	doubloons_changed.emit(doubloons_total)
+	return true
+
+
 func apply_doubloons_penalty(amount: int) -> int:
 	var penalty_amount: int = max(amount, 0)
 	if penalty_amount <= 0:

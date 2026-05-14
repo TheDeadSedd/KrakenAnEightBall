@@ -103,6 +103,8 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var ball_drop_system: BallDropSystem = $BallDropSystem
 @onready var aim_preview: AimPreview = $AimPreview
 @onready var spawn_system: SpawnSystem = $SpawnSystem
+@onready var ball_placement_system: BallPlacementSystem = $BallPlacementSystem
+@onready var quartermaster_system: QuartermasterSystem = $QuartermasterSystem
 @onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
 @onready var powder_keg_system: PowderKegSystem = $PowderKegSystem
 @onready var anchor_ball_system: AnchorBallSystem = $AnchorBallSystem
@@ -174,12 +176,14 @@ func _ready() -> void:
 	_connect_score_drop_events()
 	aim_preview.setup(self)
 	spawn_system.setup(self)
+	ball_placement_system.setup(self)
 	wayfinder_system.setup(self)
 	powder_keg_system.setup(self)
 	anchor_ball_system.setup(self)
 	cannon_ball_system.setup(self)
 	treasure_ball_system.setup(self)
 	table_impact_shake_system.setup(self)
+	quartermaster_system.setup(self)
 	_cache_table_geometry()
 	cue_controller.setup()
 	if Engine.is_editor_hint():
@@ -205,6 +209,22 @@ func emit_ready_status_if_needed(current_status_text: String) -> void:
 		return
 	if _can_start_aiming():
 		status_text_changed.emit(READY_STATUS_TEXT)
+
+
+func can_start_manual_ball_placement() -> bool:
+	if game_over or ball_placement_system.is_placement_active():
+		return false
+	if shot_active:
+		return false
+	return _all_balls_stopped() and _get_cue_control_base_blocker().is_empty()
+
+
+func is_ball_placement_active() -> bool:
+	return ball_placement_system.is_placement_active()
+
+
+func cancel_active_ball_placement() -> void:
+	quartermaster_system.cancel_active_purchase()
 
 
 func _is_loading_status_text(status_text: String) -> bool:
@@ -266,6 +286,8 @@ func _physics_process(delta: float) -> void:
 # Routes raw mouse/touch/debug keys. Cue-specific behavior stays in Cue Controller below.
 func _unhandled_input(event: InputEvent) -> void:
 	if game_over or not is_instance_valid(cue_ball):
+		return
+	if ball_placement_system.is_placement_active():
 		return
 
 	if _try_debug_spawn_ball(event):
@@ -1549,6 +1571,8 @@ func _evaluate_cue_reclaim_eligibility() -> Dictionary:
 func _get_cue_control_base_blocker() -> String:
 	if game_over:
 		return "Game over"
+	if ball_placement_system.is_placement_active():
+		return "Placement active"
 	if not is_instance_valid(cue_ball) or not cue_ball.visible or not cue_ball.gameplay_enabled:
 		return "Cue unavailable"
 	if spawn_system.has_pending_spawns():

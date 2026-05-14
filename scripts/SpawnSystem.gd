@@ -202,6 +202,35 @@ func reset_ball(ball: Ball, origin: Vector2) -> void:
 	ball.respawn_at(safe_position)
 
 
+func get_manual_placement_ball_radius() -> float:
+	if table != null and is_instance_valid(table.cue_ball):
+		return table.cue_ball.radius
+	return 18.0
+
+
+func get_manual_placement_validation(candidate: Vector2, ball_radius: float) -> Dictionary:
+	if table == null:
+		return {"valid": false, "reason": "No table"}
+	if not table.playfield_rect.grow(-ball_radius).has_point(candidate):
+		return {"valid": false, "reason": "Outside table"}
+	if table.pocket_system.is_position_too_close_to_pocket(candidate, ball_radius):
+		return {"valid": false, "reason": "Too close to pocket"}
+	if _is_position_too_close_to_ball(candidate, ball_radius, null):
+		return {"valid": false, "reason": "Too close to ball"}
+	return {"valid": true, "reason": "Safe"}
+
+
+func is_manual_placement_safe(candidate: Vector2, ball_radius: float) -> bool:
+	return bool(get_manual_placement_validation(candidate, ball_radius).get("valid", false))
+
+
+func spawn_manual_plain_object_ball(position: Vector2) -> Ball:
+	var ball_number: int = _get_next_spawn_ball_number()
+	var ball := _create_ball(Ball.BallType.OBJECT, ball_number, _ball_color(ball_number), position)
+	ball.velocity = Vector2.ZERO
+	return ball
+
+
 func has_pending_spawns() -> bool:
 	return not pending_spawn_requests.is_empty()
 

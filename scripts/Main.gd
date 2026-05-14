@@ -18,16 +18,25 @@ func _ready() -> void:
 	table.status_text_changed.connect(_on_status_text_changed)
 	table.game_finished.connect(_on_game_finished)
 	table.score_system.doubloons_changed.connect(_on_doubloons_changed)
+	table.quartermaster_system.shop_state_changed.connect(_on_quartermaster_shop_state_changed)
+	table.quartermaster_system.status_changed.connect(_on_quartermaster_status_changed)
+	table.quartermaster_system.placement_started.connect(_on_quartermaster_placement_started)
+	table.quartermaster_system.placement_finished.connect(_on_quartermaster_placement_finished)
 	if not pause_menu.resume_requested.is_connected(_on_pause_resume_requested):
 		pause_menu.resume_requested.connect(_on_pause_resume_requested)
 	if not pause_menu.debug_panel_toggled.is_connected(_on_pause_debug_panel_toggled):
 		pause_menu.debug_panel_toggled.connect(_on_pause_debug_panel_toggled)
+	if not pause_menu.quartermaster_item_requested.is_connected(_on_pause_quartermaster_item_requested):
+		pause_menu.quartermaster_item_requested.connect(_on_pause_quartermaster_item_requested)
+	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
+		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 	result_label.text = ""
 	_on_doubloons_changed(table.score_system.get_doubloons_total())
 	ball_drop_meter.setup(table.ball_drop_system)
 	table.emit_ready_status_if_needed(status_label.text)
 	debug_overlay.setup(table)
 	pause_menu.set_debug_panel_states(debug_overlay.get_modular_debug_panel_states())
+	pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 
 
 func _configure_pause_process_modes() -> void:
@@ -47,7 +56,10 @@ func _input(event: InputEvent) -> void:
 		return
 
 	if key_event.keycode == PAUSE_TOGGLE_KEY:
-		_set_game_paused(not get_tree().paused)
+		if table.is_ball_placement_active():
+			table.cancel_active_ball_placement()
+		else:
+			_set_game_paused(not get_tree().paused)
 		get_viewport().set_input_as_handled()
 
 
@@ -75,6 +87,8 @@ func _on_game_finished(text: String) -> void:
 
 func _on_doubloons_changed(total: int) -> void:
 	doubloons_label.text = "Doubloons: %s" % total
+	if pause_menu != null and table != null:
+		pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 
 
 func _on_pause_resume_requested() -> void:
@@ -85,6 +99,32 @@ func _on_pause_debug_panel_toggled(panel_id: String, enabled: bool) -> void:
 	debug_overlay.set_modular_debug_panel_visible(panel_id, enabled)
 
 
+func _on_pause_quartermaster_item_requested(item_id: String) -> void:
+	table.quartermaster_system.request_purchase(item_id)
+
+
+func _on_pause_quartermaster_cancel_placement_requested() -> void:
+	table.cancel_active_ball_placement()
+
+
+func _on_quartermaster_shop_state_changed(items: Array) -> void:
+	pause_menu.set_quartermaster_items(items)
+
+
+func _on_quartermaster_status_changed(text: String) -> void:
+	pause_menu.set_quartermaster_status(text)
+	status_label.text = text
+
+
+func _on_quartermaster_placement_started(item_name: String) -> void:
+	pause_menu.set_quartermaster_placement_mode(true, item_name)
+
+
+func _on_quartermaster_placement_finished() -> void:
+	pause_menu.set_quartermaster_placement_mode(false)
+	pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
+
+
 func _set_game_paused(paused: bool) -> void:
 	if paused == get_tree().paused and pause_menu.visible == paused:
 		return
@@ -93,7 +133,10 @@ func _set_game_paused(paused: bool) -> void:
 		table.cancel_active_cue_drag_for_pause()
 		get_tree().paused = true
 		pause_menu.set_pause_visible(true)
+		pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 	else:
+		if table.is_ball_placement_active():
+			table.cancel_active_ball_placement()
 		pause_menu.set_pause_visible(false)
 		get_tree().paused = false
 

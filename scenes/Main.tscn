@@ -784,6 +784,42 @@ grow_vertical = 2
 mouse_filter = 0
 color = Color(0.01, 0.012, 0.016, 0.62)
 
+[node name="PlacementHintPanel" type="PanelContainer" parent="CanvasLayer/HUD/PauseMenu/Shade"]
+visible = false
+layout_mode = 0
+offset_left = 600.0
+offset_top = 70.0
+offset_right = 1320.0
+offset_bottom = 190.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_pause_menu")
+
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 22
+theme_override_constants/margin_top = 16
+theme_override_constants/margin_right = 22
+theme_override_constants/margin_bottom = 16
+
+[node name="VBox" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="PlacementHintLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.86, 1, 0.8, 1)
+theme_override_colors/font_outline_color = Color(0.04, 0.08, 0.03, 0.9)
+theme_override_constants/outline_size = 2
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 20
+horizontal_alignment = 1
+text = "Place ball"
+
+[node name="CancelPlacementButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 16
+text = "Cancel Placement"
+
 [node name="MenuPanel" type="PanelContainer" parent="CanvasLayer/HUD/PauseMenu/Shade"]
 layout_mode = 0
 offset_left = 704.0
@@ -801,7 +837,7 @@ theme_override_constants/margin_bottom = 30
 
 [node name="VBox" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin"]
 layout_mode = 2
-theme_override_constants/separation = 16
+theme_override_constants/separation = 12
 alignment = 1
 
 [node name="TitleLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
@@ -831,7 +867,62 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 24
 text = "Resume"
 
-[node name="DebugSectionLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="TabBar" type="HBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 10
+
+[node name="QuartermasterTabButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/TabBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 17
+text = "Quartermaster"
+
+[node name="DebugTabButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/TabBar"]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 17
+text = "Debug"
+
+[node name="QuartermasterSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="QuartermasterSectionLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.88, 0.54, 1)
+theme_override_colors/font_outline_color = Color(0.08, 0.04, 0.02, 0.95)
+theme_override_constants/outline_size = 2
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 24
+horizontal_alignment = 1
+text = "The Quartermaster"
+
+[node name="QuartermasterStatusLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 0.86, 0.76, 1)
+theme_override_colors/font_outline_color = Color(0.06, 0.04, 0.03, 0.8)
+theme_override_constants/outline_size = 1
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 16
+horizontal_alignment = 1
+autowrap_mode = 3
+text = "Spend Doubloons to place cargo on the felt."
+
+[node name="PlainObjectBallButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 19
+text = "Loose Object Ball"
+
+[node name="DebugSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+visible = false
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="DebugSectionLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.76, 0.86, 0.82, 1)
 theme_override_colors/font_outline_color = Color(0.02, 0.03, 0.03, 0.82)
@@ -842,63 +933,63 @@ horizontal_alignment = 1
 autowrap_mode = 3
 text = "Debug Panels"
 
-[node name="CorePerformancePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="CorePerformancePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Core Performance"
 
-[node name="AimPreviewPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="AimPreviewPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Aim Preview"
 
-[node name="TreasurePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="TreasurePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Treasure"
 
-[node name="AnchorPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="AnchorPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Anchor"
 
-[node name="BallDropsScorePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="BallDropsScorePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Ball Drops / Score"
 
-[node name="CannonPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="CannonPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Cannon"
 
-[node name="PowderKegWayfinderPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="PowderKegWayfinderPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Powder Keg / Wayfinder"
 
-[node name="VisualEffectsPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="VisualEffectsPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Visual Cost / Effects"
 
-[node name="PhysicsPerformancePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="PhysicsPerformancePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
