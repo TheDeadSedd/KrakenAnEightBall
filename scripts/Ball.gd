@@ -40,6 +40,13 @@ const CANNON_HEAT_GLOW_COLOR := Color("ff3218")
 const CANNON_HEAT_TRAIL_COLOR := Color("ff7a22")
 const CANNON_HEAT_HOT_COLOR := Color("ffd26a")
 const CANNON_PRESENCE_FADE_TIME := 0.18
+const TREASURE_BALL_BASE_COLOR := Color("d99a28")
+const TREASURE_BALL_RIM_COLOR := Color("5d3511")
+const TREASURE_BALL_GEM_COLOR := Color("57e0d4")
+const TREASURE_BALL_GLOW_COLOR := Color("ffe6a6")
+const TREASURE_LEG_COLOR := Color("cf7528")
+const TREASURE_LEG_FOOT_COLOR := Color("fff08a")
+const TREASURE_LEG_FADE_TIME := 0.28
 const DEBUG_WAYFINDER := false
 
 @export var ball_type := BallType.OBJECT
@@ -94,6 +101,7 @@ var wayfinder_active := false
 var is_powder_keg := false
 var is_anchor_ball := false
 var is_cannon_ball := false
+var is_treasure_ball := false
 var anchor_visual_effect_strength := 0.7
 var anchor_field_visual_radius := 230.0
 var anchor_visuals_enabled := true
@@ -121,6 +129,10 @@ var _cannon_presence_direction := Vector2.RIGHT
 var _cannon_presence_flash_strength := 0.0
 var _cannon_presence_flash_remaining := 0.0
 var _cannon_presence_flash_fade_time := 0.24
+var _treasure_leg_visual_strength := 0.0
+var _treasure_leg_target_strength := 0.0
+var _treasure_leg_direction := Vector2.RIGHT
+var _treasure_leg_phase := 0.0
 
 
 func _ready() -> void:
@@ -141,6 +153,7 @@ func _process(delta: float) -> void:
 
 	_update_anchor_influence_visual(delta)
 	_update_cannon_presence_visual(delta)
+	_update_treasure_leg_visual(delta)
 
 	if is_wayfinder and wayfinder_active and gameplay_enabled:
 		queue_redraw()
@@ -284,6 +297,17 @@ func add_cannon_presence_flash(strength: float, duration: float) -> void:
 	queue_redraw()
 
 
+func note_treasure_fleeing(strength: float, direction: Vector2) -> void:
+	if not is_treasure_ball or not visible or not gameplay_enabled:
+		return
+
+	var visual_strength: float = clamp(0.45 + strength * 0.55, 0.0, 1.0)
+	_treasure_leg_target_strength = max(_treasure_leg_target_strength, visual_strength)
+	if direction.length_squared() > 0.001:
+		_treasure_leg_direction = direction.normalized()
+	queue_redraw()
+
+
 func setup(
 	new_type: int,
 	new_number: int,
@@ -291,7 +315,8 @@ func setup(
 	new_is_wayfinder: bool = false,
 	new_is_powder_keg: bool = false,
 	new_is_anchor_ball: bool = false,
-	new_is_cannon_ball: bool = false
+	new_is_cannon_ball: bool = false,
+	new_is_treasure_ball: bool = false
 ) -> void:
 	ball_type = new_type
 	ball_number = new_number
@@ -300,10 +325,12 @@ func setup(
 	is_powder_keg = new_is_powder_keg
 	is_anchor_ball = new_is_anchor_ball
 	is_cannon_ball = new_is_cannon_ball
+	is_treasure_ball = new_is_treasure_ball
 	set_cannon_presence_visual(0.0, Vector2.RIGHT)
 	_cannon_presence_visual_strength = 0.0
 	_cannon_presence_flash_strength = 0.0
 	_cannon_presence_flash_remaining = 0.0
+	_clear_treasure_leg_visual()
 	_reset_wayfinder_state()
 	_update_label()
 	_update_number_color()
@@ -402,6 +429,7 @@ func sink() -> void:
 	_trail_points.clear()
 	visible = false
 	_clear_anchor_influence_visual()
+	_clear_treasure_leg_visual()
 	sunk.emit(self)
 
 
@@ -420,6 +448,7 @@ func respawn_at(new_position: Vector2) -> void:
 	_spawn_landing_damping_remaining = 0.0
 	_trail_suppression_remaining = 0.0
 	_clear_anchor_influence_visual()
+	_clear_treasure_leg_visual()
 	_reset_trail()
 
 
@@ -440,6 +469,7 @@ func begin_spawn_drop(final_position: Vector2) -> void:
 	_update_label_layout()
 	_reset_trail()
 	_clear_anchor_influence_visual()
+	_clear_treasure_leg_visual()
 
 
 func _update_spawn_drop(delta: float) -> void:
@@ -686,6 +716,39 @@ func _get_cannon_presence_draw_strength() -> float:
 	return clamp(_cannon_presence_visual_strength + _cannon_presence_flash_strength, 0.0, 4.45)
 
 
+func _update_treasure_leg_visual(delta: float) -> void:
+	if not is_treasure_ball:
+		return
+	if _treasure_leg_target_strength <= 0.0 and _treasure_leg_visual_strength <= 0.0:
+		return
+
+	var had_visual: bool = _treasure_leg_visual_strength > 0.0
+	if not visible or not gameplay_enabled:
+		_clear_treasure_leg_visual()
+		return
+
+	if _treasure_leg_target_strength > 0.0:
+		_treasure_leg_visual_strength = move_toward(_treasure_leg_visual_strength, _treasure_leg_target_strength, delta / 0.07)
+	else:
+		_treasure_leg_visual_strength = move_toward(_treasure_leg_visual_strength, 0.0, delta / TREASURE_LEG_FADE_TIME)
+
+	var gait_speed: float = 13.0 + min(velocity.length() / 34.0, 22.0)
+	_treasure_leg_phase = fmod(_treasure_leg_phase + delta * gait_speed, TAU)
+	_treasure_leg_target_strength = 0.0
+
+	if had_visual or _treasure_leg_visual_strength > 0.0:
+		queue_redraw()
+
+
+func _clear_treasure_leg_visual() -> void:
+	var had_visual: bool = _treasure_leg_visual_strength > 0.0 or _treasure_leg_target_strength > 0.0
+	_treasure_leg_visual_strength = 0.0
+	_treasure_leg_target_strength = 0.0
+	_treasure_leg_direction = Vector2.RIGHT
+	if had_visual:
+		queue_redraw()
+
+
 func _queue_trail_redraw() -> void:
 	_trail_redraws_this_frame += 1
 	queue_redraw()
@@ -701,7 +764,7 @@ func _get_visual_draw_origin() -> Vector2:
 
 
 func _update_label() -> void:
-	if ball_type == BallType.CUE or is_wayfinder or is_powder_keg or is_anchor_ball or is_cannon_ball:
+	if ball_type == BallType.CUE or is_wayfinder or is_powder_keg or is_anchor_ball or is_cannon_ball or is_treasure_ball:
 		number_label.text = ""
 	else:
 		number_label.text = str(ball_number)
@@ -716,6 +779,8 @@ func _update_number_color() -> void:
 		number_label.add_theme_color_override("font_color", Color("d9e2df"))
 	elif is_cannon_ball:
 		number_label.add_theme_color_override("font_color", Color("f1c28a"))
+	elif is_treasure_ball:
+		number_label.add_theme_color_override("font_color", Color("5d3511"))
 	elif ball_type == BallType.EIGHT:
 		number_label.add_theme_color_override("font_color", Color.WHITE)
 	else:
@@ -781,6 +846,8 @@ func _draw() -> void:
 		_draw_wayfinder_aura(origin)
 	elif is_anchor_ball and anchor_visuals_enabled and anchor_field_visual_enabled:
 		_draw_anchor_current(origin)
+	elif is_treasure_ball and _treasure_leg_visual_strength > 0.0:
+		_draw_treasure_legs(origin)
 
 	draw_circle(origin + Vector2(1.5, 2.0), radius, shadow_color)
 	draw_circle(origin, radius + 1.2, Color(0, 0, 0, 0.12))
@@ -788,7 +855,7 @@ func _draw() -> void:
 	draw_circle(origin + Vector2(-radius * 0.18, -radius * 0.22), radius * 0.72, display_color.lightened(0.16))
 	draw_arc(origin, radius - rim_width * 0.5, 0.0, TAU, 40, rim_color, rim_width)
 
-	if not is_wayfinder and not is_anchor_ball and not is_cannon_ball and (ball_type == BallType.OBJECT or ball_type == BallType.EIGHT):
+	if not is_wayfinder and not is_anchor_ball and not is_cannon_ball and not is_treasure_ball and (ball_type == BallType.OBJECT or ball_type == BallType.EIGHT):
 		var number_spot_color := Color.WHITE
 		draw_circle(origin, radius * number_spot_scale, number_spot_color)
 		draw_arc(
@@ -812,6 +879,11 @@ func _draw() -> void:
 		_draw_anchor_mark(origin)
 	elif is_cannon_ball:
 		_draw_cannon_ball_mark(origin)
+	elif is_treasure_ball:
+		_draw_treasure_ball_mark(origin)
+
+	if is_treasure_ball and _treasure_leg_visual_strength > 0.0:
+		_draw_treasure_feet(origin)
 
 	draw_circle(origin + Vector2(-radius * 0.32, -radius * 0.36), radius * highlight_scale, shine_color)
 
@@ -819,6 +891,9 @@ func _draw() -> void:
 func _get_display_color() -> Color:
 	if is_cannon_ball:
 		return CANNON_BALL_BASE_COLOR
+
+	if is_treasure_ball:
+		return TREASURE_BALL_BASE_COLOR
 
 	if is_anchor_ball:
 		return ANCHOR_BALL_BASE_COLOR
@@ -1034,6 +1109,99 @@ func _draw_cannon_motion_ember(ember_center: Vector2) -> void:
 		1.1 + tier_strength * 0.36
 	)
 	draw_circle(ember_center + Vector2(radius * 0.28, -radius * 0.12), radius * (0.065 + tier_strength * 0.043), hot_color)
+
+
+func _draw_treasure_ball_mark(origin: Vector2) -> void:
+	var glow_color := TREASURE_BALL_GLOW_COLOR
+	glow_color.a = 0.20
+	draw_circle(origin, radius * 0.88, glow_color)
+	draw_arc(origin, radius - 2.8, 0.0, TAU, 40, TREASURE_BALL_RIM_COLOR, 1.8)
+
+	var gem_top: Vector2 = origin + Vector2(0.0, -radius * 0.46)
+	var gem_left: Vector2 = origin + Vector2(-radius * 0.44, -radius * 0.02)
+	var gem_right: Vector2 = origin + Vector2(radius * 0.44, -radius * 0.02)
+	var gem_bottom: Vector2 = origin + Vector2(0.0, radius * 0.50)
+	draw_colored_polygon(
+		PackedVector2Array([gem_top, gem_right, gem_bottom, gem_left]),
+		TREASURE_BALL_GEM_COLOR
+	)
+	draw_polyline(
+		PackedVector2Array([gem_top, gem_right, gem_bottom, gem_left, gem_top]),
+		TREASURE_BALL_RIM_COLOR,
+		1.2
+	)
+	draw_line(gem_left, gem_right, TREASURE_BALL_GLOW_COLOR, 1.1)
+	draw_line(gem_top, gem_bottom, Color(1.0, 0.94, 0.64, 0.72), 1.0)
+
+
+func _draw_treasure_legs(origin: Vector2) -> void:
+	var strength: float = clamp(_treasure_leg_visual_strength, 0.0, 1.0)
+	if strength <= 0.01:
+		return
+
+	var leg_color := TREASURE_LEG_COLOR
+	leg_color.a = 0.92 * strength
+	var highlight_color := TREASURE_BALL_GLOW_COLOR
+	highlight_color.a = 0.40 * strength
+
+	for leg_points_value in _get_treasure_leg_points(origin):
+		var leg_points: Dictionary = leg_points_value as Dictionary
+		var hip: Vector2 = leg_points["hip"]
+		var knee: Vector2 = leg_points["knee"]
+		var foot: Vector2 = leg_points["foot"]
+		var step: float = float(leg_points["step"])
+		var leg_width: float = 2.35 + strength * 1.25
+		draw_line(hip, knee, leg_color, leg_width)
+		draw_line(knee, foot, leg_color, leg_width)
+		if step > 0.28:
+			draw_circle(knee, 1.8 + strength * 0.4, highlight_color)
+
+
+func _draw_treasure_feet(origin: Vector2) -> void:
+	var strength: float = clamp(_treasure_leg_visual_strength, 0.0, 1.0)
+	if strength <= 0.01:
+		return
+
+	var foot_shadow := TREASURE_BALL_RIM_COLOR
+	foot_shadow.a = 0.74 * strength
+	var foot_color := TREASURE_LEG_FOOT_COLOR
+	foot_color.a = 1.0 * strength
+
+	for leg_points_value in _get_treasure_leg_points(origin):
+		var leg_points: Dictionary = leg_points_value as Dictionary
+		var foot: Vector2 = leg_points["foot"]
+		var step: float = float(leg_points["step"])
+		var foot_radius: float = 2.75 + strength * 1.25 + max(step, 0.0) * 0.58
+		draw_circle(foot + Vector2(0.8, 0.9), foot_radius + 0.85, foot_shadow)
+		draw_circle(foot, foot_radius, foot_color)
+
+
+func _get_treasure_leg_points(origin: Vector2) -> Array[Dictionary]:
+	var forward: Vector2 = _treasure_leg_direction
+	if forward.length_squared() <= 0.001:
+		forward = Vector2.RIGHT
+	forward = forward.normalized()
+	var side: Vector2 = forward.orthogonal()
+	var leg_points: Array[Dictionary] = []
+	var side_signs: Array[float] = [-1.0, 1.0]
+	var forward_offsets: Array[float] = [-0.44, 0.40]
+	for side_sign in side_signs:
+		for leg_index in range(forward_offsets.size()):
+			var phase_offset: float = 0.0 if leg_index == 0 else PI
+			if side_sign > 0.0:
+				phase_offset += PI
+			var step: float = sin(_treasure_leg_phase + phase_offset)
+			var hip: Vector2 = origin + side * side_sign * radius * 0.80 + forward * radius * forward_offsets[leg_index]
+			var knee: Vector2 = hip + side * side_sign * radius * (0.68 + 0.22 * step) - forward * radius * (0.13 * step)
+			var foot: Vector2 = hip + side * side_sign * radius * (1.34 + 0.38 * step) + forward * radius * (0.34 * step)
+			leg_points.append({
+				"hip": hip,
+				"knee": knee,
+				"foot": foot,
+				"step": step,
+			})
+
+	return leg_points
 
 
 func _draw_wayfinder_aura(origin: Vector2) -> void:

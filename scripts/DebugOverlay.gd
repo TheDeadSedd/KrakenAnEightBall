@@ -17,6 +17,8 @@ const PERFORMANCE_OVERLAY_DRAG_HEIGHT := 34.0
 @onready var performance_overlay_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PerformanceOverlayCheckBox
 @onready var anchor_visuals_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/AnchorVisualsCheckBox
 @onready var anchor_debug_visual_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/AnchorDebugVisualCheckBox
+@onready var anchor_single_latch_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/AnchorSingleLatchCheckBox
+@onready var treasure_debug_visual_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/TreasureDebugVisualCheckBox
 @onready var powder_keg_particles_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PowderKegParticlesCheckBox
 @onready var powder_keg_reduced_particles_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PowderKegReducedParticlesCheckBox
 @onready var powder_keg_suppress_trails_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PowderKegSuppressTrailsCheckBox
@@ -37,6 +39,8 @@ func setup(table_ref: BilliardsTable) -> void:
 	performance_overlay_check_box.set_pressed_no_signal(false)
 	anchor_visuals_check_box.set_pressed_no_signal(table.anchor_ball_system.are_anchor_visuals_enabled())
 	anchor_debug_visual_check_box.set_pressed_no_signal(table.anchor_ball_system.is_debug_visual_enabled())
+	anchor_single_latch_check_box.set_pressed_no_signal(table.anchor_ball_system.is_single_latch_per_target_enabled())
+	treasure_debug_visual_check_box.set_pressed_no_signal(table.treasure_ball_system.is_debug_visual_enabled())
 	_sync_powder_keg_debug_toggles()
 	debug_hotkey_label.text = _make_debug_hotkey_text()
 	_connect_debug_controls()
@@ -53,6 +57,10 @@ func _connect_debug_controls() -> void:
 		anchor_visuals_check_box.toggled.connect(_on_anchor_visuals_toggled)
 	if not anchor_debug_visual_check_box.toggled.is_connected(_on_anchor_debug_visual_toggled):
 		anchor_debug_visual_check_box.toggled.connect(_on_anchor_debug_visual_toggled)
+	if not anchor_single_latch_check_box.toggled.is_connected(_on_anchor_single_latch_toggled):
+		anchor_single_latch_check_box.toggled.connect(_on_anchor_single_latch_toggled)
+	if not treasure_debug_visual_check_box.toggled.is_connected(_on_treasure_debug_visual_toggled):
+		treasure_debug_visual_check_box.toggled.connect(_on_treasure_debug_visual_toggled)
 	if not powder_keg_particles_check_box.toggled.is_connected(_on_powder_keg_particles_toggled):
 		powder_keg_particles_check_box.toggled.connect(_on_powder_keg_particles_toggled)
 	if not powder_keg_reduced_particles_check_box.toggled.is_connected(_on_powder_keg_reduced_particles_toggled):
@@ -159,6 +167,14 @@ func _on_anchor_debug_visual_toggled(enabled: bool) -> void:
 	table.anchor_ball_system.set_debug_visual_enabled(enabled)
 
 
+func _on_anchor_single_latch_toggled(enabled: bool) -> void:
+	table.anchor_ball_system.set_single_latch_per_target_enabled(enabled)
+
+
+func _on_treasure_debug_visual_toggled(enabled: bool) -> void:
+	table.treasure_ball_system.set_debug_visual_enabled(enabled)
+
+
 func _sync_powder_keg_debug_toggles() -> void:
 	powder_keg_particles_check_box.set_pressed_no_signal(table.powder_keg_system.explosion_particles_enabled)
 	powder_keg_reduced_particles_check_box.set_pressed_no_signal(table.powder_keg_system.reduced_particles_debug_enabled)
@@ -179,11 +195,12 @@ func _on_powder_keg_suppress_trails_toggled(enabled: bool) -> void:
 
 func _make_debug_hotkey_text() -> String:
 	var hotkeys: Dictionary = table.get_debug_spawn_hotkey_data()
-	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Spawn Anchor Ball\n%s: Spawn Cannon Ball\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
+	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Spawn Anchor Ball\n%s: Spawn Cannon Ball\n%s: Spawn Treasure Ball\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
 		OS.get_keycode_string(int(hotkeys["wayfinder_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["powder_keg_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["anchor_ball_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["cannon_ball_spawn_key"])),
+		OS.get_keycode_string(int(hotkeys["treasure_ball_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["normal_spawn_key"])),
 		OS.get_keycode_string(PERFORMANCE_OVERLAY_TOGGLE_KEY),
 	]
@@ -252,6 +269,12 @@ func _make_performance_debug_text() -> String:
 			float(snapshot["anchor_max_force"]),
 			_debug_distance_text(float(snapshot["anchor_nearest_distance"])),
 		],
+		"Anchor overlap: one current %s / skipped %s / max considered %s / overlap targets %s" % [
+			_debug_bool_text(bool(snapshot["anchor_single_latch_enabled"])),
+			snapshot["anchor_single_latch_skipped"],
+			snapshot["anchor_max_anchors_affecting_same_ball"],
+			snapshot["anchor_targets_affected_by_multiple_anchors"],
+		],
 		"Anchor tuning: %s / radius %.1f / strength %.1f" % [
 			_debug_bool_text(bool(snapshot["anchor_enabled"])),
 			float(snapshot["anchor_radius"]),
@@ -272,6 +295,44 @@ func _make_performance_debug_text() -> String:
 			snapshot["cannon_balls"],
 			snapshot["cannon_collisions"],
 			snapshot["cannon_heavy_impacts"],
+		],
+		"Treasure: %s active / %s seen / steering %s / %s" % [
+			snapshot["treasure_balls"],
+			snapshot["treasure_balls_seen"],
+			_debug_true_false_text(bool(snapshot["treasure_steering_active"])),
+			snapshot["treasure_steering_mode"],
+		],
+		"Treasure threat: %.2f / panic %s / %s steer apps" % [
+			float(snapshot["treasure_threat_strength"]),
+			_debug_true_false_text(bool(snapshot["treasure_panic_active"])),
+			snapshot["treasure_steering_applications"],
+		],
+		"Treasure hide target: found %s / cover target %s" % [
+			_debug_true_false_text(bool(snapshot["treasure_hide_target_found"])),
+			_debug_true_false_text(int(snapshot["treasure_hide_cover_found"]) > 0),
+		],
+		"Treasure target: cover %s / dist %s / commit %s" % [
+			_debug_id_text(int(snapshot["treasure_target_cover_ball_id"])),
+			_debug_distance_text(float(snapshot["treasure_target_distance"])),
+			_debug_distance_text(float(snapshot["treasure_target_commit_remaining"])),
+		],
+		"Treasure target reason: %s" % [
+			snapshot["treasure_target_switch_reason"],
+		],
+		"Treasure visibility: %s / lat %s / path %s" % [
+			snapshot["treasure_visibility_reason"],
+			_debug_distance_text(float(snapshot["treasure_visibility_lateral_distance"])),
+			_debug_distance_text(float(snapshot["treasure_visibility_distance_along_path"])),
+		],
+		"Treasure blocker: %s / lat %s / path %s" % [
+			_debug_id_text(int(snapshot["treasure_visibility_blocker_ball_id"])),
+			_debug_distance_text(float(snapshot["treasure_visibility_blocker_lateral_distance"])),
+			_debug_distance_text(float(snapshot["treasure_visibility_blocker_distance_along_path"])),
+		],
+		"Treasure perception: %s checks / epoch %s / %s rebuilds" % [
+			snapshot["treasure_perception_checks"],
+			snapshot["treasure_perception_epoch"],
+			snapshot["treasure_perception_rebuilds"],
 		],
 		"",
 		"VISUAL COST",
@@ -378,6 +439,8 @@ func _get_ball_debug_name(ball_data: Dictionary) -> String:
 		return "Anchor Ball"
 	if bool(ball_data["is_cannon_ball"]):
 		return "Cannon Ball"
+	if bool(ball_data["is_treasure_ball"]):
+		return "Treasure Ball"
 	return "Ball %s" % ball_data["ball_number"]
 
 
@@ -396,7 +459,17 @@ func _debug_bool_text(enabled: bool) -> String:
 	return "enabled" if enabled else "disabled"
 
 
+func _debug_true_false_text(enabled: bool) -> String:
+	return "true" if enabled else "false"
+
+
 func _debug_distance_text(distance: float) -> String:
 	if distance < 0.0:
 		return "none"
 	return "%.1f" % distance
+
+
+func _debug_id_text(id_value: int) -> String:
+	if id_value < 0:
+		return "none"
+	return str(id_value)

@@ -67,6 +67,7 @@ KNOWN_CATEGORY_HINTS = {
     "scripts/SpawnSystem.gd": ["Mechanics", "Systems", "In Progress"],
     "scripts/Table.gd": ["Mechanics", "Physics", "Systems", "Performance Concerns"],
     "scripts/TableImpactShakeSystem.gd": ["UI", "Systems", "Performance Concerns", "In Progress"],
+    "scripts/TreasureBallSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns", "In Progress"],
     "scripts/WayfinderSystem.gd": ["Anomaly Balls", "Systems"],
 }
 
@@ -78,6 +79,9 @@ AGENT_DEFINITIONS = {
         "responsibility": "Tracks core play loops, shot lifecycle, scoring hooks, ball identity, and moment-to-moment billiards feel.",
         "watch_keywords": ["table", "ball", "cue", "shot", "score", "spawn", "event"],
         "notes": [
+            "Current loop: better play creates more Doubloons, score-tied drops, more balls, more interactions, and an escalating table state.",
+            "Early cue reclaim is shot-lifecycle coordination in Table.gd and should stay lightweight.",
+            "Cue/eight-ball sinks are penalties now, not run-ending conditions.",
             "Preserve cue feel, shot feel, pocket feel, and scoring values during cleanup.",
             "Score-tied ball drops and cue/eight-ball sink penalties now flow through BallDropSystem.gd boundaries.",
         ],
@@ -94,6 +98,8 @@ AGENT_DEFINITIONS = {
             "Table.gd should coordinate systems without absorbing new feature logic.",
             "Scene-authored geometry remains the source of truth.",
             "TableImpactShakeSystem.gd owns presentation-only fake-3D table shake so gameplay geometry and HUD stay stable.",
+            "Coalesce repeated input/event work in the owning coordinator instead of letting systems rebuild many times per frame.",
+            "Prefer event/state-driven updates over continuous rescans when systems can track meaningful changes safely.",
         ],
         "questions": [
             "What reward decisions should BallDropSystem.gd own before tuning starts?",
@@ -102,11 +108,14 @@ AGENT_DEFINITIONS = {
     },
     "anomaly_ball_agent": {
         "display": "Anomaly Ball Agent",
-        "responsibility": "Tracks Wayfinder, Powder Keg, Anchor Ball, Cannon Ball, and future anomaly behavior boundaries.",
-        "watch_keywords": ["wayfinder", "powder", "anchor", "cannon", "anomaly", "ball"],
+        "responsibility": "Tracks Wayfinder, Powder Keg, Anchor Ball, Cannon Ball, Treasure Ball, and future anomaly behavior boundaries.",
+        "watch_keywords": ["wayfinder", "powder", "anchor", "cannon", "treasure", "anomaly", "ball"],
         "notes": [
-            "Wayfinder, Powder Keg, and Anchor are active anomaly systems; Cannon Ball has collision tuning, Powder Keg launch, heavy-impact shake, and high-speed heat presence.",
-            "Anchor has independent priority spawn odds and object-ball-only pull.",
+            "Wayfinder, Powder Keg, Anchor, Cannon, and Treasure all have focused system boundaries.",
+            "Cannon Ball has collision tuning, Powder Keg launch, heavy-impact shake, and high-speed heat presence.",
+            "Treasure Ball is a debug-spawn perception/hiding/scuttle experiment; it reacts to being watched, not just exact first-hit targeting.",
+            "Treasure should feel like a cautious sneaky thief, not a shortest-path optimizer.",
+            "Anchor has independent priority spawn odds, object-ball-only pull, and one strongest current per target rather than stacked pulls.",
         ],
         "questions": [
             "Should future anomalies interact with Anchor fields, or stay independent?",
@@ -121,6 +130,7 @@ AGENT_DEFINITIONS = {
             "Score popups are pocket-side arcade celebrations, not generic UI spam.",
             "Debug labels should stay clearly marked and not leak temporary test wording into player-facing strings.",
             "BallDropSystem.gd owns rotating score-earned drop-message selection; SpawnSystem/Table carry those messages to callouts.",
+            "BallDropMeter.gd owns the vertical right-side player-facing progress meter.",
             "TableImpactShakeSystem.gd owns fake-3D table impact shake and draw-only ball shimmy presentation.",
         ],
         "questions": [
@@ -131,12 +141,14 @@ AGENT_DEFINITIONS = {
     "performance_agent": {
         "display": "Performance Agent",
         "responsibility": "Tracks visual cost, broad-phase health, trail redraws, particle load, and stress-test readiness.",
-        "watch_keywords": ["performance", "debug", "trail", "particle", "anchor", "powder", "boundary", "pocket", "aim", "shake"],
+        "watch_keywords": ["performance", "debug", "trail", "particle", "anchor", "powder", "treasure", "boundary", "pocket", "aim", "shake"],
         "notes": [
             "Do not solve chaos by preventing chaos; degrade visuals first.",
             "High ball counts and large earned chain reactions are intended.",
+            "Coalesce repeated work before reducing gameplay ambition; avoid unnecessary redraws and reuse/pool temporary visuals where practical.",
+            "Optimization should preserve readability as well as performance.",
             "BallDropSystem.gd exists as the score-tied drop spine and should be watched for high-count visual scaling pressure.",
-            "AimPreview.gd uses broad-phase filtering and debug counters to keep swept prediction affordable.",
+            "AimPreview.gd uses broad-phase filtering, rebuild coalescing, and debug counters to keep swept prediction affordable without lying about grazes.",
         ],
         "questions": [
             "What visual-quality tiers should exist for trails, particles, aura effects, and score labels?",
@@ -148,8 +160,8 @@ AGENT_DEFINITIONS = {
         "responsibility": "Tracks pirate/kraken tone, anomaly fantasy, callout language, and presentation consistency.",
         "watch_keywords": ["agents", "notes", "stack", "score", "spawn", "main"],
         "notes": [
-            "Tone is pirate arcade chaos with readable eldritch flair.",
-            "Doubloons belong to this prototype; Insight is reserved for the larger future Cuethulhu direction.",
+            "Tone is pirate arcade chaos with readable eldritch flair and a little mischievous weirdness.",
+            "Doubloons belong to this game; Insight is reserved for the larger future Cuethulhu direction.",
         ],
         "questions": [
             "How weird should ball drop callouts get as chaos escalates?",
@@ -304,7 +316,7 @@ def guess_categories(rel_path: str) -> list[str]:
 
     if "balldrop" in lowered or "ball_drop" in lowered:
         categories.extend(["Mechanics", "Systems", "UI", "Performance Concerns", "In Progress"])
-    if any(token in lowered for token in ["wayfinder", "powder", "anchor", "anomaly"]):
+    if any(token in lowered for token in ["wayfinder", "powder", "anchor", "treasure", "anomaly"]):
         categories.extend(["Anomaly Balls", "Performance Concerns"])
     if "debug" in lowered:
         categories.extend(["UI", "Debug Tools"])
@@ -320,6 +332,7 @@ def guess_owner(rel_path: str) -> str:
         "AnchorBallSystem.gd": "anomaly_ball_agent",
         "CannonBallSystem.gd": "anomaly_ball_agent",
         "PowderKegSystem.gd": "anomaly_ball_agent",
+        "TreasureBallSystem.gd": "anomaly_ball_agent",
         "WayfinderSystem.gd": "anomaly_ball_agent",
         "Ball.gd": "mechanics_agent",
         "CueController.gd": "mechanics_agent",
@@ -356,11 +369,11 @@ def guess_summary(rel_path: str) -> str:
     name = Path(rel_path).name
     lowered = rel_path.lower()
     if name == "Table.gd":
-        return "High-level table coordinator and current home of authoritative arcade ball physics."
+        return "High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics."
     if name == "Ball.gd":
-        return "Individual ball state, visuals, friction helpers, trails, and anomaly identity flags."
+        return "Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags."
     if name == "SpawnSystem.gd":
-        return "Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds."
+        return "Creates balls, queues reward drops, performs safe spawn searches, and owns regular anomaly plus Anchor priority spawn odds."
     if name == "BallDropSystem.gd":
         return "Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties."
     if name == "BallDropMeter.gd":
@@ -376,13 +389,15 @@ def guess_summary(rel_path: str) -> str:
     if name == "PowderKegSystem.gd":
         return "Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts."
     if name == "AnchorBallSystem.gd":
-        return "Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters."
+        return "Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters."
     if name == "CannonBallSystem.gd":
         return "Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence."
+    if name == "TreasureBallSystem.gd":
+        return "Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting."
     if name == "DebugOverlay.gd":
         return "Formats debug menu, performance overlay, toggles, and physics debug text."
     if name == "AimPreview.gd":
-        return "Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, and AimPreview broad-phase counters."
+        return "Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure perception snapshots, and AimPreview broad-phase counters."
     if name == "BoundarySystem.gd":
         return "Loads authored rail/boundary geometry and shared boundary helpers."
     if name == "PocketSystem.gd":
@@ -432,6 +447,13 @@ def build_readme() -> str:
             "This folder is generated/reference-only.",
             "",
             "It exists to help future AI/Codex sessions understand Kraken An Eight Ball quickly without rereading the whole project from zero.",
+            "",
+            "Current snapshot:",
+            "",
+            "- Kraken An Eight Ball is a systemic arcade-chaos billiards prototype.",
+            "- The current loop is better play -> more score -> more balls -> more chaos -> survive the escalating table.",
+            "- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, and Treasure perception/hiding are active modern systems.",
+            "- Generated reports are a project map only; `AGENTS.md` and the real scripts/scenes remain authoritative.",
             "",
             "Important rules:",
             "",
@@ -492,6 +514,17 @@ def build_project_index(files: list[FileInfo], changed_paths: list[str]) -> str:
         "- `project_brain/debug_media/` stores visual debugging references, performance captures, feel/polish references, reproduction clips, and comparison screenshots/videos.",
         "- Future sessions should check relevant clips/screenshots when investigating feel, prediction, anomaly, UI, or performance issues.",
         "- Debug media is reference material only and should never be treated as gameplay/source code.",
+        "",
+        "## Current Game State",
+        "",
+        "- Kraken An Eight Ball is a systemic arcade-chaos billiards prototype with multiple active escalation systems.",
+        "- Core loop: better play -> more Doubloons -> score-tied ball drops -> more balls -> more interactions -> survive the escalating table state.",
+        "- `BallDropSystem.gd` is active; cue-ball and eight-ball sinks are penalties and no longer end the run.",
+        "- Early cue reclaim lets players regain control after the cue ball stops under safe motion conditions.",
+        "- `TableImpactShakeSystem.gd` owns fake-3D presentation-only impact shake for Powder Keg and Cannon events.",
+        "- Cannon Ball is a debug-spawn delayed-chaos future-problem anomaly with heat presence and heavy-impact behavior.",
+        "- Treasure Ball is a debug-spawn perception/hiding experiment that reacts to being watched by the aim guide.",
+        "- Optimization philosophy: support chaos gracefully, coalesce repeated work, and degrade visuals before limiting gameplay.",
         "",
         "## Next Major Goal",
         "",
@@ -565,9 +598,15 @@ def format_file_bullet(info: FileInfo) -> str:
         details.append(f"status: {info.status}")
     if info.owner:
         details.append(f"owner: {info.owner}")
-    if info.notes:
-        details.append(f"notes: {info.notes}")
+    notes = clean_metadata_notes(info.notes)
+    if notes and notes.lower() not in info.summary.lower():
+        details.append(f"notes: {notes}")
     return f"- `{info.path}` - {info.title}. {'; '.join(details)}"
+
+
+def clean_metadata_notes(notes: str) -> str:
+    """Keep generated docs current without editing source metadata comments."""
+    return notes.replace("Stage 4 ", "").strip()
 
 
 def build_agent_report(files: list[FileInfo]) -> str:
@@ -712,6 +751,7 @@ def risks_for_agent(agent_id: str) -> list[str]:
         "mechanics_agent": [
             "BallDropSystem.gd is first-pass playable; drop tuning and penalty presentation still need playtesting.",
             "Cue/eight-ball sink penalties should not accidentally feed score-tied drop progress.",
+            "Early cue reclaim must stay safe: cue-ball motion or reset/drop states should still block release.",
         ],
         "systems_agent": [
             "Table.gd still owns BallPhysics; do not extract casually.",
@@ -720,6 +760,7 @@ def risks_for_agent(agent_id: str) -> list[str]:
         "anomaly_ball_agent": [
             "Anchor behavior is tuned by feel and should be adjusted incrementally.",
             "Future anomalies should avoid hidden coupling through Table.gd.",
+            "Treasure rewards and regular spawn odds are not implemented yet.",
         ],
         "ui_agent": [
             "Score popup readability can regress when many events happen at once.",
@@ -728,6 +769,7 @@ def risks_for_agent(agent_id: str) -> list[str]:
         "performance_agent": [
             "Visual effects should degrade before gameplay chaos is limited.",
             "Pooling/reuse is not broadly implemented for temporary visuals yet.",
+            "AimPreview rebuild coalescing should preserve reliable graze behavior and avoid tolerance-based lies.",
         ],
         "lore_agent": [
             "Score-earned drop callouts now rotate; future passes should tune message frequency and tone.",

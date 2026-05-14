@@ -34,3 +34,5 @@ android/
 # Local Python helper caches
 __pycache__/
 *.pyc
+
+project_brain/debug_media/

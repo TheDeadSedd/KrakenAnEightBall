@@ -107,6 +107,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var powder_keg_system: PowderKegSystem = $PowderKegSystem
 @onready var anchor_ball_system: AnchorBallSystem = $AnchorBallSystem
 @onready var cannon_ball_system: CannonBallSystem = $CannonBallSystem
+@onready var treasure_ball_system: TreasureBallSystem = $TreasureBallSystem
 @onready var table_impact_shake_system: TableImpactShakeSystem = $TableImpactShakeSystem
 @onready var cue_controller: CueController = $CuePivot
 #endregion
@@ -125,6 +126,7 @@ var drag_start_drag_vector := Vector2.ZERO
 var drag_aim_direction := Vector2.RIGHT
 var drag_mouse_position := Vector2.ZERO
 var is_dragging := false
+var aim_preview_dirty := true
 var game_over := false
 var shot_active := false
 var shot_pocketed_object_balls := 0
@@ -176,6 +178,7 @@ func _ready() -> void:
 	powder_keg_system.setup(self)
 	anchor_ball_system.setup(self)
 	cannon_ball_system.setup(self)
+	treasure_ball_system.setup(self)
 	table_impact_shake_system.setup(self)
 	_cache_table_geometry()
 	cue_controller.setup()
@@ -200,7 +203,7 @@ func _connect_score_drop_events() -> void:
 func emit_ready_status_if_needed(current_status_text: String) -> void:
 	if not _is_loading_status_text(current_status_text):
 		return
-	if _can_shoot():
+	if _can_start_aiming():
 		status_text_changed.emit(READY_STATUS_TEXT)
 
 
@@ -225,6 +228,7 @@ func _physics_process(delta: float) -> void:
 	for step_index in range(PHYSICS_SUBSTEPS):
 		wayfinder_system.update_guidance(step_delta)
 		anchor_ball_system.update_pull(step_delta)
+		treasure_ball_system.update_hiding(step_delta)
 		_move_balls(step_delta)
 		var phase_start_usec: int = Time.get_ticks_usec()
 		_resolve_ball_collisions()
@@ -248,8 +252,11 @@ func _physics_process(delta: float) -> void:
 	spawn_system.process_spawn_queue(delta)
 	_process_callout_queue(delta)
 	_try_finish_shot()
-	cue_controller.update_cue(cue_ball, _can_shoot(), is_dragging, _get_current_shot_drag_vector(), MAX_DRAG_DISTANCE, game_over, delta)
-	_refresh_aim_preview()
+	var can_use_cue: bool = _can_release_current_shot() if is_dragging else _can_start_aiming()
+	cue_controller.update_cue(cue_ball, can_use_cue, is_dragging, _get_current_shot_drag_vector(), MAX_DRAG_DISTANCE, game_over, delta)
+	if is_dragging:
+		_mark_aim_preview_dirty()
+	_flush_aim_preview_refresh()
 
 	perf_physics_process_ms = _elapsed_ms_since(physics_start_usec)
 #endregion
@@ -271,7 +278,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_release_shot(event.position)
 	elif event is InputEventMouseMotion and is_dragging:
 		drag_mouse_position = event.position
-		_refresh_aim_preview()
+		_mark_aim_preview_dirty()
 		queue_redraw()
 	elif event is InputEventScreenTouch:
 		if event.pressed:
@@ -280,7 +287,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			_release_shot(event.position)
 	elif event is InputEventScreenDrag and is_dragging:
 		drag_mouse_position = event.position
-		_refresh_aim_preview()
+		_mark_aim_preview_dirty()
 		queue_redraw()
 
 
@@ -297,6 +304,7 @@ func _draw() -> void:
 	_draw_table_art()
 	_draw_collision_debug()
 	anchor_ball_system.draw_debug(self)
+	treasure_ball_system.draw_debug(self)
 
 
 func _draw_table_art() -> void:
@@ -536,6 +544,8 @@ func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2)
 	var impulse: Vector2 = normal * impulse_strength
 	if cannon_ball_system.try_apply_collision_response(ball_a, ball_b, normal, impulse):
 		return true
+	if treasure_ball_system.try_apply_collision_response(ball_a, ball_b, normal, impulse):
+		return true
 
 	ball_a.velocity -= impulse
 	ball_b.velocity += impulse
@@ -613,6 +623,7 @@ func _reset_performance_frame_stats() -> void:
 	perf_pocket_check_ms = 0.0
 	anchor_ball_system.reset_frame_stats()
 	cannon_ball_system.reset_frame_stats()
+	treasure_ball_system.reset_frame_stats()
 
 
 func _reset_ball_debug_frame_stats() -> void:
@@ -630,7 +641,7 @@ func _elapsed_ms_since(start_usec: int) -> float:
 #region Cue Input / Shot Release
 # Table owns shot state and velocity. CueController owns sprite visuals and cue hit testing.
 func _try_start_drag(mouse_position: Vector2) -> void:
-	if not _can_shoot():
+	if not _can_start_aiming():
 		return
 
 	if not cue_controller.is_point_over_grab_zone(mouse_position, cue_ball, MAX_DRAG_DISTANCE):
@@ -642,7 +653,7 @@ func _try_start_drag(mouse_position: Vector2) -> void:
 	drag_start_drag_vector = cue_ball.global_position - mouse_position
 	drag_aim_direction = _get_initial_drag_aim_direction()
 	drag_mouse_position = mouse_position
-	_refresh_aim_preview()
+	_mark_aim_preview_dirty()
 	queue_redraw()
 
 
@@ -650,10 +661,10 @@ func _release_shot(_mouse_position: Vector2) -> void:
 	if not is_dragging:
 		return
 
-	if not _can_shoot():
+	if not _can_release_current_shot():
 		is_dragging = false
 		cue_controller.stop_recoil()
-		_refresh_aim_preview()
+		_clear_aim_preview_now()
 		queue_redraw()
 		return
 
@@ -664,7 +675,7 @@ func _release_shot(_mouse_position: Vector2) -> void:
 	is_dragging = false
 	if drag_vector.length() < MIN_SHOT_DISTANCE:
 		cue_controller.stop_recoil()
-		_refresh_aim_preview()
+		_clear_aim_preview_now()
 		queue_redraw()
 		return
 
@@ -676,7 +687,7 @@ func _release_shot(_mouse_position: Vector2) -> void:
 	_print_shot_power_debug(drag_vector, release_position)
 	_start_shot_tracking()
 	status_text_changed.emit("Shot taken. Wait for the balls to settle before shooting again.")
-	_refresh_aim_preview()
+	_clear_aim_preview_now()
 	queue_redraw()
 
 
@@ -715,14 +726,33 @@ func _get_current_shot_drag_vector() -> Vector2:
 	return _get_drag_vector(drag_mouse_position)
 
 
+func _mark_aim_preview_dirty() -> void:
+	aim_preview_dirty = true
+
+
+func _flush_aim_preview_refresh() -> void:
+	if not aim_preview_dirty:
+		return
+
+	_refresh_aim_preview()
+	aim_preview_dirty = false
+
+
+func _clear_aim_preview_now() -> void:
+	aim_preview_dirty = false
+	_refresh_aim_preview()
+
+
 func _refresh_aim_preview() -> void:
-	if not is_dragging or not _can_shoot():
+	if not is_dragging or not _can_release_current_shot():
 		aim_preview.update_preview(false, Vector2.ZERO, Vector2.ZERO, SHOT_POWER, 0.0)
+		treasure_ball_system.handle_aim_perception_snapshot(aim_preview.get_treasure_perception_snapshot())
 		return
 
 	var drag_vector: Vector2 = _get_drag_vector(drag_mouse_position)
 	var power_ratio: float = clamp(drag_vector.length() / MAX_DRAG_DISTANCE, 0.0, 1.0)
 	aim_preview.update_preview(true, cue_ball.global_position, drag_vector, SHOT_POWER, power_ratio)
+	treasure_ball_system.handle_aim_perception_snapshot(aim_preview.get_treasure_perception_snapshot())
 
 
 func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) -> void:
@@ -742,20 +772,35 @@ func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) ->
 #region Shot State / Pocket Consequences
 # Owns shot lifecycle, pocket outcomes, and reward triggers after pocket captures.
 # Future extraction candidate: PocketSystem. Spawn rewards delegate to SpawnSystem.
-func _can_shoot() -> bool:
-	if game_over or not is_instance_valid(cue_ball) or not cue_ball.visible or not cue_ball.gameplay_enabled:
-		return false
+func _can_start_aiming() -> bool:
+	return _can_take_cue_control()
 
-	if spawn_system.has_pending_spawns():
-		return false
 
+func _can_take_cue_control() -> bool:
+	if not _get_cue_control_base_blocker().is_empty():
+		return false
 	if shot_active:
-		return cue_control_reclaimed and not cue_ball.is_moving()
+		return cue_control_reclaimed
 
 	for child in balls.get_children():
 		var ball := child as Ball
 		if ball != null and ball.is_moving():
 			return false
+
+	return true
+
+
+func _can_release_current_shot() -> bool:
+	if not is_dragging:
+		return false
+	if not _get_cue_control_base_blocker().is_empty():
+		return false
+
+	# Once aiming has started, later non-cue-ball movement should not revoke
+	# the release. For reclaimed shots, keep the original reclaim grant as
+	# proof that control was safely handed back.
+	if shot_active and not cue_control_reclaimed:
+		return false
 
 	return true
 
@@ -1007,6 +1052,7 @@ func get_performance_debug_snapshot() -> Dictionary:
 	var counts: Dictionary = _get_performance_ball_counts()
 	var anchor_snapshot: Dictionary = anchor_ball_system.get_debug_snapshot()
 	var cannon_snapshot: Dictionary = cannon_ball_system.get_debug_snapshot()
+	var treasure_snapshot: Dictionary = treasure_ball_system.get_debug_snapshot()
 	var ball_drop_snapshot: Dictionary = ball_drop_system.get_debug_snapshot()
 	var aim_snapshot: Dictionary = aim_preview.get_debug_snapshot()
 	return {
@@ -1025,6 +1071,11 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"anchor_avg_force": anchor_snapshot["avg_force"],
 		"anchor_max_force": anchor_snapshot["max_force"],
 		"anchor_nearest_distance": anchor_snapshot["nearest_distance"],
+		"anchor_single_latch_enabled": anchor_snapshot["single_latch_enabled"],
+		"anchor_multi_latch_candidates": anchor_snapshot["multi_latch_candidates"],
+		"anchor_single_latch_skipped": anchor_snapshot["single_latch_skipped"],
+		"anchor_max_anchors_affecting_same_ball": anchor_snapshot["max_anchors_affecting_same_ball"],
+		"anchor_targets_affected_by_multiple_anchors": anchor_snapshot["targets_affected_by_multiple_anchors"],
 		"anchor_enabled": anchor_snapshot["enabled"],
 		"anchor_radius": anchor_snapshot["influence_radius"],
 		"anchor_strength": anchor_snapshot["pull_strength"],
@@ -1038,6 +1089,32 @@ func get_performance_debug_snapshot() -> Dictionary:
 		"cannon_balls": cannon_snapshot["active_cannon_balls"],
 		"cannon_collisions": cannon_snapshot["collisions"],
 		"cannon_heavy_impacts": cannon_snapshot["heavy_impacts"],
+		"treasure_balls": treasure_snapshot["active_treasure_balls"],
+		"treasure_balls_seen": treasure_snapshot["seen_treasure_balls"],
+		"treasure_hide_targets": treasure_snapshot["hide_targets"],
+		"treasure_hide_cover_found": treasure_snapshot["hide_cover_found"],
+		"treasure_hide_target_found": treasure_snapshot["hide_target_found"],
+		"treasure_hiding_enabled": treasure_snapshot["hiding_movement_enabled"],
+		"treasure_steering_active": treasure_snapshot["steering_active"],
+		"treasure_steering_applications": treasure_snapshot["steering_applications"],
+		"treasure_steering_cover_count": treasure_snapshot["steering_cover_count"],
+		"treasure_steering_fallback_count": treasure_snapshot["steering_fallback_count"],
+		"treasure_steering_mode": treasure_snapshot["steering_mode"],
+		"treasure_threat_strength": treasure_snapshot["max_threat_strength"],
+		"treasure_panic_active": treasure_snapshot["panic_active"],
+		"treasure_visibility_reason": treasure_snapshot["visibility_reason"],
+		"treasure_visibility_lateral_distance": treasure_snapshot["visibility_lateral_distance"],
+		"treasure_visibility_distance_along_path": treasure_snapshot["visibility_distance_along_path"],
+		"treasure_visibility_blocker_ball_id": treasure_snapshot["visibility_blocker_ball_id"],
+		"treasure_visibility_blocker_lateral_distance": treasure_snapshot["visibility_blocker_lateral_distance"],
+		"treasure_visibility_blocker_distance_along_path": treasure_snapshot["visibility_blocker_distance_along_path"],
+		"treasure_target_cover_ball_id": treasure_snapshot["target_cover_ball_id"],
+		"treasure_target_distance": treasure_snapshot["target_distance"],
+		"treasure_target_commit_remaining": treasure_snapshot["target_commit_remaining"],
+		"treasure_target_switch_reason": treasure_snapshot["target_switch_reason"],
+		"treasure_perception_checks": treasure_snapshot["perception_checks"],
+		"treasure_perception_epoch": treasure_snapshot["perception_epoch"],
+		"treasure_perception_rebuilds": treasure_snapshot["perception_rebuilds"],
 		"ball_drop_progress": ball_drop_snapshot["drop_progress"],
 		"ball_drop_threshold": ball_drop_snapshot["doubloons_per_drop"],
 		"ball_drop_enabled": ball_drop_snapshot["enabled"],
@@ -1119,6 +1196,7 @@ func _get_ball_debug_snapshot(ball: Ball) -> Dictionary:
 		"is_powder_keg": ball.is_powder_keg,
 		"is_anchor_ball": ball.is_anchor_ball,
 		"is_cannon_ball": ball.is_cannon_ball,
+		"is_treasure_ball": ball.is_treasure_ball,
 		"wayfinder_active": ball.is_wayfinder and ball.wayfinder_active,
 		"guided": wayfinder_system.is_ball_guided(ball),
 		"gameplay_enabled": ball.gameplay_enabled,
@@ -1150,7 +1228,8 @@ func queue_spawn_reward_message(
 	is_powder_keg: bool = false,
 	is_anchor_ball: bool = false,
 	is_cannon_ball: bool = false,
-	override_message: String = ""
+	override_message: String = "",
+	is_treasure_ball: bool = false
 ) -> void:
 	if not override_message.is_empty():
 		_queue_result_message(override_message)
@@ -1164,6 +1243,8 @@ func queue_spawn_reward_message(
 		_queue_result_message("ANCHOR BALL DROPPED")
 	elif is_cannon_ball:
 		_queue_result_message("CANNON BALL DROPPED")
+	elif is_treasure_ball:
+		_queue_result_message("TREASURE BALL DROPPED")
 	else:
 		_queue_result_message("+1 BALL DROPPED")
 
@@ -1339,7 +1420,7 @@ func _update_cue_reclaim_state(delta: float) -> void:
 
 	shot_elapsed_time += delta
 	if cue_control_reclaimed:
-		var base_blocker: String = _get_cue_reclaim_base_blocker()
+		var base_blocker: String = _get_cue_control_base_blocker()
 		cue_reclaim_eligible = base_blocker == ""
 		cue_reclaim_blocker_reason = "Granted" if cue_reclaim_eligible else base_blocker
 		return
@@ -1361,7 +1442,7 @@ func _update_cue_reclaim_state(delta: float) -> void:
 
 func _get_cue_reclaim_motion_signature() -> String:
 	return "%s|%s|%s|%s|%s|%s|%s|%s" % [
-		_get_cue_reclaim_base_blocker(),
+		_get_cue_control_base_blocker(),
 		shot_elapsed_time >= EARLY_CUE_RECLAIM_DELAY,
 		cue_reclaim_moving_non_cue_count,
 		cue_reclaim_low_speed_count,
@@ -1373,7 +1454,7 @@ func _get_cue_reclaim_motion_signature() -> String:
 
 
 func _evaluate_cue_reclaim_eligibility() -> Dictionary:
-	var base_blocker: String = _get_cue_reclaim_base_blocker()
+	var base_blocker: String = _get_cue_control_base_blocker()
 	if not base_blocker.is_empty():
 		return {"eligible": false, "reason": base_blocker}
 
@@ -1399,7 +1480,7 @@ func _evaluate_cue_reclaim_eligibility() -> Dictionary:
 	return {"eligible": false, "reason": "5+ moving balls"}
 
 
-func _get_cue_reclaim_base_blocker() -> String:
+func _get_cue_control_base_blocker() -> String:
 	if game_over:
 		return "Game over"
 	if not is_instance_valid(cue_ball) or not cue_ball.visible or not cue_ball.gameplay_enabled:

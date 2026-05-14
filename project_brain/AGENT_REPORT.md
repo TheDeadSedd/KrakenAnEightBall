@@ -12,24 +12,28 @@ Relevant files:
 - `scenes/Ball.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scenes/CueBall.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scenes/Table.tscn` - Godot scene file used for authored node layout and scene wiring.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.
-- `scripts/Ball.gd` - Individual ball state, visuals, friction helpers, trails, and anomaly identity flags.
+- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
+- `scripts/Ball.gd` - Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.
 - `scripts/BallDropMeter.gd` - Vertical right-side HUD meter for progress toward the next score-earned ball drop.
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
 - `scripts/CannonBallSystem.gd` - Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.
 - `scripts/CueController.gd` - Owns cue visuals, grab-zone hit testing, pullback, and strike presentation.
 - `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons and pocket-side score popup presentation.
 - `scripts/ShotEventSystem.gd` - Tracks causal per-shot scoring events for sunk balls.
-- `scripts/SpawnSystem.gd` - Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.
+- `scripts/SpawnSystem.gd` - Creates balls, queues reward drops, performs safe spawn searches, and owns regular anomaly plus Anchor priority spawn odds.
 
 What it appears to do:
 - Tracks core play loops, shot lifecycle, scoring hooks, ball identity, and moment-to-moment billiards feel.
+- Current loop: better play creates more Doubloons, score-tied drops, more balls, more interactions, and an escalating table state.
+- Early cue reclaim is shot-lifecycle coordination in Table.gd and should stay lightweight.
+- Cue/eight-ball sinks are penalties now, not run-ending conditions.
 - Preserve cue feel, shot feel, pocket feel, and scoring values during cleanup.
 - Score-tied ball drops and cue/eight-ball sink penalties now flow through BallDropSystem.gd boundaries.
 
 Known risks or TODOs:
 - BallDropSystem.gd is first-pass playable; drop tuning and penalty presentation still need playtesting.
 - Cue/eight-ball sink penalties should not accidentally feed score-tied drop progress.
+- Early cue reclaim must stay safe: cue-ball motion or reset/drop states should still block release.
 
 Questions for the developer:
 - How many extra balls should different score-event tiers award?
@@ -41,7 +45,7 @@ Relevant files:
 - `AGENTS.md` - Project documentation or checkpoint notes.
 - `scenes/Main.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scenes/Table.tscn` - Godot scene file used for authored node layout and scene wiring.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.
+- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
 - `scripts/CannonBallSystem.gd` - Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.
@@ -56,6 +60,8 @@ What it appears to do:
 - Table.gd should coordinate systems without absorbing new feature logic.
 - Scene-authored geometry remains the source of truth.
 - TableImpactShakeSystem.gd owns presentation-only fake-3D table shake so gameplay geometry and HUD stay stable.
+- Coalesce repeated input/event work in the owning coordinator instead of letting systems rebuild many times per frame.
+- Prefer event/state-driven updates over continuous rescans when systems can track meaningful changes safely.
 
 Known risks or TODOs:
 - Table.gd still owns BallPhysics; do not extract casually.
@@ -70,22 +76,27 @@ Questions for the developer:
 Relevant files:
 - `scenes/Ball.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scenes/CueBall.tscn` - Godot scene file used for authored node layout and scene wiring.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.
-- `scripts/Ball.gd` - Individual ball state, visuals, friction helpers, trails, and anomaly identity flags.
+- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
+- `scripts/Ball.gd` - Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.
 - `scripts/BallDropMeter.gd` - Vertical right-side HUD meter for progress toward the next score-earned ball drop.
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
 - `scripts/CannonBallSystem.gd` - Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.
 - `scripts/PowderKegSystem.gd` - Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.
+- `scripts/TreasureBallSystem.gd` - Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.
 - `scripts/WayfinderSystem.gd` - Handles Wayfinder activation and temporary guided-ball redirects.
 
 What it appears to do:
-- Tracks Wayfinder, Powder Keg, Anchor Ball, Cannon Ball, and future anomaly behavior boundaries.
-- Wayfinder, Powder Keg, and Anchor are active anomaly systems; Cannon Ball has collision tuning, Powder Keg launch, heavy-impact shake, and high-speed heat presence.
-- Anchor has independent priority spawn odds and object-ball-only pull.
+- Tracks Wayfinder, Powder Keg, Anchor Ball, Cannon Ball, Treasure Ball, and future anomaly behavior boundaries.
+- Wayfinder, Powder Keg, Anchor, Cannon, and Treasure all have focused system boundaries.
+- Cannon Ball has collision tuning, Powder Keg launch, heavy-impact shake, and high-speed heat presence.
+- Treasure Ball is a debug-spawn perception/hiding/scuttle experiment; it reacts to being watched, not just exact first-hit targeting.
+- Treasure should feel like a cautious sneaky thief, not a shortest-path optimizer.
+- Anchor has independent priority spawn odds, object-ball-only pull, and one strongest current per target rather than stacked pulls.
 
 Known risks or TODOs:
 - Anchor behavior is tuned by feel and should be adjusted incrementally.
 - Future anomalies should avoid hidden coupling through Table.gd.
+- Treasure rewards and regular spawn odds are not implemented yet.
 
 Questions for the developer:
 - Should future anomalies interact with Anchor fields, or stay independent?
@@ -110,6 +121,7 @@ What it appears to do:
 - Score popups are pocket-side arcade celebrations, not generic UI spam.
 - Debug labels should stay clearly marked and not leak temporary test wording into player-facing strings.
 - BallDropSystem.gd owns rotating score-earned drop-message selection; SpawnSystem/Table carry those messages to callouts.
+- BallDropMeter.gd owns the vertical right-side player-facing progress meter.
 - TableImpactShakeSystem.gd owns fake-3D table impact shake and draw-only ball shimmy presentation.
 
 Known risks or TODOs:
@@ -123,24 +135,28 @@ Questions for the developer:
 ## Performance Agent
 
 Relevant files:
-- `scripts/AimPreview.gd` - Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, and AimPreview broad-phase counters.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.
+- `scripts/AimPreview.gd` - Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure perception snapshots, and AimPreview broad-phase counters.
+- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
 - `scripts/DebugOverlay.gd` - Formats debug menu, performance overlay, toggles, and physics debug text.
 - `scripts/PocketSystem.gd` - Loads authored pocket geometry and detects pocket captures.
 - `scripts/PowderKegSystem.gd` - Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.
 - `scripts/TableImpactShakeSystem.gd` - Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.
+- `scripts/TreasureBallSystem.gd` - Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.
 
 What it appears to do:
 - Tracks visual cost, broad-phase health, trail redraws, particle load, and stress-test readiness.
 - Do not solve chaos by preventing chaos; degrade visuals first.
 - High ball counts and large earned chain reactions are intended.
+- Coalesce repeated work before reducing gameplay ambition; avoid unnecessary redraws and reuse/pool temporary visuals where practical.
+- Optimization should preserve readability as well as performance.
 - BallDropSystem.gd exists as the score-tied drop spine and should be watched for high-count visual scaling pressure.
-- AimPreview.gd uses broad-phase filtering and debug counters to keep swept prediction affordable.
+- AimPreview.gd uses broad-phase filtering, rebuild coalescing, and debug counters to keep swept prediction affordable without lying about grazes.
 
 Known risks or TODOs:
 - Visual effects should degrade before gameplay chaos is limited.
 - Pooling/reuse is not broadly implemented for temporary visuals yet.
+- AimPreview rebuild coalescing should preserve reliable graze behavior and avoid tolerance-based lies.
 
 Questions for the developer:
 - What visual-quality tiers should exist for trails, particles, aura effects, and score labels?
@@ -155,12 +171,12 @@ Relevant files:
 - `scenes/Main.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scripts/Main.gd` - Small app shell and top-level scene wiring.
 - `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons and pocket-side score popup presentation.
-- `scripts/SpawnSystem.gd` - Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.
+- `scripts/SpawnSystem.gd` - Creates balls, queues reward drops, performs safe spawn searches, and owns regular anomaly plus Anchor priority spawn odds.
 
 What it appears to do:
 - Tracks pirate/kraken tone, anomaly fantasy, callout language, and presentation consistency.
-- Tone is pirate arcade chaos with readable eldritch flair.
-- Doubloons belong to this prototype; Insight is reserved for the larger future Cuethulhu direction.
+- Tone is pirate arcade chaos with readable eldritch flair and a little mischievous weirdness.
+- Doubloons belong to this game; Insight is reserved for the larger future Cuethulhu direction.
 
 Known risks or TODOs:
 - Score-earned drop callouts now rotate; future passes should tune message frequency and tone.
@@ -177,7 +193,7 @@ Relevant files:
 - `CHECKPOINT_EscalationLoopPlayable.md` - Project documentation or checkpoint notes.
 - `CHECKPOINT_PrototypePhysicsPlayable.md` - Project documentation or checkpoint notes.
 - `scenes/Table.tscn` - Godot scene file used for authored node layout and scene wiring.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.
+- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
 - `scripts/CannonBallSystem.gd` - Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.

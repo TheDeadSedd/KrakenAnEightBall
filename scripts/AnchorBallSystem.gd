@@ -36,6 +36,8 @@ const STATIONARY_ANCHOR_PULL_MULTIPLIER := 0.5
 @export var anchor_visuals_enabled := true
 @export var max_visible_field_auras := 3
 @export var debug_visual_enabled := false
+# Official overlap rule: each target follows one strongest Anchor current per update.
+@export var anchor_single_latch_per_target_enabled := true
 
 # Debug safety valve only. Normal play should support chaos by degrading visuals first.
 @export var anchor_spawn_cap_enabled := false
@@ -49,6 +51,11 @@ var max_force_this_frame := 0.0
 var nearest_distance_this_frame := INF
 var affected_ball_ids: Dictionary = {}
 var debug_pull_vectors: Dictionary = {}
+var latch_candidate_counts_this_update: Dictionary = {}
+var multi_latch_candidates_this_frame := 0
+var single_latch_skipped_this_frame := 0
+var max_anchors_affecting_same_ball_this_frame := 0
+var multi_latch_target_ids_this_frame: Dictionary = {}
 var post_collision_pull_cooldowns: Dictionary = {}
 var stationary_wake_cooldowns: Dictionary = {}
 var stationary_wake_positions: Dictionary = {}
@@ -67,6 +74,11 @@ func reset_frame_stats() -> void:
 	nearest_distance_this_frame = INF
 	affected_ball_ids.clear()
 	debug_pull_vectors.clear()
+	latch_candidate_counts_this_update.clear()
+	multi_latch_candidates_this_frame = 0
+	single_latch_skipped_this_frame = 0
+	max_anchors_affecting_same_ball_this_frame = 0
+	multi_latch_target_ids_this_frame.clear()
 
 
 func update_pull(delta: float) -> void:
@@ -94,11 +106,19 @@ func update_pull(delta: float) -> void:
 	if moving_targets.is_empty() and not should_check_stationary_pull:
 		return
 
-	for anchor_ball in anchor_balls:
+	_begin_latch_candidate_update()
+	if anchor_single_latch_per_target_enabled:
 		if not moving_targets.is_empty():
-			_apply_anchor_pull_to_targets(anchor_ball, moving_targets, delta, false)
+			_apply_single_latch_anchor_pull_to_targets(anchor_balls, moving_targets, delta, false)
 		if should_check_stationary_pull:
-			_apply_anchor_pull_to_targets(anchor_ball, stationary_targets, delta, true)
+			_apply_single_latch_anchor_pull_to_targets(anchor_balls, stationary_targets, delta, true)
+	else:
+		for anchor_ball in anchor_balls:
+			if not moving_targets.is_empty():
+				_apply_anchor_pull_to_targets(anchor_ball, moving_targets, delta, false)
+			if should_check_stationary_pull:
+				_apply_anchor_pull_to_targets(anchor_ball, stationary_targets, delta, true)
+	_finish_latch_candidate_update()
 
 
 func finish_frame() -> void:
@@ -120,6 +140,11 @@ func get_debug_snapshot() -> Dictionary:
 		"avg_force": _get_average_force(),
 		"max_force": max_force_this_frame,
 		"nearest_distance": _get_nearest_distance_or_negative(),
+		"single_latch_enabled": anchor_single_latch_per_target_enabled,
+		"multi_latch_candidates": multi_latch_candidates_this_frame,
+		"single_latch_skipped": single_latch_skipped_this_frame,
+		"max_anchors_affecting_same_ball": max_anchors_affecting_same_ball_this_frame,
+		"targets_affected_by_multiple_anchors": multi_latch_target_ids_this_frame.size(),
 		"influence_radius": influence_radius,
 		"pull_strength": pull_strength,
 		"visuals_enabled": anchor_visuals_enabled,
@@ -175,6 +200,14 @@ func set_debug_visual_enabled(enabled_value: bool) -> void:
 
 func is_debug_visual_enabled() -> bool:
 	return debug_visual_enabled
+
+
+func set_single_latch_per_target_enabled(enabled_value: bool) -> void:
+	anchor_single_latch_per_target_enabled = enabled_value
+
+
+func is_single_latch_per_target_enabled() -> bool:
+	return anchor_single_latch_per_target_enabled
 
 
 func draw_debug(canvas: Node2D) -> void:
@@ -317,31 +350,85 @@ func _apply_anchor_pull_to_targets(
 		_try_apply_anchor_pull(anchor_ball, target_ball, delta, is_stationary_batch)
 
 
+func _apply_single_latch_anchor_pull_to_targets(
+	anchor_balls: Array[Ball],
+	target_balls: Array,
+	delta: float,
+	is_stationary_batch: bool
+) -> void:
+	for target_value in target_balls:
+		var target_ball := target_value as Ball
+		if target_ball == null:
+			continue
+
+		var best_candidate: Dictionary = {}
+		var best_force := -1.0
+		var best_distance := INF
+		for anchor_ball in anchor_balls:
+			var candidate: Dictionary = _get_anchor_pull_candidate(anchor_ball, target_ball, delta, is_stationary_batch)
+			if candidate.is_empty():
+				continue
+
+			_record_latch_candidate(target_ball)
+			var force_magnitude: float = float(candidate["force_magnitude"])
+			var distance: float = float(candidate["distance"])
+			if force_magnitude < best_force:
+				continue
+			if is_equal_approx(force_magnitude, best_force) and distance >= best_distance:
+				continue
+
+			best_force = force_magnitude
+			best_distance = distance
+			best_candidate = candidate
+
+		if best_candidate.is_empty():
+			continue
+
+		var target_id: int = target_ball.get_instance_id()
+		var latch_count: int = int(latch_candidate_counts_this_update.get(target_id, 0))
+		single_latch_skipped_this_frame += max(latch_count - 1, 0)
+		_apply_anchor_pull_candidate(best_candidate)
+
+
 func _try_apply_anchor_pull(
 	anchor_ball: Ball,
 	target_ball: Ball,
 	delta: float,
 	is_stationary_batch: bool
 ) -> void:
-	if not _is_pull_target(anchor_ball, target_ball):
+	var candidate: Dictionary = _get_anchor_pull_candidate(anchor_ball, target_ball, delta, is_stationary_batch)
+	if candidate.is_empty():
 		return
+
+	_record_latch_candidate(target_ball)
+	_apply_anchor_pull_candidate(candidate)
+
+
+func _get_anchor_pull_candidate(
+	anchor_ball: Ball,
+	target_ball: Ball,
+	delta: float,
+	is_stationary_batch: bool
+) -> Dictionary:
+	if not _is_pull_target(anchor_ball, target_ball):
+		return {}
 
 	var offset: Vector2 = anchor_ball.global_position - target_ball.global_position
 	var distance_squared: float = offset.length_squared()
 	var influence_radius_squared: float = influence_radius * influence_radius
 	if distance_squared <= 0.000001 or distance_squared > influence_radius_squared:
-		return
+		return {}
 
 	var inner_dead_zone: float = _get_inner_dead_zone_radius(anchor_ball, target_ball)
 	if distance_squared <= inner_dead_zone * inner_dead_zone:
-		return
+		return {}
 	if _is_pull_pair_on_cooldown(anchor_ball, target_ball):
-		return
+		return {}
 
 	var distance: float = sqrt(distance_squared)
 	var motion_multiplier: float = _get_motion_multiplier(target_ball)
 	if motion_multiplier <= 0.0:
-		return
+		return {}
 
 	var distance_ratio: float = 1.0 - clamp(distance / influence_radius, 0.0, 1.0)
 	var pull_ratio: float = lerp(minimum_pull_strength, 1.0, distance_ratio * distance_ratio)
@@ -350,18 +437,44 @@ func _try_apply_anchor_pull(
 
 	nearest_distance_this_frame = min(nearest_distance_this_frame, distance)
 	var pull_direction: Vector2 = offset / distance
+	var velocity_delta: Vector2
 	if is_stationary_batch:
 		var wake_impulse: float = _get_stationary_wake_impulse(anchor_ball, target_ball, force_magnitude, delta)
 		if wake_impulse <= 0.0:
-			return
-		target_ball.velocity += pull_direction * wake_impulse
-		_start_stationary_wake_cooldown(anchor_ball, target_ball)
+			return {}
+		velocity_delta = pull_direction * wake_impulse
 	else:
-		target_ball.velocity += pull_direction * force_magnitude * delta
+		velocity_delta = pull_direction * force_magnitude * delta
+
+	return {
+		"anchor_ball": anchor_ball,
+		"target_ball": target_ball,
+		"offset": offset,
+		"distance": distance,
+		"pull_direction": pull_direction,
+		"force_magnitude": force_magnitude,
+		"pull_ratio": pull_ratio,
+		"velocity_delta": velocity_delta,
+		"is_stationary_batch": is_stationary_batch,
+	}
+
+
+func _apply_anchor_pull_candidate(candidate: Dictionary) -> void:
+	var anchor_ball := candidate["anchor_ball"] as Ball
+	var target_ball := candidate["target_ball"] as Ball
+	if anchor_ball == null or target_ball == null:
+		return
+
+	var velocity_delta: Vector2 = candidate["velocity_delta"]
+	var pull_direction: Vector2 = candidate["pull_direction"]
+	var offset: Vector2 = candidate["offset"]
+	target_ball.velocity += velocity_delta
+	if bool(candidate["is_stationary_batch"]):
+		_start_stationary_wake_cooldown(anchor_ball, target_ball)
 
 	if target_ball.is_moving():
-		target_ball.note_anchor_influence(pull_ratio, pull_direction)
-	_record_force_application(anchor_ball, target_ball, offset, force_magnitude)
+		target_ball.note_anchor_influence(float(candidate["pull_ratio"]), pull_direction)
+	_record_force_application(anchor_ball, target_ball, offset, float(candidate["force_magnitude"]))
 
 
 func _get_stationary_wake_impulse(
@@ -411,6 +524,31 @@ func _get_motion_multiplier(target_ball: Ball) -> float:
 	if target_ball.is_moving():
 		return 1.0
 	return stationary_ball_multiplier
+
+
+func _begin_latch_candidate_update() -> void:
+	latch_candidate_counts_this_update.clear()
+
+
+func _record_latch_candidate(target_ball: Ball) -> void:
+	if target_ball == null:
+		return
+
+	var target_id: int = target_ball.get_instance_id()
+	latch_candidate_counts_this_update[target_id] = int(latch_candidate_counts_this_update.get(target_id, 0)) + 1
+
+
+func _finish_latch_candidate_update() -> void:
+	for target_id in latch_candidate_counts_this_update:
+		var latch_count: int = int(latch_candidate_counts_this_update[target_id])
+		max_anchors_affecting_same_ball_this_frame = max(max_anchors_affecting_same_ball_this_frame, latch_count)
+		if latch_count <= 1:
+			continue
+
+		multi_latch_candidates_this_frame += latch_count - 1
+		multi_latch_target_ids_this_frame[target_id] = true
+
+	latch_candidate_counts_this_update.clear()
 
 
 func _get_anchor_source_multiplier(anchor_ball: Ball) -> float:

@@ -42,6 +42,9 @@ const AIM_TARGET_ENDPOINT_MARKER_RADIUS := 5.0
 const AIM_TARGET_PREDICTION_MAX_DISTANCE := 360.0
 const AIM_TARGET_PREDICTION_MAX_STEPS := 120
 const AIM_TARGET_PREDICTION_STEP_SUBSTEPS := 2
+const AIM_TREASURE_PERCEPTION_RADIUS := 54.0
+const AIM_TREASURE_COVER_CANDIDATE_QUERY_RADIUS := 120.0
+const AIM_TREASURE_OCCLUSION_DISTANCE_PADDING := 4.0
 
 # Bank/path comparison debug visuals.
 const BANK_DEBUG_MARKER_LIFETIME := 1.0
@@ -114,8 +117,20 @@ var pocket_checks_this_frame := 0
 var rail_checks_this_frame := 0
 var aim_spatial_cells := 0
 var aim_spatial_balls := 0
+var aim_spatial_treasure_balls := 0
 var aim_spatial_query_cells_this_frame := 0
 var aim_spatial_candidates_this_frame := 0
+var treasure_perception_epoch := 0
+var treasure_perception_rebuilds_this_frame := 0
+var treasure_perception_checks_this_frame := 0
+var _treasure_last_rebuild_checks := 0
+var _treasure_perceived_ball_ids: Array[int] = []
+var _treasure_seen_entries: Array[Dictionary] = []
+var _treasure_cover_candidate_entries: Array[Dictionary] = []
+var _treasure_visibility_debug_entries: Array[Dictionary] = []
+var _treasure_aim_path_points: Array[Vector2] = []
+var _treasure_aim_origin := Vector2.ZERO
+var _treasure_aim_direction := Vector2.ZERO
 var draw_ms_last_draw := 0.0
 var draw_segments_last_draw := 0
 var draw_calls_last_draw := 0
@@ -137,12 +152,14 @@ func update_preview(active: bool, origin: Vector2, drag_vector: Vector2, shot_po
 		_aim_ball_spatial_grid.clear()
 		aim_spatial_cells = 0
 		aim_spatial_balls = 0
+		aim_spatial_treasure_balls = 0
 		draw_ms_last_draw = 0.0
 		draw_segments_last_draw = 0
 		draw_calls_last_draw = 0
 		if preview_active or current_prediction != null:
 			preview_active = false
 			current_prediction = null
+			_rebuild_treasure_perception_snapshot(null)
 			queue_redraw()
 		return
 
@@ -154,6 +171,7 @@ func update_preview(active: bool, origin: Vector2, drag_vector: Vector2, shot_po
 	var aim_start_usec: int = Time.get_ticks_usec()
 	_rebuild_aim_ball_spatial_grid()
 	current_prediction = _get_first_aim_collision(origin, drag_vector * shot_power)
+	_rebuild_treasure_perception_snapshot(current_prediction)
 	prediction_ms = _elapsed_ms_since(aim_start_usec)
 	prediction_frame_ms += prediction_ms
 	prediction_recalculations_this_frame += 1
@@ -277,6 +295,8 @@ func reset_frame_stats() -> void:
 	rail_checks_this_frame = 0
 	aim_spatial_query_cells_this_frame = 0
 	aim_spatial_candidates_this_frame = 0
+	treasure_perception_rebuilds_this_frame = 0
+	treasure_perception_checks_this_frame = 0
 
 
 func get_debug_snapshot() -> Dictionary:
@@ -291,11 +311,31 @@ func get_debug_snapshot() -> Dictionary:
 		"rail_checks": rail_checks_this_frame,
 		"spatial_cells": aim_spatial_cells,
 		"spatial_balls": aim_spatial_balls,
+		"spatial_treasure_balls": aim_spatial_treasure_balls,
 		"spatial_query_cells": aim_spatial_query_cells_this_frame,
 		"spatial_candidates": aim_spatial_candidates_this_frame,
+		"treasure_perception_epoch": treasure_perception_epoch,
+		"treasure_perception_rebuilds": treasure_perception_rebuilds_this_frame,
+		"treasure_perception_checks": treasure_perception_checks_this_frame,
 		"draw_ms": draw_ms_last_draw,
 		"draw_segments": draw_segments_last_draw,
 		"draw_calls": draw_calls_last_draw,
+	}
+
+
+func get_treasure_perception_snapshot() -> Dictionary:
+	return {
+		"epoch": treasure_perception_epoch,
+		"rebuilds_this_frame": treasure_perception_rebuilds_this_frame,
+		"checks_this_frame": treasure_perception_checks_this_frame,
+		"last_rebuild_checks": _treasure_last_rebuild_checks,
+		"aim_origin": _treasure_aim_origin,
+		"aim_direction": _treasure_aim_direction,
+		"aim_path_points": _treasure_aim_path_points.duplicate(),
+		"seen_treasure_ball_ids": _treasure_perceived_ball_ids.duplicate(),
+		"seen_treasure_balls": _treasure_seen_entries.duplicate(),
+		"cover_candidates": _treasure_cover_candidate_entries.duplicate(),
+		"visibility_debug_entries": _treasure_visibility_debug_entries.duplicate(),
 	}
 #endregion
 
@@ -625,6 +665,26 @@ func _get_first_aim_collision(origin: Vector2, initial_velocity: Vector2) -> Aim
 	return prediction
 
 
+func _rebuild_treasure_perception_snapshot(prediction: AimPrediction) -> void:
+	_treasure_perceived_ball_ids.clear()
+	_treasure_seen_entries.clear()
+	_treasure_cover_candidate_entries.clear()
+	_treasure_visibility_debug_entries.clear()
+	_treasure_aim_path_points.clear()
+	_treasure_aim_origin = Vector2.ZERO
+	_treasure_aim_direction = Vector2.ZERO
+	_treasure_last_rebuild_checks = 0
+	if prediction != null and prediction.path_points.size() >= 2:
+		_treasure_aim_origin = preview_origin
+		_treasure_aim_direction = preview_drag_vector.normalized()
+		_treasure_aim_path_points = prediction.path_points.duplicate()
+		_rebuild_treasure_corridor_perception(prediction.path_points)
+
+	treasure_perception_checks_this_frame += _treasure_last_rebuild_checks
+	treasure_perception_rebuilds_this_frame += 1
+	treasure_perception_epoch += 1
+
+
 func _get_prediction_step_delta(step_substeps: int) -> float:
 	# AimPreview uses coarser visual-prediction steps than real physics, while
 	# swept ball/pocket checks keep fast paths from skipping collision targets.
@@ -732,6 +792,7 @@ func _rebuild_aim_ball_spatial_grid() -> void:
 	_aim_spatial_cell_size = max(float(table.BALL_COLLISION_GRID_CELL_SIZE), 1.0)
 	_aim_spatial_max_ball_radius = 0.0
 	aim_spatial_balls = 0
+	aim_spatial_treasure_balls = 0
 
 	for child in table.balls.get_children():
 		var ball := child as Ball
@@ -744,6 +805,8 @@ func _rebuild_aim_ball_spatial_grid() -> void:
 		_aim_ball_spatial_grid[cell].append(ball)
 		_aim_spatial_max_ball_radius = max(_aim_spatial_max_ball_radius, ball.radius)
 		aim_spatial_balls += 1
+		if ball.is_treasure_ball:
+			aim_spatial_treasure_balls += 1
 
 	aim_spatial_cells = _aim_ball_spatial_grid.size()
 
@@ -789,6 +852,240 @@ func _get_aim_spatial_candidates_for_segment(
 
 	aim_spatial_candidates_this_frame += candidates.size()
 	return candidates
+
+
+func _rebuild_treasure_corridor_perception(path_points: Array[Vector2]) -> void:
+	if aim_spatial_treasure_balls <= 0:
+		return
+
+	var query_radius: float = max(AIM_TREASURE_PERCEPTION_RADIUS, AIM_TREASURE_COVER_CANDIDATE_QUERY_RADIUS)
+	var path_candidate_entries: Array[Dictionary] = _get_treasure_path_candidate_entries(path_points, query_radius)
+	_treasure_last_rebuild_checks = path_candidate_entries.size()
+	_treasure_cover_candidate_entries = _get_treasure_cover_candidates_from_entries(path_candidate_entries)
+
+	for candidate_entry_value in path_candidate_entries:
+		var candidate_entry: Dictionary = candidate_entry_value
+		if not bool(candidate_entry["is_treasure_ball"]):
+			continue
+		var visibility_result: Dictionary = _get_treasure_visibility_result(candidate_entry, path_candidate_entries)
+		_treasure_visibility_debug_entries.append(visibility_result)
+		if str(visibility_result["reason"]) != "seen":
+			continue
+
+		var ball_id: int = int(candidate_entry["ball_id"])
+		_treasure_perceived_ball_ids.append(ball_id)
+		_treasure_seen_entries.append({
+			"ball_id": ball_id,
+			"position": candidate_entry["position"],
+			"radius": candidate_entry["radius"],
+			"impact_position": candidate_entry["closest_point"],
+			"distance_along_path": candidate_entry["distance_along_path"],
+			"lateral_distance": candidate_entry["lateral_distance"],
+			"visibility_reason": visibility_result["reason"],
+		})
+
+
+func _get_treasure_path_candidate_entries(path_points: Array[Vector2], query_radius: float) -> Array[Dictionary]:
+	var candidate_entries: Array[Dictionary] = []
+	if path_points.size() < 2:
+		return candidate_entries
+
+	var seen_ball_ids: Dictionary = {}
+	for point_index in range(path_points.size() - 1):
+		var segment_start: Vector2 = path_points[point_index]
+		var segment_end: Vector2 = path_points[point_index + 1]
+		for candidate_ball in _get_treasure_spatial_candidates_for_segment(segment_start, segment_end, query_radius):
+			if candidate_ball == null or candidate_ball == table.cue_ball or not candidate_ball.is_gameplay_active():
+				continue
+
+			var ball_id: int = candidate_ball.get_instance_id()
+			if seen_ball_ids.has(ball_id):
+				continue
+
+			var projection: Dictionary = _project_point_onto_path(candidate_ball.global_position, path_points)
+			if projection.is_empty():
+				continue
+
+			var lateral_distance: float = float(projection["lateral_distance"])
+			if lateral_distance > query_radius + candidate_ball.radius:
+				continue
+
+			seen_ball_ids[ball_id] = true
+			candidate_entries.append({
+				"ball_id": ball_id,
+				"position": candidate_ball.global_position,
+				"radius": candidate_ball.radius,
+				"is_treasure_ball": candidate_ball.is_treasure_ball,
+				"closest_point": projection["closest_point"],
+				"distance_along_path": projection["distance_along_path"],
+				"lateral_distance": lateral_distance,
+				"segment_direction": projection["segment_direction"],
+			})
+
+	return candidate_entries
+
+
+func _get_treasure_cover_candidates_from_entries(path_candidate_entries: Array[Dictionary]) -> Array[Dictionary]:
+	var cover_candidates: Array[Dictionary] = []
+	for candidate_entry_value in path_candidate_entries:
+		var candidate_entry: Dictionary = candidate_entry_value
+		if bool(candidate_entry["is_treasure_ball"]):
+			continue
+
+		cover_candidates.append({
+			"ball_id": candidate_entry["ball_id"],
+			"position": candidate_entry["position"],
+			"radius": candidate_entry["radius"],
+			"closest_point": candidate_entry["closest_point"],
+			"distance_along_path": candidate_entry["distance_along_path"],
+			"lateral_distance": candidate_entry["lateral_distance"],
+			"segment_direction": candidate_entry["segment_direction"],
+		})
+
+	return cover_candidates
+
+
+func _get_treasure_visibility_result(
+	treasure_entry: Dictionary,
+	path_candidate_entries: Array[Dictionary]
+) -> Dictionary:
+	var result: Dictionary = {
+		"ball_id": treasure_entry["ball_id"],
+		"reason": "seen",
+		"lateral_distance": treasure_entry["lateral_distance"],
+		"distance_along_path": treasure_entry["distance_along_path"],
+		"blocker_ball_id": -1,
+		"blocker_lateral_distance": -1.0,
+		"blocker_distance_along_path": -1.0,
+		"blocker_entry_distance": -1.0,
+	}
+	if float(treasure_entry["lateral_distance"]) > AIM_TREASURE_PERCEPTION_RADIUS:
+		result["reason"] = "outside_corridor"
+		return result
+
+	var treasure_distance: float = float(treasure_entry["distance_along_path"])
+	if treasure_distance <= 0.0:
+		result["reason"] = "behind_origin"
+		return result
+
+	var treasure_entry_distance: float = _get_treasure_visibility_entry_distance(treasure_entry)
+	var treasure_ball_id: int = int(treasure_entry["ball_id"])
+	for blocker_entry_value in path_candidate_entries:
+		var blocker_entry: Dictionary = blocker_entry_value
+		var blocker_ball_id: int = int(blocker_entry["ball_id"])
+		if blocker_ball_id == treasure_ball_id:
+			continue
+
+		var blocker_distance: float = float(blocker_entry["distance_along_path"])
+		if blocker_distance <= 0.0:
+			continue
+
+		var blocker_lateral_distance: float = float(blocker_entry["lateral_distance"])
+		var blocker_occlusion_radius: float = _get_treasure_occlusion_radius(blocker_entry)
+		if blocker_lateral_distance > blocker_occlusion_radius:
+			continue
+
+		var blocker_entry_distance: float = _get_circle_path_entry_distance(
+			blocker_distance,
+			blocker_lateral_distance,
+			blocker_occlusion_radius
+		)
+		if blocker_entry_distance >= treasure_entry_distance - AIM_TREASURE_OCCLUSION_DISTANCE_PADDING:
+			continue
+
+		result["reason"] = "occluded"
+		result["blocker_ball_id"] = blocker_ball_id
+		result["blocker_lateral_distance"] = blocker_lateral_distance
+		result["blocker_distance_along_path"] = blocker_distance
+		result["blocker_entry_distance"] = blocker_entry_distance
+		return result
+
+	return result
+
+
+func _get_treasure_visibility_entry_distance(treasure_entry: Dictionary) -> float:
+	var treasure_distance: float = float(treasure_entry["distance_along_path"])
+	var treasure_lateral_distance: float = float(treasure_entry["lateral_distance"])
+	var treasure_radius: float = float(treasure_entry["radius"]) + AIM_TREASURE_OCCLUSION_DISTANCE_PADDING
+	if treasure_lateral_distance <= treasure_radius:
+		return _get_circle_path_entry_distance(treasure_distance, treasure_lateral_distance, treasure_radius)
+
+	return treasure_distance
+
+
+func _get_treasure_occlusion_radius(blocker_entry: Dictionary) -> float:
+	var blocker_radius: float = float(blocker_entry["radius"])
+	return min(AIM_TREASURE_PERCEPTION_RADIUS, blocker_radius + AIM_TREASURE_OCCLUSION_DISTANCE_PADDING)
+
+
+func _get_circle_path_entry_distance(center_distance: float, lateral_distance: float, radius: float) -> float:
+	var entry_offset_squared: float = max(radius * radius - lateral_distance * lateral_distance, 0.0)
+	return center_distance - sqrt(entry_offset_squared)
+
+
+func _get_treasure_spatial_candidates_for_segment(
+	segment_start: Vector2,
+	segment_end: Vector2,
+	query_radius: float
+) -> Array[Ball]:
+	var candidates: Array[Ball] = []
+	if _aim_ball_spatial_grid.is_empty():
+		return candidates
+
+	var query_padding: float = query_radius + _aim_spatial_max_ball_radius
+	var min_position := Vector2(
+		min(segment_start.x, segment_end.x) - query_padding,
+		min(segment_start.y, segment_end.y) - query_padding
+	)
+	var max_position := Vector2(
+		max(segment_start.x, segment_end.x) + query_padding,
+		max(segment_start.y, segment_end.y) + query_padding
+	)
+	var min_cell: Vector2i = _get_aim_spatial_cell(min_position)
+	var max_cell: Vector2i = _get_aim_spatial_cell(max_position)
+
+	for cell_x in range(min_cell.x, max_cell.x + 1):
+		for cell_y in range(min_cell.y, max_cell.y + 1):
+			var cell := Vector2i(cell_x, cell_y)
+			if not _aim_ball_spatial_grid.has(cell):
+				continue
+
+			for candidate in _aim_ball_spatial_grid[cell]:
+				var ball := candidate as Ball
+				if ball != null:
+					candidates.append(ball)
+
+	return candidates
+
+
+func _project_point_onto_path(point: Vector2, path_points: Array[Vector2]) -> Dictionary:
+	var best_projection: Dictionary = {}
+	var best_distance := INF
+	var distance_before_segment := 0.0
+	for point_index in range(path_points.size() - 1):
+		var segment_start: Vector2 = path_points[point_index]
+		var segment_end: Vector2 = path_points[point_index + 1]
+		var segment: Vector2 = segment_end - segment_start
+		var segment_length: float = segment.length()
+		if segment_length <= 0.001:
+			continue
+
+		var raw_segment_fraction: float = (point - segment_start).dot(segment) / segment.length_squared()
+		var segment_fraction: float = clamp(raw_segment_fraction, 0.0, 1.0)
+		var closest_point: Vector2 = segment_start + segment * segment_fraction
+		var lateral_distance: float = point.distance_to(closest_point)
+		if lateral_distance < best_distance:
+			best_distance = lateral_distance
+			best_projection = {
+				"closest_point": closest_point,
+				"lateral_distance": lateral_distance,
+				"distance_along_path": distance_before_segment + segment_length * raw_segment_fraction,
+				"segment_direction": segment / segment_length,
+			}
+
+		distance_before_segment += segment_length
+
+	return best_projection
 
 
 func _get_aim_spatial_cell(position: Vector2) -> Vector2i:

@@ -16,12 +16,12 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 - `scenes/Main.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scripts/Main.gd` - Small app shell and top-level scene wiring.
 - `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons and pocket-side score popup presentation.
-- `scripts/SpawnSystem.gd` - Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.
+- `scripts/SpawnSystem.gd` - Creates balls, queues reward drops, performs safe spawn searches, and owns regular anomaly plus Anchor priority spawn odds.
 
 ## Current Notes
 
-- Tone is pirate arcade chaos with readable eldritch flair.
-- Doubloons belong to this prototype; Insight is reserved for the larger future Cuethulhu direction.
+- Tone is pirate arcade chaos with readable eldritch flair and a little mischievous weirdness.
+- Doubloons belong to this game; Insight is reserved for the larger future Cuethulhu direction.
 
 ## Risks Or TODOs
 

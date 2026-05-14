@@ -4,6 +4,13 @@ This folder is generated/reference-only.
 
 It exists to help future AI/Codex sessions understand Kraken An Eight Ball quickly without rereading the whole project from zero.
 
+Current snapshot:
+
+- Kraken An Eight Ball is a systemic arcade-chaos billiards prototype.
+- The current loop is better play -> more score -> more balls -> more chaos -> survive the escalating table.
+- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, and Treasure perception/hiding are active modern systems.
+- Generated reports are a project map only; `AGENTS.md` and the real scripts/scenes remain authoritative.
+
 Important rules:
 
 - Gameplay source of truth remains the real scripts, scenes, and `AGENTS.md`.

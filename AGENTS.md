@@ -2,9 +2,11 @@
 
 ## Project Identity
 
-Kraken An Eight Ball is a Godot 4 / GDScript pirate-eldritch arcade billiards prototype.
+Kraken An Eight Ball is a Godot 4 / GDScript pirate-eldritch systemic arcade-chaos billiards prototype.
 
-The project is currently a "baby Cuethulhu" proof-of-interest build: small, punchy, readable, and focused on testing whether billiards plus roguelike escalation, special balls, and arcade trick-shot celebration are fun.
+The project is now a playable escalation sandbox with multiple interacting systems. The current core loop is:
+
+better play -> more score/Doubloons -> more score-tied ball drops -> more interactions and chaos -> survive an escalating table state.
 
 Core pillars:
 
@@ -12,8 +14,10 @@ Core pillars:
 - Pirate/kraken table presentation and in-engine charm.
 - Doubloons scoring driven by trick-shot event history.
 - Pocket-side score celebrations instead of generic center-screen scoring spam.
-- Occasional anomaly balls: Wayfinder Ball, Powder Keg, Anchor Ball, and Cannon Ball.
-- Fast iteration over broad systems.
+- Score-tied ball drops that turn successful play into rising table pressure.
+- Active anomaly balls: Wayfinder Ball, Powder Keg, Anchor Ball, Cannon Ball, and Treasure Ball experiments.
+- Presentation-only fake-3D impact and heat/scuttle effects that add juice without moving authoritative gameplay geometry.
+- Fast iteration over broad systems while preserving shot feel.
 
 Target platforms:
 
@@ -26,13 +30,15 @@ Target platforms:
 
 Owns high-level coordination, shot lifecycle, early cue-control reclaim gating, authoritative ball list, current main physics loop, run state, callout queue, and event routing between systems.
 
+Early cue reclaim belongs here because it is shot-lifecycle coordination, not cue presentation. Reclaim requires the cue ball to be stopped and valid, avoids reset/drop states, waits a short post-shot delay, uses lightweight moving-ball counts/speed buckets, blocks likely imminent cue-ball collisions, and does not revoke cue control after it has already been granted.
+
 Does not own large new feature systems unless there is no cleaner option. New gameplay clusters should usually become system scripts and be coordinated from `Table.gd`.
 
 `BallPhysics` intentionally still lives here. It is high-risk because it controls shot feel, collision response, rail events, pocket timing, Wayfinder event timing, and performance counters.
 
 ### `scripts/Ball.gd`
 
-Owns individual ball identity, velocity/friction state, generated ball visuals, spawn/drop presentation state, trails, and minimal anomaly identity/state flags such as `is_wayfinder`, `is_powder_keg`, `is_anchor_ball`, `is_cannon_ball`, and `wayfinder_active`.
+Owns individual ball identity, velocity/friction state, generated ball visuals, spawn/drop presentation state, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and minimal anomaly identity/state flags such as `is_wayfinder`, `is_powder_keg`, `is_anchor_ball`, `is_cannon_ball`, `is_treasure_ball`, and `wayfinder_active`.
 
 Does not own table-wide gameplay rules, scoring, spawning decisions, pocket logic, or anomaly systems beyond per-ball state that must live on the ball.
 
@@ -50,9 +56,11 @@ Does not own shot power, shot velocity, aim prediction, or real ball movement.
 
 ### `scripts/AimPreview.gd`
 
-Owns polished cue-ball aim line presentation, shot-power color, swept cue-ball preview collision checks, AimPreview-only broad-phase filtering, ghost cue-ball prediction, one-bank preview, hit-ball prediction line presentation, hit-ball first-collision stopping against rails/balls/pockets, visual-only endpoint markers, and predicted-vs-actual shot path debug visualization.
+Owns polished cue-ball aim line presentation, shot-power color, swept cue-ball preview collision checks, AimPreview-only broad-phase filtering, ghost cue-ball prediction, one-bank preview, hit-ball prediction line presentation, hit-ball first-collision stopping against rails/balls/pockets, visual-only endpoint markers, read-only Treasure Ball perception snapshots, and predicted-vs-actual shot path debug visualization.
 
 Does not mutate real gameplay state. Prediction must stay side-effect-free and should use shared boundary/pocket helpers so preview stays aligned with real movement.
+
+Aim preview rebuilds should be coalesced by `Table.gd`: input events mark the preview dirty, and a single centralized update performs at most one rebuild per frame while dragging. Do not reintroduce coarse angle/power tolerance reuse; graze shots need reliable rebuilds when the visible aim changes.
 
 AimPreview.gd must remain prediction/presentation only. It must not change real physics, shot power, cue feel, scoring, anomalies, or spawn systems.
 
@@ -76,7 +84,7 @@ Does not own ball-to-ball collision response, spawn chance, scoring values, pock
 
 ### `scripts/AnchorBallSystem.gd`
 
-Owns Anchor Ball cursed-tide pull behavior, Anchor source/target rules, contact-loop cooldowns, affected-ball marker reporting, Anchor debug visuals, visual aura caps, and Anchor performance counters.
+Owns Anchor Ball cursed-tide pull behavior, Anchor source/target rules, single strongest-current-per-target selection, contact-loop cooldowns, affected-ball marker reporting, Anchor debug visuals, visual aura caps, and Anchor performance counters.
 
 Does not own ball-to-ball collision response, cue input, scoring values, prediction, pocket geometry, or SpawnSystem's reward-roll decisions.
 
@@ -87,6 +95,12 @@ Owns the Cannon Ball anomaly boundary, Cannon-specific collision tuning, Powder 
 Future Cannon Ball passes may own Anchor pull tuning, Wayfinder guidance safeguards, regular spawn odds, and additional heat-presence polish, but those are not active yet.
 
 Does not own global ball-to-ball collision constants, spawn odds, scoring values, cue input, prediction, pocket geometry, screen shake, or interactions with Anchor or Wayfinder.
+
+### `scripts/TreasureBallSystem.gd`
+
+Owns Treasure Ball tracking, read-only AimPreview perception state, committed hide target selection, aim-corridor crossing avoidance, pocket-aware hide/flee target filtering, and threat-scaled self-steering while Treasure is actively perceived by the aim-line corridor. Treasure Ball is currently debug-spawnable, visually distinct, uses capped soft-body/scuttle steering toward cover or a fallback flee target without overriding normal collisions, and can request draw-only fleeing-leg presentation from `Ball.gd`.
+
+Does not own rewards, scoring values, spawn odds, pocket behavior, cue input, prediction math, broad physics, or procedural leg drawing. Future Treasure passes may add reward variants, but current Treasure behavior is identity/perception/committed hide-target/threat-scaled hiding movement, soft outgoing self-propelled collision nudges, quick self-braking when calm, and visual fleeing-state reporting only.
 
 ### `scripts/PocketSystem.gd`
 
@@ -157,6 +171,8 @@ Owns presentation-only fake-3D table impact shake for Powder Keg explosions and 
 
 Does not own gameplay positions, physics velocities, camera movement, HUD/debug UI, scoring, spawn timing, or anomaly force tuning. It should stay inactive when no shake is playing and must never move authoritative ball/table geometry.
 
+Fake-3D presentation systems should move only drawn presentation layers or draw offsets. HUD/debug UI should remain readable, floor/background should stay still or barely move, and any ball shimmy must be visual-only.
+
 ## Physics Rules
 
 - Preserve shot feel, pocket feel, rail feel, cue feel, and collision liveliness unless explicitly asked to tune them.
@@ -184,6 +200,7 @@ Anomaly balls should generally get their own system scripts. Current active anom
 - `PowderKegSystem.gd`
 - `AnchorBallSystem.gd`
 - `CannonBallSystem.gd` currently owns debug-spawnable Cannon identity, collision tuning, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat-presence thresholds.
+- `TreasureBallSystem.gd` currently owns debug-spawnable Treasure identity tracking, AimPreview perception reporting, committed hide target selection, gentle hiding movement while perceived, and visual fleeing-state reporting.
 
 Pattern:
 
@@ -204,6 +221,7 @@ Current anomaly rules:
 - Powder Keg particle bursts should look juicy and readable, but debug/quality controls should allow particles to degrade safely under load.
 - Anchor pulls object balls only. It does not affect the cue ball.
 - Anchor does not pull other Anchor balls, though Anchor balls still physically collide normally.
+- Overlapping Anchor fields do not stack on the same target. Each target ball follows one strongest effective Anchor current per update/substep, with nearest Anchor as the tie-breaker. Anchor overlap debug counters should report skipped overlaps, max Anchors considered per target, and targets with overlap candidates.
 - Moving Anchor balls use full pull strength.
 - Stationary Anchor balls remain active field sources but use half pull strength.
 - Anchor has an inner dead zone and a per Anchor/target post-collision pull cooldown to prevent gravity-loop chase bumps.
@@ -214,6 +232,18 @@ Current anomaly rules:
 - Cannon Ball qualifying heavy impacts can request short, subtle table-impact shake through `TableImpactShakeSystem.gd`, with cooldown to prevent shake spam.
 - Cannon Ball high-speed heat presence is draw-only in `Ball.gd`, tuned by `CannonBallSystem.gd`, and visually capped so chaos degrades presentation before gameplay.
 - Cannon Ball currently has no regular spawn odds and no Cannon-specific special interactions with Anchor or Wayfinder.
+- Treasure Ball is currently debug-spawn only and behaves physically like a normal object ball.
+- Treasure Ball uses AimPreview's existing prediction/spatial-grid work to report when Treasure is inside the aim-line perception corridor and not occluded by a closer ball.
+- Treasure perception is emotional/perceptual, not merely exact first-hit targeting. Treasure should react to being watched by the aim guide or aimed at too closely, even when it is not the first predicted collision target.
+- Treasure Ball can choose a committed hide target behind nearby cover, or a fallback perpendicular flee target when no cover is available.
+- Treasure Ball should prefer cover that moves it away from the cue/aim origin and should not willingly cross the active aim corridor if another valid hide option exists.
+- Treasure Ball should behave like a cautious sneaky thief, not a shortest-path optimizer.
+- Treasure Ball avoids hide/flee targets too close to pockets, though it can still be pocketed by normal hits or table motion.
+- Treasure Ball gently steers toward its target only while perceived by the aim line, with stronger panic movement when the aim line is close to its center. This is capped self-steering; normal collisions, pockets, hits, and blocking still use regular ball physics.
+- Treasure Ball self-propelled movement should feel like a soft-body scuttle: gentle squeezing/nudging is allowed, but self-steering should not build full billiards momentum, shove clusters hard, or coast into pockets after it calms down. External hits still use normal ball physics.
+- Treasure Ball should avoid target-thrashing through short commitment windows and meaningful switch thresholds.
+- Treasure Ball procedural legs are draw-only in `Ball.gd`. They appear only while Treasure is actively fleeing/steering, then fade/retract without adding collision or gameplay effects.
+- Treasure Ball currently has no special scoring, reward payout, or regular spawn odds.
 
 Possible future anomaly systems:
 
@@ -249,13 +279,17 @@ Do not bury score-tied reward decisions inside `ScoreSystem.gd`, and do not add 
 - Stopped-ball filtering exists and should be preserved.
 - Ball-vs-ball broad-phase spatial grid exists and should be preserved.
 - Rail checks and pocket checks should run only for moving gameplay-active balls.
-- Performance overlay/debug tools exist in `DebugOverlay.gd` and use snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, `CannonBallSystem.gd`, and `BallDropSystem.gd`.
+- Performance overlay/debug tools exist in `DebugOverlay.gd` and use snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, `CannonBallSystem.gd`, `TreasureBallSystem.gd`, and `BallDropSystem.gd`.
 - Do not remove counters or make them misleading during optimization.
 - Do not add spatial partition rewrites or alternate physics engines without a focused request.
 - Do not solve chaos by preventing chaos. Large earned chain reactions and high ball counts are intended.
 - Do not hard-cap normal gameplay ball counts as the primary optimization strategy unless explicitly requested.
 - Keep physics/gameplay authoritative and correct. Degrade visual effects first under load.
-- Good first optimization targets include particles, trails, aura effects, popup labels, redraw frequency, pooling/reuse, and offscreen or low-priority visual simplification.
+- Prefer event/state-driven updates over continuous rescanning. Systems should track meaningful state changes when practical instead of rebuilding full-table answers every frame.
+- Coalesce repeated work before reducing gameplay ambition or visual fidelity. Input/event spam should mark systems dirty, then a single owner should process the newest state once per frame or once per relevant physics step.
+- Optimization should preserve readability as well as raw performance; a faster effect that hides cause/effect relationships is usually not a good trade.
+- AimPreview rebuilds are the canonical example: mouse/input events should not trigger dozens of same-frame prediction rebuilds; `Table.gd` should collapse them into one accurate rebuild without tolerance caching that lies about grazes.
+- Good first optimization targets include particles, trails, aura effects, popup labels, redraw frequency, prediction rebuild frequency, pooling/reuse, and offscreen or low-priority visual simplification.
 - Debug/stress testing should continue to support 100+ balls.
 
 ## Project Brain And Debug Media

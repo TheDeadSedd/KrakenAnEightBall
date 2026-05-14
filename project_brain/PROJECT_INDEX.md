@@ -16,6 +16,17 @@ This is a fast project map, not a substitute for reading source files and `AGENT
 - Future sessions should check relevant clips/screenshots when investigating feel, prediction, anomaly, UI, or performance issues.
 - Debug media is reference material only and should never be treated as gameplay/source code.
 
+## Current Game State
+
+- Kraken An Eight Ball is a systemic arcade-chaos billiards prototype with multiple active escalation systems.
+- Core loop: better play -> more Doubloons -> score-tied ball drops -> more balls -> more interactions -> survive the escalating table state.
+- `BallDropSystem.gd` is active; cue-ball and eight-ball sinks are penalties and no longer end the run.
+- Early cue reclaim lets players regain control after the cue ball stops under safe motion conditions.
+- `TableImpactShakeSystem.gd` owns fake-3D presentation-only impact shake for Powder Keg and Cannon events.
+- Cannon Ball is a debug-spawn delayed-chaos future-problem anomaly with heat presence and heavy-impact behavior.
+- Treasure Ball is a debug-spawn perception/hiding experiment that reacts to being watched by the aim guide.
+- Optimization philosophy: support chaos gracefully, coalesce repeated work, and degrade visuals before limiting gameplay.
+
 ## Next Major Goal
 
 - Continue stabilizing the score-tied ball drop loop: better play creates more score events/Doubloons, more balls, more interactions, and higher score before the table empties.
@@ -39,29 +50,31 @@ The scanner understands optional comments in source files:
 ## Mechanics
 
 - `scenes/CueBall.tscn` - CueBall. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
-- `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, and anomaly identity flags.; owner: mechanics_agent
+- `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.; owner: mechanics_agent
 - `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
 - `scripts/CannonBallSystem.gd` - Cannon Ball System. Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Cannon Ball anomaly system; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/CueController.gd` - CueController. Owns cue visuals, grab-zone hit testing, pullback, and strike presentation.; owner: mechanics_agent
 - `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and pocket-side score popup presentation.; owner: ui_agent
 - `scripts/ShotEventSystem.gd` - ShotEventSystem. Tracks causal per-shot scoring events for sunk balls.; owner: mechanics_agent
-- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.; owner: systems_agent
-- `scripts/Table.gd` - Table. High-level table coordinator and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns regular anomaly plus Anchor priority spawn odds.; owner: systems_agent
+- `scripts/Table.gd` - Table. High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception, committed hide target selection, threat-scaled hiding movement, and fleeing-leg visual reporting.
 
 ## Physics
 
 - `scenes/Table.tscn` - Table. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
-- `scripts/AimPreview.gd` - AimPreview. Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, and AimPreview broad-phase counters.; owner: performance_agent
-- `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, and anomaly identity flags.; owner: mechanics_agent
+- `scripts/AimPreview.gd` - AimPreview. Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure perception snapshots, and AimPreview broad-phase counters.; owner: performance_agent
+- `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.; owner: mechanics_agent
 - `scripts/BoundarySystem.gd` - BoundarySystem. Loads authored rail/boundary geometry and shared boundary helpers.; owner: systems_agent
 - `scripts/PocketSystem.gd` - PocketSystem. Loads authored pocket geometry and detects pocket captures.; owner: systems_agent
-- `scripts/Table.gd` - Table. High-level table coordinator and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/Table.gd` - Table. High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics.; owner: mechanics_agent
 
 ## Anomaly Balls
 
-- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
+- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
 - `scripts/CannonBallSystem.gd` - Cannon Ball System. Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Cannon Ball anomaly system; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/PowderKegSystem.gd` - PowderKegSystem. Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.; owner: anomaly_ball_agent
+- `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception, committed hide target selection, threat-scaled hiding movement, and fleeing-leg visual reporting.
 - `scripts/WayfinderSystem.gd` - WayfinderSystem. Handles Wayfinder activation and temporary guided-ball redirects.; owner: anomaly_ball_agent
 
 ## Systems
@@ -71,7 +84,7 @@ The scanner understands optional comments in source files:
 - `scenes/CueBall.tscn` - CueBall. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
 - `scenes/Main.tscn` - Main. Godot scene file used for authored node layout and scene wiring.; owner: ui_agent
 - `scenes/Table.tscn` - Table. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
-- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
+- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
 - `scripts/BallDropMeter.gd` - Ball Drop Meter. Vertical right-side HUD meter for progress toward the next score-earned ball drop.; status: In Progress; owner: ui_agent; notes: Vertical right-side meter for score progress toward the next earned ball drop.
 - `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
 - `scripts/BoundarySystem.gd` - BoundarySystem. Loads authored rail/boundary geometry and shared boundary helpers.; owner: systems_agent
@@ -81,16 +94,17 @@ The scanner understands optional comments in source files:
 - `scripts/PowderKegSystem.gd` - PowderKegSystem. Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.; owner: anomaly_ball_agent
 - `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and pocket-side score popup presentation.; owner: ui_agent
 - `scripts/ShotEventSystem.gd` - ShotEventSystem. Tracks causal per-shot scoring events for sunk balls.; owner: mechanics_agent
-- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.; owner: systems_agent
-- `scripts/Table.gd` - Table. High-level table coordinator and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns regular anomaly plus Anchor priority spawn odds.; owner: systems_agent
+- `scripts/Table.gd` - Table. High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics.; owner: mechanics_agent
 - `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
+- `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception, committed hide target selection, threat-scaled hiding movement, and fleeing-leg visual reporting.
 - `scripts/WayfinderSystem.gd` - WayfinderSystem. Handles Wayfinder activation and temporary guided-ball redirects.; owner: anomaly_ball_agent
 
 ## UI
 
 - `scenes/CueBall.tscn` - CueBall. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
 - `scenes/Main.tscn` - Main. Godot scene file used for authored node layout and scene wiring.; owner: ui_agent
-- `scripts/AimPreview.gd` - AimPreview. Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, and AimPreview broad-phase counters.; owner: performance_agent
+- `scripts/AimPreview.gd` - AimPreview. Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure perception snapshots, and AimPreview broad-phase counters.; owner: performance_agent
 - `scripts/BallDropMeter.gd` - Ball Drop Meter. Vertical right-side HUD meter for progress toward the next score-earned ball drop.; status: In Progress; owner: ui_agent; notes: Vertical right-side meter for score progress toward the next earned ball drop.
 - `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
 - `scripts/CueController.gd` - CueController. Owns cue visuals, grab-zone hit testing, pullback, and strike presentation.; owner: mechanics_agent
@@ -106,27 +120,29 @@ The scanner understands optional comments in source files:
 
 ## Performance Concerns
 
-- `scripts/AimPreview.gd` - AimPreview. Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, and AimPreview broad-phase counters.; owner: performance_agent
-- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
-- `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, and anomaly identity flags.; owner: mechanics_agent
+- `scripts/AimPreview.gd` - AimPreview. Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure perception snapshots, and AimPreview broad-phase counters.; owner: performance_agent
+- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
+- `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.; owner: mechanics_agent
 - `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
 - `scripts/BoundarySystem.gd` - BoundarySystem. Loads authored rail/boundary geometry and shared boundary helpers.; owner: systems_agent
 - `scripts/CannonBallSystem.gd` - Cannon Ball System. Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Cannon Ball anomaly system; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/PocketSystem.gd` - PocketSystem. Loads authored pocket geometry and detects pocket captures.; owner: systems_agent
 - `scripts/PowderKegSystem.gd` - PowderKegSystem. Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.; owner: anomaly_ball_agent
-- `scripts/Table.gd` - Table. High-level table coordinator and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/Table.gd` - Table. High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics.; owner: mechanics_agent
 - `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
+- `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception, committed hide target selection, threat-scaled hiding movement, and fleeing-leg visual reporting.
 
 ## In Progress
 
 - `AGENTS.md` - AGENTS. Project documentation or checkpoint notes.; owner: cleanup_agent
-- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, target rules, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
+- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
 - `scripts/BallDropMeter.gd` - Ball Drop Meter. Vertical right-side HUD meter for progress toward the next score-earned ball drop.; status: In Progress; owner: ui_agent; notes: Vertical right-side meter for score progress toward the next earned ball drop.
 - `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
 - `scripts/CannonBallSystem.gd` - Cannon Ball System. Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Cannon Ball anomaly system; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and pocket-side score popup presentation.; owner: ui_agent
-- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns current anomaly spawn odds.; owner: systems_agent
+- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns regular anomaly plus Anchor priority spawn odds.; owner: systems_agent
 - `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
+- `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception, committed hide target selection, threat-scaled hiding movement, and fleeing-leg visual reporting.
 
 ## Needs Review
 
@@ -140,8 +156,21 @@ The scanner understands optional comments in source files:
 
 Changed scanned files:
 - `AGENTS.md` - AGENTS. Project documentation or checkpoint notes.; owner: cleanup_agent
+- `NOTES.md` - NOTES. Project documentation or checkpoint notes.; owner: lore_agent
+- `STACK.md` - STACK. Project documentation or checkpoint notes.; owner: lore_agent
+- `scenes/Main.tscn` - Main. Godot scene file used for authored node layout and scene wiring.; owner: ui_agent
+- `scenes/Table.tscn` - Table. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
+- `scripts/AimPreview.gd` - AimPreview. Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure perception snapshots, and AimPreview broad-phase counters.; owner: performance_agent
+- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.; owner: anomaly_ball_agent
+- `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.; owner: mechanics_agent
+- `scripts/DebugOverlay.gd` - DebugOverlay. Formats debug menu, performance overlay, toggles, and physics debug text.; owner: ui_agent
+- `scripts/PocketSystem.gd` - PocketSystem. Loads authored pocket geometry and detects pocket captures.; owner: systems_agent
+- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, and owns regular anomaly plus Anchor priority spawn odds.; owner: systems_agent
+- `scripts/Table.gd` - Table. High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, read-only AimPreview corridor perception, committed hide target selection, soft scuttle movement, and fleeing-leg visual reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception, committed hide target selection, threat-scaled hiding movement, and fleeing-leg visual reporting.
 
 Changed files outside scanner set:
+- `scripts/TreasureBallSystem.gd.uid` - Recently changed but outside the scanned file set.
 - `tools/build_project_brain.py` - Recently changed but outside the scanned file set.
 
 ## Unclassified
