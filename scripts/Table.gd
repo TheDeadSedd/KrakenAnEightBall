@@ -640,6 +640,17 @@ func _elapsed_ms_since(start_usec: int) -> float:
 
 #region Cue Input / Shot Release
 # Table owns shot state and velocity. CueController owns sprite visuals and cue hit testing.
+func cancel_active_cue_drag_for_pause() -> void:
+	if not is_instance_valid(cue_ball):
+		return
+
+	if is_dragging:
+		is_dragging = false
+		cue_controller.stop_recoil()
+	_clear_aim_preview_now()
+	queue_redraw()
+
+
 func _try_start_drag(mouse_position: Vector2) -> void:
 	if not _can_start_aiming():
 		return

@@ -5,12 +5,38 @@ class_name DebugOverlay
 # Table.gd still owns the gameplay counters/data that this panel displays.
 const DEBUG_MENU_TOGGLE_KEY := KEY_QUOTELEFT
 const PERFORMANCE_OVERLAY_TOGGLE_KEY := KEY_F3
-const PERFORMANCE_OVERLAY_DRAG_HEIGHT := 34.0
+const PANEL_CORE_PERFORMANCE := "core_performance"
+const PANEL_AIM_PREVIEW := "aim_preview"
+const PANEL_TREASURE := "treasure"
+const PANEL_ANCHOR := "anchor"
+const PANEL_BALL_DROPS_SCORE := "ball_drops_score"
+const PANEL_CANNON := "cannon"
+const PANEL_POWDER_KEG_WAYFINDER := "powder_keg_wayfinder"
+const PANEL_VISUAL_EFFECTS := "visual_effects"
+const PANEL_PHYSICS := "physics"
 
 @onready var physics_debug_panel: PanelContainer = $PhysicsDebugPanel
 @onready var physics_debug_label: Label = $PhysicsDebugPanel/Margin/PhysicsDebugLabel
 @onready var performance_overlay_panel: PanelContainer = $PerformanceOverlayPanel
 @onready var performance_overlay_label: Label = $PerformanceOverlayPanel/Margin/PerformanceOverlayLabel
+@onready var core_performance_panel: DebugPanel = $CorePerformancePanel
+@onready var core_performance_label: Label = $CorePerformancePanel/Margin/CorePerformanceLabel
+@onready var aim_preview_panel: DebugPanel = $AimPreviewPanel
+@onready var aim_preview_label: Label = $AimPreviewPanel/Margin/AimPreviewPanelLabel
+@onready var treasure_panel: DebugPanel = $TreasurePanel
+@onready var treasure_label: Label = $TreasurePanel/Margin/TreasurePanelLabel
+@onready var anchor_panel: DebugPanel = $AnchorPanel
+@onready var anchor_label: Label = $AnchorPanel/Margin/AnchorPanelLabel
+@onready var ball_drops_score_panel: DebugPanel = $BallDropsScorePanel
+@onready var ball_drops_score_label: Label = $BallDropsScorePanel/Margin/BallDropsScorePanelLabel
+@onready var cannon_panel: DebugPanel = $CannonPanel
+@onready var cannon_label: Label = $CannonPanel/Margin/CannonPanelLabel
+@onready var powder_keg_wayfinder_panel: DebugPanel = $PowderKegWayfinderPanel
+@onready var powder_keg_wayfinder_label: Label = $PowderKegWayfinderPanel/Margin/PowderKegWayfinderPanelLabel
+@onready var visual_effects_panel: DebugPanel = $VisualEffectsPanel
+@onready var visual_effects_label: Label = $VisualEffectsPanel/Margin/VisualEffectsPanelLabel
+@onready var physics_performance_panel: DebugPanel = $PhysicsPerformancePanel
+@onready var physics_performance_label: Label = $PhysicsPerformancePanel/Margin/PhysicsPerformancePanelLabel
 @onready var debug_menu_panel: PanelContainer = $DebugMenuPanel
 @onready var shot_path_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/ShotPathCheckBox
 @onready var physics_debug_check_box: CheckBox = $DebugMenuPanel/Margin/VBox/PhysicsDebugCheckBox
@@ -25,15 +51,15 @@ const PERFORMANCE_OVERLAY_DRAG_HEIGHT := 34.0
 @onready var debug_hotkey_label: Label = $DebugMenuPanel/Margin/VBox/DebugHotkeyLabel
 
 var table: BilliardsTable
-var is_dragging_performance_overlay := false
-var performance_overlay_drag_offset := Vector2.ZERO
 
 
 func setup(table_ref: BilliardsTable) -> void:
+	process_mode = Node.PROCESS_MODE_ALWAYS
 	table = table_ref
 	debug_menu_panel.visible = false
 	physics_debug_panel.visible = false
 	performance_overlay_panel.visible = false
+	_set_all_modular_debug_panels_visible(false)
 	shot_path_check_box.set_pressed_no_signal(table.is_shot_path_debug_enabled())
 	physics_debug_check_box.set_pressed_no_signal(false)
 	performance_overlay_check_box.set_pressed_no_signal(false)
@@ -69,11 +95,6 @@ func _connect_debug_controls() -> void:
 		powder_keg_suppress_trails_check_box.toggled.connect(_on_powder_keg_suppress_trails_toggled)
 
 
-func _input(event: InputEvent) -> void:
-	if _handle_performance_overlay_drag(event):
-		get_viewport().set_input_as_handled()
-
-
 func _unhandled_input(event: InputEvent) -> void:
 	if not (event is InputEventKey):
 		return
@@ -97,42 +118,157 @@ func _process(_delta: float) -> void:
 	if physics_debug_panel.visible:
 		physics_debug_label.text = _make_physics_debug_text()
 
-	if performance_overlay_panel.visible:
-		performance_overlay_label.text = _make_performance_debug_text()
+	var full_performance_visible := performance_overlay_panel.visible
+	var modular_performance_visible := _has_visible_modular_debug_panels()
+	if full_performance_visible or modular_performance_visible:
+		var snapshot: Dictionary = table.get_performance_debug_snapshot()
+		if full_performance_visible:
+			performance_overlay_label.text = _make_performance_debug_text_from_snapshot(snapshot)
+		if modular_performance_visible:
+			_refresh_visible_modular_debug_panels(snapshot)
 
 
-func _handle_performance_overlay_drag(event: InputEvent) -> bool:
-	if not performance_overlay_panel.visible:
-		is_dragging_performance_overlay = false
-		return false
+func set_modular_debug_panel_visible(panel_id: String, enabled: bool) -> void:
+	var panel: Control = _get_modular_debug_panel(panel_id)
+	if panel == null:
+		return
 
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
-		return _handle_performance_overlay_mouse_button(event)
-
-	if event is InputEventMouseMotion and is_dragging_performance_overlay:
-		performance_overlay_panel.position = event.position - performance_overlay_drag_offset
-		return true
-
-	return false
+	panel.visible = enabled
+	if enabled and table != null:
+		_refresh_modular_debug_panel(panel_id, table.get_performance_debug_snapshot())
 
 
-func _handle_performance_overlay_mouse_button(event: InputEventMouseButton) -> bool:
-	if event.pressed and _is_position_in_performance_overlay_header(event.position):
-		is_dragging_performance_overlay = true
-		performance_overlay_drag_offset = event.position - performance_overlay_panel.position
-		return true
+func get_modular_debug_panel_states() -> Dictionary:
+	return {
+		PANEL_CORE_PERFORMANCE: core_performance_panel.visible,
+		PANEL_AIM_PREVIEW: aim_preview_panel.visible,
+		PANEL_TREASURE: treasure_panel.visible,
+		PANEL_ANCHOR: anchor_panel.visible,
+		PANEL_BALL_DROPS_SCORE: ball_drops_score_panel.visible,
+		PANEL_CANNON: cannon_panel.visible,
+		PANEL_POWDER_KEG_WAYFINDER: powder_keg_wayfinder_panel.visible,
+		PANEL_VISUAL_EFFECTS: visual_effects_panel.visible,
+		PANEL_PHYSICS: physics_performance_panel.visible,
+	}
 
-	if not event.pressed and is_dragging_performance_overlay:
-		is_dragging_performance_overlay = false
-		return true
 
-	return false
+func _set_all_modular_debug_panels_visible(visible_value: bool) -> void:
+	core_performance_panel.visible = visible_value
+	aim_preview_panel.visible = visible_value
+	treasure_panel.visible = visible_value
+	anchor_panel.visible = visible_value
+	ball_drops_score_panel.visible = visible_value
+	cannon_panel.visible = visible_value
+	powder_keg_wayfinder_panel.visible = visible_value
+	visual_effects_panel.visible = visible_value
+	physics_performance_panel.visible = visible_value
 
 
-func _is_position_in_performance_overlay_header(position: Vector2) -> bool:
-	var overlay_rect := Rect2(performance_overlay_panel.position, performance_overlay_panel.size)
-	var header_rect := Rect2(overlay_rect.position, Vector2(overlay_rect.size.x, PERFORMANCE_OVERLAY_DRAG_HEIGHT))
-	return header_rect.has_point(position)
+func _has_visible_modular_debug_panels() -> bool:
+	return (
+		core_performance_panel.visible
+		or aim_preview_panel.visible
+		or treasure_panel.visible
+		or anchor_panel.visible
+		or ball_drops_score_panel.visible
+		or cannon_panel.visible
+		or powder_keg_wayfinder_panel.visible
+		or visual_effects_panel.visible
+		or physics_performance_panel.visible
+	)
+
+
+func _refresh_visible_modular_debug_panels(snapshot: Dictionary) -> void:
+	if core_performance_panel.visible:
+		_refresh_modular_debug_panel(PANEL_CORE_PERFORMANCE, snapshot)
+	if aim_preview_panel.visible:
+		_refresh_modular_debug_panel(PANEL_AIM_PREVIEW, snapshot)
+	if treasure_panel.visible:
+		_refresh_modular_debug_panel(PANEL_TREASURE, snapshot)
+	if anchor_panel.visible:
+		_refresh_modular_debug_panel(PANEL_ANCHOR, snapshot)
+	if ball_drops_score_panel.visible:
+		_refresh_modular_debug_panel(PANEL_BALL_DROPS_SCORE, snapshot)
+	if cannon_panel.visible:
+		_refresh_modular_debug_panel(PANEL_CANNON, snapshot)
+	if powder_keg_wayfinder_panel.visible:
+		_refresh_modular_debug_panel(PANEL_POWDER_KEG_WAYFINDER, snapshot)
+	if visual_effects_panel.visible:
+		_refresh_modular_debug_panel(PANEL_VISUAL_EFFECTS, snapshot)
+	if physics_performance_panel.visible:
+		_refresh_modular_debug_panel(PANEL_PHYSICS, snapshot)
+
+
+func _refresh_modular_debug_panel(panel_id: String, snapshot: Dictionary) -> void:
+	var label: Label = _get_modular_debug_label(panel_id)
+	if label == null:
+		return
+
+	match panel_id:
+		PANEL_CORE_PERFORMANCE:
+			label.text = _make_core_performance_panel_text(snapshot)
+		PANEL_AIM_PREVIEW:
+			label.text = "\n".join(_make_aim_preview_performance_lines(snapshot))
+		PANEL_TREASURE:
+			label.text = _make_titled_panel_text("TREASURE", _make_treasure_performance_lines(snapshot))
+		PANEL_ANCHOR:
+			label.text = _make_titled_panel_text("ANCHOR", _make_anchor_performance_lines(snapshot))
+		PANEL_BALL_DROPS_SCORE:
+			label.text = _make_ball_drops_score_panel_text(snapshot)
+		PANEL_CANNON:
+			label.text = _make_titled_panel_text("CANNON", _make_cannon_performance_lines(snapshot))
+		PANEL_POWDER_KEG_WAYFINDER:
+			label.text = _make_powder_keg_wayfinder_panel_text(snapshot)
+		PANEL_VISUAL_EFFECTS:
+			label.text = "\n".join(_make_visual_cost_performance_lines(snapshot))
+		PANEL_PHYSICS:
+			label.text = "\n".join(_make_physics_performance_lines(snapshot))
+
+
+func _get_modular_debug_panel(panel_id: String) -> Control:
+	match panel_id:
+		PANEL_CORE_PERFORMANCE:
+			return core_performance_panel
+		PANEL_AIM_PREVIEW:
+			return aim_preview_panel
+		PANEL_TREASURE:
+			return treasure_panel
+		PANEL_ANCHOR:
+			return anchor_panel
+		PANEL_BALL_DROPS_SCORE:
+			return ball_drops_score_panel
+		PANEL_CANNON:
+			return cannon_panel
+		PANEL_POWDER_KEG_WAYFINDER:
+			return powder_keg_wayfinder_panel
+		PANEL_VISUAL_EFFECTS:
+			return visual_effects_panel
+		PANEL_PHYSICS:
+			return physics_performance_panel
+	return null
+
+
+func _get_modular_debug_label(panel_id: String) -> Label:
+	match panel_id:
+		PANEL_CORE_PERFORMANCE:
+			return core_performance_label
+		PANEL_AIM_PREVIEW:
+			return aim_preview_label
+		PANEL_TREASURE:
+			return treasure_label
+		PANEL_ANCHOR:
+			return anchor_label
+		PANEL_BALL_DROPS_SCORE:
+			return ball_drops_score_label
+		PANEL_CANNON:
+			return cannon_label
+		PANEL_POWDER_KEG_WAYFINDER:
+			return powder_keg_wayfinder_label
+		PANEL_VISUAL_EFFECTS:
+			return visual_effects_label
+		PANEL_PHYSICS:
+			return physics_performance_label
+	return null
 
 
 func _toggle_debug_menu() -> void:
@@ -227,6 +363,10 @@ func _make_physics_debug_text() -> String:
 
 func _make_performance_debug_text() -> String:
 	var snapshot: Dictionary = table.get_performance_debug_snapshot()
+	return _make_performance_debug_text_from_snapshot(snapshot)
+
+
+func _make_performance_debug_text_from_snapshot(snapshot: Dictionary) -> String:
 	var lines: Array = []
 	lines.append_array(_make_performance_summary_lines(snapshot))
 	lines.append("")
@@ -241,6 +381,40 @@ func _make_performance_debug_text() -> String:
 	lines.append_array(_make_physics_performance_lines(snapshot))
 	lines.append("")
 	lines.append_array(_make_timing_performance_lines(snapshot))
+	return "\n".join(lines)
+
+
+func _make_core_performance_panel_text(snapshot: Dictionary) -> String:
+	var lines: Array = ["CORE PERFORMANCE"]
+	var summary_lines: Array = _make_performance_summary_lines(snapshot)
+	if not summary_lines.is_empty():
+		summary_lines.remove_at(0)
+	lines.append_array(summary_lines)
+	lines.append("")
+	lines.append_array(_make_timing_performance_lines(snapshot))
+	return "\n".join(lines)
+
+
+func _make_ball_drops_score_panel_text(snapshot: Dictionary) -> String:
+	var lines: Array = ["BALL DROPS / SCORE"]
+	var ball_drop_lines: Array = _make_ball_drop_performance_lines(snapshot)
+	if not ball_drop_lines.is_empty():
+		ball_drop_lines.remove_at(0)
+	lines.append_array(ball_drop_lines)
+	lines.append("Score popups: %s active labels" % snapshot["active_score_popup_labels"])
+	return "\n".join(lines)
+
+
+func _make_powder_keg_wayfinder_panel_text(snapshot: Dictionary) -> String:
+	var lines: Array = ["POWDER KEG / WAYFINDER"]
+	lines.append_array(_make_wayfinder_performance_lines(snapshot))
+	lines.append("Powder Keg bursts: %s active bursts" % snapshot["active_powder_keg_particle_bursts"])
+	return "\n".join(lines)
+
+
+func _make_titled_panel_text(title: String, section_lines: Array) -> String:
+	var lines: Array = [title]
+	lines.append_array(section_lines)
 	return "\n".join(lines)
 
 

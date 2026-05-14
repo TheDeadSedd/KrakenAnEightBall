@@ -192,7 +192,7 @@ func _spawn_explosion_particles(explosion_center: Vector2) -> void:
 	active_particle_bursts += 1
 	particles.emitting = true
 
-	var cleanup_timer: SceneTreeTimer = table.get_tree().create_timer(effective_particle_lifetime + 0.35)
+	var cleanup_timer: SceneTreeTimer = table.get_tree().create_timer(effective_particle_lifetime + 0.35, false)
 	cleanup_timer.timeout.connect(func() -> void:
 		active_particle_bursts = max(active_particle_bursts - 1, 0)
 		if is_instance_valid(particles):
