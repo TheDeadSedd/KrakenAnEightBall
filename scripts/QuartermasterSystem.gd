@@ -6,8 +6,8 @@ signal status_changed(text: String)
 signal placement_started(item_name: String)
 signal placement_finished
 
-# Owns shop inventory, prices, affordability, and purchase intent. Actual
-# table placement is delegated to BallPlacementSystem so it can be reused.
+# Owns shop inventory, prices, affordability, and purchase intent. Purchases
+# fill ReserveSystem slots; reserve deployment is handled outside this shop.
 const ITEM_PLAIN_OBJECT_BALL := "plain_object_ball"
 const ITEM_WAYFINDER_BALL := "wayfinder_ball"
 const ITEM_POWDER_KEG_BALL := "powder_keg_ball"
@@ -19,21 +19,21 @@ const SHOP_ITEMS := {
 	"plain_object_ball": {
 		"id": ITEM_PLAIN_OBJECT_BALL,
 		"name": "Loose Object Ball",
-		"description": "Buy one plain ball and choose a safe place for it.",
+		"description": "Adds another normal ball to the table.",
 		"price": 10,
 		"spawn_type": SPAWN_TYPE_PLAIN_OBJECT_BALL,
 	},
 	"wayfinder_ball": {
 		"id": ITEM_WAYFINDER_BALL,
 		"name": "Wayfinder Ball",
-		"description": "Buy one Wayfinder Ball and place it for a future guided shot.",
+		"description": "Helps guide shots toward pockets.",
 		"price": 35,
 		"spawn_type": SPAWN_TYPE_WAYFINDER_BALL,
 	},
 	"powder_keg_ball": {
 		"id": ITEM_POWDER_KEG_BALL,
 		"name": "Powder Keg",
-		"description": "Buy one Powder Keg and place it for a high-impact setup.",
+		"description": "Explodes when struck by cue ball or Cannon Ball.",
 		"price": 55,
 		"spawn_type": SPAWN_TYPE_POWDER_KEG_BALL,
 	},
@@ -51,11 +51,6 @@ var last_blocker_reason := ""
 
 func setup(table_ref) -> void:
 	table = table_ref
-	if table.ball_placement_system != null:
-		if not table.ball_placement_system.placement_confirmed.is_connected(_on_placement_confirmed):
-			table.ball_placement_system.placement_confirmed.connect(_on_placement_confirmed)
-		if not table.ball_placement_system.placement_canceled.is_connected(_on_placement_canceled):
-			table.ball_placement_system.placement_canceled.connect(_on_placement_canceled)
 	_emit_shop_state_changed()
 
 
@@ -70,28 +65,47 @@ func request_purchase(item_id: String) -> bool:
 		return false
 
 	var item: Dictionary = _get_item(item_id)
-	pending_item_id = item_id
+	var slot_index: int = table.reserve_system.get_first_empty_slot_index()
+	if slot_index == -1:
+		denied_purchase_attempts += 1
+		last_blocker_reason = "Reserve slots full"
+		status_changed.emit(last_blocker_reason)
+		_emit_shop_state_changed()
+		return false
+
+	var price := int(item["price"])
+	if not table.score_system.try_spend_doubloons(price):
+		denied_purchase_attempts += 1
+		last_blocker_reason = "Not enough Doubloons"
+		status_changed.emit(last_blocker_reason)
+		_emit_shop_state_changed()
+		return false
+
 	purchase_intents_started += 1
-	var radius: float = table.spawn_system.get_manual_placement_ball_radius()
-	table.ball_placement_system.start_placement(item_id, str(item["name"]), radius)
-	status_changed.emit("Choose a safe spot for %s." % str(item["name"]))
-	placement_started.emit(str(item["name"]))
+	if not table.reserve_system.store_item_in_slot(slot_index, _make_reserve_item_payload(item)):
+		last_blocker_reason = "Reserve slot unavailable"
+		status_changed.emit(last_blocker_reason)
+		_emit_shop_state_changed()
+		return false
+
+	confirmed_purchases += 1
+	last_blocker_reason = ""
+	status_changed.emit("Quartermaster stowed %s in reserve slot %s." % [str(item["name"]), slot_index + 1])
 	_emit_shop_state_changed()
 	return true
 
 
 func cancel_active_purchase() -> void:
-	if pending_item_id.is_empty():
-		return
-
-	table.ball_placement_system.cancel_placement()
+	return
 
 
 func get_shop_items_snapshot() -> Array:
 	var items: Array = []
+	var doubloons_available := _get_doubloons_available()
 	for item_id in SHOP_ITEM_IDS:
 		var item: Dictionary = _get_item(item_id).duplicate(true)
 		item["affordable"] = can_afford_item(item_id)
+		item["doubloons_available"] = doubloons_available
 		item["blocked_reason"] = _get_purchase_blocker(item_id)
 		item["available"] = str(item["blocked_reason"]).is_empty()
 		items.append(item)
@@ -122,63 +136,6 @@ func get_debug_snapshot() -> Dictionary:
 	}
 
 
-func _on_placement_confirmed(item_id: String, position: Vector2) -> void:
-	if item_id != pending_item_id:
-		last_blocker_reason = "Placement item mismatch"
-		_finish_purchase_intent()
-		status_changed.emit(last_blocker_reason)
-		return
-
-	var item: Dictionary = _get_item(item_id)
-	if item.is_empty():
-		last_blocker_reason = "Unknown Quartermaster item"
-		_finish_purchase_intent()
-		status_changed.emit(last_blocker_reason)
-		return
-
-	var radius: float = table.spawn_system.get_manual_placement_ball_radius()
-	if not table.spawn_system.is_manual_placement_safe(position, radius):
-		last_blocker_reason = "Placement no longer safe"
-		_finish_purchase_intent()
-		status_changed.emit(last_blocker_reason)
-		return
-
-	var price := int(item["price"])
-	if not table.score_system.try_spend_doubloons(price):
-		last_blocker_reason = "Not enough Doubloons"
-		_finish_purchase_intent()
-		status_changed.emit(last_blocker_reason)
-		return
-
-	_spawn_purchased_item(item, position)
-	confirmed_purchases += 1
-	_finish_purchase_intent()
-	status_changed.emit("Quartermaster placed %s." % str(item["name"]))
-
-
-func _on_placement_canceled(item_id: String) -> void:
-	if item_id == pending_item_id:
-		canceled_purchases += 1
-	_finish_purchase_intent()
-	status_changed.emit("Quartermaster order canceled.")
-
-
-func _spawn_purchased_item(item: Dictionary, position: Vector2) -> void:
-	match str(item["spawn_type"]):
-		SPAWN_TYPE_PLAIN_OBJECT_BALL:
-			table.spawn_system.spawn_manual_plain_object_ball(position)
-		SPAWN_TYPE_WAYFINDER_BALL:
-			table.spawn_system.spawn_manual_wayfinder_ball(position)
-		SPAWN_TYPE_POWDER_KEG_BALL:
-			table.spawn_system.spawn_manual_powder_keg_ball(position)
-
-
-func _finish_purchase_intent() -> void:
-	pending_item_id = ""
-	placement_finished.emit()
-	_emit_shop_state_changed()
-
-
 func _emit_shop_state_changed() -> void:
 	shop_state_changed.emit(get_shop_items_snapshot())
 
@@ -187,12 +144,12 @@ func _get_purchase_blocker(item_id: String) -> String:
 	var item: Dictionary = _get_item(item_id)
 	if item.is_empty():
 		return "Unknown Quartermaster item"
-	if table == null or table.score_system == null or table.spawn_system == null or table.ball_placement_system == null:
+	if table == null or table.score_system == null or table.reserve_system == null:
 		return "Quartermaster not ready"
 	if is_purchase_pending():
 		return "Placement already active"
-	if not table.can_start_manual_ball_placement():
-		return "Wait for the table to settle"
+	if table.reserve_system.is_full():
+		return "Reserve slots full"
 	if not can_afford_item(item_id):
 		return "Not enough Doubloons"
 	return ""
@@ -202,3 +159,20 @@ func _get_item(item_id: String) -> Dictionary:
 	if not SHOP_ITEMS.has(item_id):
 		return {}
 	return SHOP_ITEMS[item_id]
+
+
+func _get_doubloons_available() -> int:
+	if table == null or table.score_system == null:
+		return 0
+	return table.score_system.get_doubloons_total()
+
+
+func _make_reserve_item_payload(item: Dictionary) -> Dictionary:
+	return {
+		"item_id": str(item["id"]),
+		"item_name": str(item["name"]),
+		"description": str(item.get("description", "")),
+		"price": int(item.get("price", 0)),
+		"spawn_type": str(item["spawn_type"]),
+		"icon_key": str(item["id"]),
+	}

@@ -105,6 +105,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var spawn_system: SpawnSystem = $SpawnSystem
 @onready var ball_placement_system: BallPlacementSystem = $BallPlacementSystem
 @onready var quartermaster_system: QuartermasterSystem = $QuartermasterSystem
+@onready var reserve_system: ReserveSystem = $ReserveSystem
 @onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
 @onready var powder_keg_system: PowderKegSystem = $PowderKegSystem
 @onready var anchor_ball_system: AnchorBallSystem = $AnchorBallSystem
@@ -184,6 +185,7 @@ func _ready() -> void:
 	treasure_ball_system.setup(self)
 	table_impact_shake_system.setup(self)
 	quartermaster_system.setup(self)
+	reserve_system.setup(self)
 	_cache_table_geometry()
 	cue_controller.setup()
 	if Engine.is_editor_hint():
@@ -224,7 +226,7 @@ func is_ball_placement_active() -> bool:
 
 
 func cancel_active_ball_placement() -> void:
-	quartermaster_system.cancel_active_purchase()
+	ball_placement_system.cancel_placement()
 
 
 func _is_loading_status_text(status_text: String) -> bool:

@@ -17,6 +17,9 @@ const PANEL_VISUAL_EFFECTS := "visual_effects"
 const PANEL_PHYSICS := "physics"
 const NORMAL_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.62)
 const PLACEMENT_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.18)
+const SHOP_BUTTON_AVAILABLE_MODULATE := Color(1.0, 1.0, 1.0, 1.0)
+const SHOP_BUTTON_BLOCKED_MODULATE := Color(0.74, 0.72, 0.64, 0.82)
+const SHOP_BUTTON_UNAFFORDABLE_MODULATE := Color(0.58, 0.52, 0.46, 0.68)
 
 @onready var shade: ColorRect = $Shade
 @onready var menu_panel: PanelContainer = $Shade/MenuPanel
@@ -26,6 +29,7 @@ const PLACEMENT_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.18)
 @onready var quartermaster_section: VBoxContainer = $Shade/MenuPanel/Margin/VBox/QuartermasterSection
 @onready var debug_section: VBoxContainer = $Shade/MenuPanel/Margin/VBox/DebugSection
 @onready var quartermaster_status_label: Label = $Shade/MenuPanel/Margin/VBox/QuartermasterSection/QuartermasterStatusLabel
+@onready var quartermaster_doubloons_label: Label = $Shade/MenuPanel/Margin/VBox/QuartermasterSection/QuartermasterDoubloonsLabel
 @onready var plain_object_ball_button: Button = $Shade/MenuPanel/Margin/VBox/QuartermasterSection/PlainObjectBallButton
 @onready var wayfinder_ball_button: Button = $Shade/MenuPanel/Margin/VBox/QuartermasterSection/WayfinderBallButton
 @onready var powder_keg_ball_button: Button = $Shade/MenuPanel/Margin/VBox/QuartermasterSection/PowderKegBallButton
@@ -106,6 +110,7 @@ func set_quartermaster_items(items: Array) -> void:
 		quartermaster_status_label.text = "Quartermaster cargo unavailable"
 		return
 
+	quartermaster_doubloons_label.text = "Doubloons Available: %s" % _get_doubloons_available_from_items(items)
 	var any_available := false
 	var first_blocker := ""
 	for item_value in items:
@@ -136,17 +141,40 @@ func _reset_quartermaster_item_buttons() -> void:
 	plain_object_ball_button.text = "Loose Object Ball"
 	wayfinder_ball_button.text = "Wayfinder Ball"
 	powder_keg_ball_button.text = "Powder Keg"
-	plain_object_ball_button.disabled = true
-	wayfinder_ball_button.disabled = true
-	powder_keg_ball_button.disabled = true
+	quartermaster_doubloons_label.text = "Doubloons Available: --"
+	_reset_quartermaster_button_state(plain_object_ball_button)
+	_reset_quartermaster_button_state(wayfinder_ball_button)
+	_reset_quartermaster_button_state(powder_keg_ball_button)
 
 
 func _apply_quartermaster_button_state(button: Button, item: Dictionary) -> void:
 	var price := int(item.get("price", 0))
 	var item_name := str(item.get("name", "Quartermaster Item"))
-	button.text = "%s - %s Doubloons" % [item_name, price]
-	button.tooltip_text = str(item.get("description", ""))
-	button.disabled = not bool(item.get("available", false))
+	var description := str(item.get("description", ""))
+	var affordable := bool(item.get("affordable", false))
+	var available := bool(item.get("available", false))
+	button.text = "%s\nCost: %s Doubloons\n%s" % [item_name, price, description]
+	button.tooltip_text = "%s\nCost: %s Doubloons\n%s" % [item_name, price, description]
+	button.disabled = not available
+	if not affordable:
+		button.modulate = SHOP_BUTTON_UNAFFORDABLE_MODULATE
+	elif not available:
+		button.modulate = SHOP_BUTTON_BLOCKED_MODULATE
+	else:
+		button.modulate = SHOP_BUTTON_AVAILABLE_MODULATE
+
+
+func _reset_quartermaster_button_state(button: Button) -> void:
+	button.disabled = true
+	button.tooltip_text = ""
+	button.modulate = SHOP_BUTTON_BLOCKED_MODULATE
+
+
+func _get_doubloons_available_from_items(items: Array) -> int:
+	if items.is_empty():
+		return 0
+	var first_item: Dictionary = items[0]
+	return int(first_item.get("doubloons_available", 0))
 
 
 func set_quartermaster_status(text: String) -> void:

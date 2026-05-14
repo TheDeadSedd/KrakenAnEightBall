@@ -7,6 +7,8 @@
 [ext_resource type="Script" path="res://scripts/BallDropMeter.gd" id="5_ball_drop_meter"]
 [ext_resource type="Script" path="res://scripts/PauseMenu.gd" id="6_pause_menu"]
 [ext_resource type="Script" path="res://scripts/DebugPanel.gd" id="7_debug_panel"]
+[ext_resource type="Script" uid="uid://c5h88rg15m2pu" path="res://scripts/ReserveSlotsUI.gd" id="8_reserve_slots_ui"]
+[ext_resource type="Script" path="res://scripts/ReserveDeploymentPresenter.gd" id="9_reserve_deploy_presenter"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -282,6 +284,30 @@ offset_right = 1798.0
 offset_bottom = 806.0
 mouse_filter = 2
 script = ExtResource("5_ball_drop_meter")
+
+[node name="ReserveSlotsUI" type="Control" parent="CanvasLayer/HUD"]
+process_mode = 3
+z_index = 24
+layout_mode = 0
+offset_left = 876.0
+offset_top = 228.0
+offset_right = 1044.0
+offset_bottom = 288.0
+mouse_filter = 0
+script = ExtResource("8_reserve_slots_ui")
+
+[node name="ReserveDeploymentPresenter" type="Control" parent="CanvasLayer/HUD"]
+visible = false
+process_mode = 3
+z_index = 26
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("9_reserve_deploy_presenter")
 
 [node name="ResultLabel" type="Label" parent="CanvasLayer/HUD" unique_id=556767554]
 layout_mode = 0
@@ -910,25 +936,35 @@ horizontal_alignment = 1
 autowrap_mode = 3
 text = "Spend Doubloons to place cargo on the felt."
 
+[node name="QuartermasterDoubloonsLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+layout_mode = 2
+theme_override_colors/font_color = Color(1, 0.82, 0.34, 1)
+theme_override_colors/font_outline_color = Color(0.08, 0.04, 0.02, 0.9)
+theme_override_constants/outline_size = 2
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 18
+horizontal_alignment = 1
+text = "Doubloons Available: 0"
+
 [node name="PlainObjectBallButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
-custom_minimum_size = Vector2(0, 48)
+custom_minimum_size = Vector2(0, 86)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
-theme_override_font_sizes/font_size = 19
+theme_override_font_sizes/font_size = 16
 text = "Loose Object Ball"
 
 [node name="WayfinderBallButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
-custom_minimum_size = Vector2(0, 48)
+custom_minimum_size = Vector2(0, 86)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
-theme_override_font_sizes/font_size = 19
+theme_override_font_sizes/font_size = 16
 text = "Wayfinder Ball"
 
 [node name="PowderKegBallButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
-custom_minimum_size = Vector2(0, 48)
+custom_minimum_size = Vector2(0, 86)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
-theme_override_font_sizes/font_size = 19
+theme_override_font_sizes/font_size = 16
 text = "Powder Keg"
 
 [node name="DebugSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]

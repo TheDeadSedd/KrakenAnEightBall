@@ -74,7 +74,7 @@ func get_debug_snapshot() -> Dictionary:
 	}
 
 
-func _input(event: InputEvent) -> void:
+func _unhandled_input(event: InputEvent) -> void:
 	if not is_placement_active():
 		return
 

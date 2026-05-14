@@ -10,6 +10,11 @@ const PAUSE_TOGGLE_KEY := KEY_ESCAPE
 @onready var result_label: Label = $CanvasLayer/HUD/ResultLabel
 @onready var doubloons_label: Label = $CanvasLayer/HUD/DoubloonsLabel
 @onready var ball_drop_meter: BallDropMeter = $CanvasLayer/HUD/BallDropMeter
+@onready var reserve_slots_ui: ReserveSlotsUI = $CanvasLayer/HUD/ReserveSlotsUI
+@onready var reserve_deployment_presenter: ReserveDeploymentPresenter = $CanvasLayer/HUD/ReserveDeploymentPresenter
+
+var reserve_deployment_active := false
+var reserve_deployment_previous_pause_state := false
 
 
 func _ready() -> void:
@@ -22,6 +27,11 @@ func _ready() -> void:
 	table.quartermaster_system.status_changed.connect(_on_quartermaster_status_changed)
 	table.quartermaster_system.placement_started.connect(_on_quartermaster_placement_started)
 	table.quartermaster_system.placement_finished.connect(_on_quartermaster_placement_finished)
+	table.reserve_system.reserve_slots_changed.connect(_on_reserve_slots_changed)
+	table.reserve_system.deployment_finished.connect(_on_reserve_deployment_finished)
+	table.reserve_system.deployment_blocked.connect(_on_reserve_deployment_blocked)
+	if not reserve_slots_ui.reserve_slot_clicked.is_connected(_on_reserve_slot_clicked):
+		reserve_slots_ui.reserve_slot_clicked.connect(_on_reserve_slot_clicked)
 	if not pause_menu.resume_requested.is_connected(_on_pause_resume_requested):
 		pause_menu.resume_requested.connect(_on_pause_resume_requested)
 	if not pause_menu.debug_panel_toggled.is_connected(_on_pause_debug_panel_toggled):
@@ -33,6 +43,8 @@ func _ready() -> void:
 	result_label.text = ""
 	_on_doubloons_changed(table.score_system.get_doubloons_total())
 	ball_drop_meter.setup(table.ball_drop_system)
+	reserve_slots_ui.setup(table.reserve_system, table)
+	reserve_deployment_presenter.setup(table.reserve_system, reserve_slots_ui)
 	table.emit_ready_status_if_needed(status_label.text)
 	debug_overlay.setup(table)
 	pause_menu.set_debug_panel_states(debug_overlay.get_modular_debug_panel_states())
@@ -44,6 +56,8 @@ func _configure_pause_process_modes() -> void:
 	table.process_mode = Node.PROCESS_MODE_PAUSABLE
 	debug_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
 	pause_menu.process_mode = Node.PROCESS_MODE_ALWAYS
+	reserve_slots_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	reserve_deployment_presenter.process_mode = Node.PROCESS_MODE_ALWAYS
 	ball_drop_meter.process_mode = Node.PROCESS_MODE_PAUSABLE
 
 
@@ -105,6 +119,38 @@ func _on_pause_quartermaster_item_requested(item_id: String) -> void:
 
 func _on_pause_quartermaster_cancel_placement_requested() -> void:
 	table.cancel_active_ball_placement()
+
+
+func _on_reserve_slot_clicked(slot_index: int) -> void:
+	if reserve_deployment_active:
+		return
+
+	reserve_deployment_previous_pause_state = get_tree().paused
+	if not reserve_deployment_previous_pause_state:
+		table.cancel_active_cue_drag_for_pause()
+		get_tree().paused = true
+
+	if table.reserve_system.request_deploy_slot(slot_index):
+		reserve_deployment_active = true
+	else:
+		get_tree().paused = reserve_deployment_previous_pause_state
+
+
+func _on_reserve_deployment_finished(_confirmed: bool, _slot_index: int) -> void:
+	if not reserve_deployment_active:
+		return
+
+	reserve_deployment_active = false
+	get_tree().paused = reserve_deployment_previous_pause_state
+
+
+func _on_reserve_deployment_blocked(reason: String) -> void:
+	status_label.text = reason
+
+
+func _on_reserve_slots_changed(_slots: Array) -> void:
+	if pause_menu != null and table != null:
+		pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 
 
 func _on_quartermaster_shop_state_changed(items: Array) -> void:
