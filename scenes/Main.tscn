@@ -917,6 +917,20 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 19
 text = "Loose Object Ball"
 
+[node name="WayfinderBallButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 19
+text = "Wayfinder Ball"
+
+[node name="PowderKegBallButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 19
+text = "Powder Keg"
+
 [node name="DebugSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
 visible = false
 layout_mode = 2

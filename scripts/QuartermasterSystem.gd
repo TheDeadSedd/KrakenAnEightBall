@@ -9,8 +9,12 @@ signal placement_finished
 # Owns shop inventory, prices, affordability, and purchase intent. Actual
 # table placement is delegated to BallPlacementSystem so it can be reused.
 const ITEM_PLAIN_OBJECT_BALL := "plain_object_ball"
+const ITEM_WAYFINDER_BALL := "wayfinder_ball"
+const ITEM_POWDER_KEG_BALL := "powder_keg_ball"
 const SPAWN_TYPE_PLAIN_OBJECT_BALL := "plain_object_ball"
-const SHOP_ITEM_IDS := ["plain_object_ball"]
+const SPAWN_TYPE_WAYFINDER_BALL := "wayfinder_ball"
+const SPAWN_TYPE_POWDER_KEG_BALL := "powder_keg_ball"
+const SHOP_ITEM_IDS := ["plain_object_ball", "wayfinder_ball", "powder_keg_ball"]
 const SHOP_ITEMS := {
 	"plain_object_ball": {
 		"id": ITEM_PLAIN_OBJECT_BALL,
@@ -18,6 +22,20 @@ const SHOP_ITEMS := {
 		"description": "Buy one plain ball and choose a safe place for it.",
 		"price": 10,
 		"spawn_type": SPAWN_TYPE_PLAIN_OBJECT_BALL,
+	},
+	"wayfinder_ball": {
+		"id": ITEM_WAYFINDER_BALL,
+		"name": "Wayfinder Ball",
+		"description": "Buy one Wayfinder Ball and place it for a future guided shot.",
+		"price": 35,
+		"spawn_type": SPAWN_TYPE_WAYFINDER_BALL,
+	},
+	"powder_keg_ball": {
+		"id": ITEM_POWDER_KEG_BALL,
+		"name": "Powder Keg",
+		"description": "Buy one Powder Keg and place it for a high-impact setup.",
+		"price": 55,
+		"spawn_type": SPAWN_TYPE_POWDER_KEG_BALL,
 	},
 }
 
@@ -149,6 +167,10 @@ func _spawn_purchased_item(item: Dictionary, position: Vector2) -> void:
 	match str(item["spawn_type"]):
 		SPAWN_TYPE_PLAIN_OBJECT_BALL:
 			table.spawn_system.spawn_manual_plain_object_ball(position)
+		SPAWN_TYPE_WAYFINDER_BALL:
+			table.spawn_system.spawn_manual_wayfinder_ball(position)
+		SPAWN_TYPE_POWDER_KEG_BALL:
+			table.spawn_system.spawn_manual_powder_keg_ball(position)
 
 
 func _finish_purchase_intent() -> void:

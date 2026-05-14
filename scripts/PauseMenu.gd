@@ -27,6 +27,8 @@ const PLACEMENT_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.18)
 @onready var debug_section: VBoxContainer = $Shade/MenuPanel/Margin/VBox/DebugSection
 @onready var quartermaster_status_label: Label = $Shade/MenuPanel/Margin/VBox/QuartermasterSection/QuartermasterStatusLabel
 @onready var plain_object_ball_button: Button = $Shade/MenuPanel/Margin/VBox/QuartermasterSection/PlainObjectBallButton
+@onready var wayfinder_ball_button: Button = $Shade/MenuPanel/Margin/VBox/QuartermasterSection/WayfinderBallButton
+@onready var powder_keg_ball_button: Button = $Shade/MenuPanel/Margin/VBox/QuartermasterSection/PowderKegBallButton
 @onready var placement_hint_panel: PanelContainer = $Shade/PlacementHintPanel
 @onready var placement_hint_label: Label = $Shade/PlacementHintPanel/Margin/VBox/PlacementHintLabel
 @onready var cancel_placement_button: Button = $Shade/PlacementHintPanel/Margin/VBox/CancelPlacementButton
@@ -41,6 +43,8 @@ const PLACEMENT_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.18)
 @onready var physics_check_box: CheckBox = $Shade/MenuPanel/Margin/VBox/DebugSection/PhysicsPerformancePanelCheckBox
 
 var plain_object_ball_item_id := ""
+var wayfinder_ball_item_id := ""
+var powder_keg_ball_item_id := ""
 
 
 func _ready() -> void:
@@ -56,6 +60,10 @@ func _ready() -> void:
 		debug_tab_button.pressed.connect(_show_debug_tab)
 	if not plain_object_ball_button.pressed.is_connected(_on_plain_object_ball_pressed):
 		plain_object_ball_button.pressed.connect(_on_plain_object_ball_pressed)
+	if not wayfinder_ball_button.pressed.is_connected(_on_wayfinder_ball_pressed):
+		wayfinder_ball_button.pressed.connect(_on_wayfinder_ball_pressed)
+	if not powder_keg_ball_button.pressed.is_connected(_on_powder_keg_ball_pressed):
+		powder_keg_ball_button.pressed.connect(_on_powder_keg_ball_pressed)
 	if not cancel_placement_button.pressed.is_connected(_on_cancel_placement_pressed):
 		cancel_placement_button.pressed.connect(_on_cancel_placement_pressed)
 	_connect_debug_panel_toggles()
@@ -93,23 +101,52 @@ func set_pause_visible(should_show: bool) -> void:
 
 
 func set_quartermaster_items(items: Array) -> void:
+	_reset_quartermaster_item_buttons()
 	if items.is_empty():
-		plain_object_ball_item_id = ""
-		plain_object_ball_button.text = "Quartermaster cargo unavailable"
-		plain_object_ball_button.disabled = true
+		quartermaster_status_label.text = "Quartermaster cargo unavailable"
 		return
 
-	var item: Dictionary = items[0]
-	plain_object_ball_item_id = str(item.get("id", ""))
+	var any_available := false
+	var first_blocker := ""
+	for item_value in items:
+		var item: Dictionary = item_value
+		var item_id := str(item.get("id", ""))
+		var item_available := bool(item.get("available", false))
+		any_available = any_available or item_available
+		if first_blocker.is_empty() and not item_available:
+			first_blocker = str(item.get("blocked_reason", "Unavailable"))
+		match item_id:
+			"plain_object_ball":
+				plain_object_ball_item_id = item_id
+				_apply_quartermaster_button_state(plain_object_ball_button, item)
+			"wayfinder_ball":
+				wayfinder_ball_item_id = item_id
+				_apply_quartermaster_button_state(wayfinder_ball_button, item)
+			"powder_keg_ball":
+				powder_keg_ball_item_id = item_id
+				_apply_quartermaster_button_state(powder_keg_ball_button, item)
+
+	quartermaster_status_label.text = "Quartermaster cargo ready." if any_available else first_blocker
+
+
+func _reset_quartermaster_item_buttons() -> void:
+	plain_object_ball_item_id = ""
+	wayfinder_ball_item_id = ""
+	powder_keg_ball_item_id = ""
+	plain_object_ball_button.text = "Loose Object Ball"
+	wayfinder_ball_button.text = "Wayfinder Ball"
+	powder_keg_ball_button.text = "Powder Keg"
+	plain_object_ball_button.disabled = true
+	wayfinder_ball_button.disabled = true
+	powder_keg_ball_button.disabled = true
+
+
+func _apply_quartermaster_button_state(button: Button, item: Dictionary) -> void:
 	var price := int(item.get("price", 0))
-	var item_name := str(item.get("name", "Loose Object Ball"))
-	plain_object_ball_button.text = "%s - %s Doubloons" % [item_name, price]
-	plain_object_ball_button.tooltip_text = str(item.get("description", ""))
-	plain_object_ball_button.disabled = not bool(item.get("available", false))
-	if plain_object_ball_button.disabled:
-		quartermaster_status_label.text = str(item.get("blocked_reason", "Unavailable"))
-	else:
-		quartermaster_status_label.text = "Quartermaster cargo ready."
+	var item_name := str(item.get("name", "Quartermaster Item"))
+	button.text = "%s - %s Doubloons" % [item_name, price]
+	button.tooltip_text = str(item.get("description", ""))
+	button.disabled = not bool(item.get("available", false))
 
 
 func set_quartermaster_status(text: String) -> void:
@@ -165,6 +202,18 @@ func _on_plain_object_ball_pressed() -> void:
 	if plain_object_ball_item_id.is_empty():
 		return
 	quartermaster_item_requested.emit(plain_object_ball_item_id)
+
+
+func _on_wayfinder_ball_pressed() -> void:
+	if wayfinder_ball_item_id.is_empty():
+		return
+	quartermaster_item_requested.emit(wayfinder_ball_item_id)
+
+
+func _on_powder_keg_ball_pressed() -> void:
+	if powder_keg_ball_item_id.is_empty():
+		return
+	quartermaster_item_requested.emit(powder_keg_ball_item_id)
 
 
 func _on_cancel_placement_pressed() -> void:
