@@ -5,7 +5,7 @@ class_name MainMenuPresentationOverlay
 # index:category UI / Presentation
 # index:status In Progress
 # index:owner ui_agent
-# index:notes Draw-only subtle title screen atmosphere over the static main menu artwork.
+# index:notes Draw-only title screen atmosphere that can be split across layered main menu artwork.
 
 const MOON_POSITION_RATIO := Vector2(0.420, 0.176)
 const OCEAN_START_RATIO := 0.56

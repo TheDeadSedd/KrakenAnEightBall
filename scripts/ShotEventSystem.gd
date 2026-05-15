@@ -2,7 +2,7 @@
 extends Node
 class_name ShotEventSystem
 
-# Owns per-shot ball event history for the future Doubloons system.
+# Owns passive per-shot ball event history consumed by Doubloons scoring.
 # This is passive tracking only; it should not change gameplay outcomes.
 const DEBUG_SHOT_EVENTS := false
 const EVENT_BANK := "BANK"

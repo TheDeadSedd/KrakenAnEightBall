@@ -30,7 +30,7 @@ func _ready() -> void:
 	get_tree().paused = false
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	mouse_filter = Control.MOUSE_FILTER_STOP
-	_build_background()
+	_build_scene_layers()
 	_build_interface()
 	_update_menu_layout()
 	start_button.grab_focus()
@@ -41,7 +41,7 @@ func _notification(what: int) -> void:
 		_update_menu_layout()
 
 
-func _build_background() -> void:
+func _build_scene_layers() -> void:
 	background_layer = _make_fullscreen_texture_layer("BackgroundLayer", BACKGROUND_TEXTURE)
 	add_child(background_layer)
 
@@ -211,8 +211,8 @@ func _make_button_style(background_color: Color, border_color: Color) -> StyleBo
 	style.corner_radius_bottom_right = 10
 	style.set_content_margin(SIDE_LEFT, 18.0)
 	style.set_content_margin(SIDE_RIGHT, 18.0)
-	style.set_content_margin(SIDE_TOP, 8.0)
-	style.set_content_margin(SIDE_BOTTOM, 8.0)
+	style.set_content_margin(SIDE_TOP, 15.0)
+	style.set_content_margin(SIDE_BOTTOM, 1.0)
 	return style
 
 
