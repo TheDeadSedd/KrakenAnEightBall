@@ -49,19 +49,31 @@ KNOWN_CATEGORY_HINTS = {
     "scenes/Ball.tscn": ["Systems"],
     "scenes/CueBall.tscn": ["Mechanics", "Systems", "UI"],
     "scenes/Main.tscn": ["Systems", "UI"],
+    "scenes/MainMenu.tscn": ["Systems", "UI", "In Progress"],
     "scenes/Table.tscn": ["Physics", "Systems"],
     "scripts/AimPreview.gd": ["Physics", "UI", "Performance Concerns"],
     "scripts/AnchorBallSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns", "In Progress"],
+    "scripts/BallAudioSystem.gd": ["Systems", "Performance Concerns", "In Progress"],
     "scripts/BallDropMeter.gd": ["UI", "Systems", "In Progress"],
     "scripts/BallDropSystem.gd": ["Mechanics", "Systems", "UI", "Performance Concerns", "In Progress"],
+    "scripts/BallPlacementSystem.gd": ["Systems", "UI", "Performance Concerns", "In Progress"],
     "scripts/Ball.gd": ["Mechanics", "Physics", "Performance Concerns"],
     "scripts/BoundarySystem.gd": ["Physics", "Systems", "Performance Concerns"],
     "scripts/CannonBallSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns", "In Progress"],
     "scripts/CueController.gd": ["Mechanics", "UI"],
+    "scripts/DebugPanel.gd": ["UI", "Debug Tools", "Performance Concerns", "In Progress"],
     "scripts/DebugOverlay.gd": ["UI", "Debug Tools"],
     "scripts/Main.gd": ["Systems", "UI"],
+    "scripts/MainMenu.gd": ["Systems", "UI", "In Progress"],
+    "scripts/MainMenuPresentationOverlay.gd": ["UI", "Performance Concerns", "In Progress"],
+    "scripts/PauseMenu.gd": ["UI", "Systems", "Debug Tools", "In Progress"],
     "scripts/PocketSystem.gd": ["Physics", "Systems", "Performance Concerns"],
     "scripts/PowderKegSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns"],
+    "scripts/QuartermasterOfferRefreshEffect.gd": ["UI", "Performance Concerns", "In Progress"],
+    "scripts/QuartermasterSystem.gd": ["Systems", "UI", "In Progress"],
+    "scripts/ReserveDeploymentPresenter.gd": ["UI", "Systems", "Performance Concerns", "In Progress"],
+    "scripts/ReserveSlotsUI.gd": ["UI", "Systems", "In Progress"],
+    "scripts/ReserveSystem.gd": ["Systems", "UI", "In Progress"],
     "scripts/ScoreSystem.gd": ["Mechanics", "Systems", "UI", "In Progress"],
     "scripts/ShotEventSystem.gd": ["Mechanics", "Systems"],
     "scripts/SpawnSystem.gd": ["Mechanics", "Systems", "In Progress"],
@@ -76,33 +88,37 @@ PLANNED_SYSTEMS = {}
 AGENT_DEFINITIONS = {
     "mechanics_agent": {
         "display": "Mechanics Agent",
-        "responsibility": "Tracks core play loops, shot lifecycle, scoring hooks, ball identity, and moment-to-moment billiards feel.",
-        "watch_keywords": ["table", "ball", "cue", "shot", "score", "spawn", "event"],
+        "responsibility": "Tracks core play loops, shot lifecycle, scoring hooks, shot-event history, ball identity, and moment-to-moment billiards feel.",
+        "watch_keywords": ["table", "ball", "cue", "shot", "score", "spawn", "event", "placement"],
         "notes": [
             "Current loop: better play creates more Doubloons, score-tied drops, more balls, more interactions, and an escalating table state.",
             "Early cue reclaim is shot-lifecycle coordination in Table.gd and should stay lightweight.",
             "Cue/eight-ball sinks are penalties now, not run-ending conditions.",
+            "ShotEventSystem.gd now tracks foundational, skilled, heroic, and legendary events through causal shot history.",
             "Preserve cue feel, shot feel, pocket feel, and scoring values during cleanup.",
             "Score-tied ball drops and cue/eight-ball sink penalties now flow through BallDropSystem.gd boundaries.",
         ],
         "questions": [
-            "How many extra balls should different score-event tiers award?",
+            "Which new shot-event thresholds need tuning after longer playtests?",
             "When should a crowded table stop escalating and start resolving?",
         ],
     },
     "systems_agent": {
         "display": "Systems Agent",
         "responsibility": "Tracks module boundaries, ownership rules, scene wiring, and coordinator responsibilities.",
-        "watch_keywords": ["system", "table", "spawn", "pocket", "boundary", "main", "agent"],
+        "watch_keywords": ["system", "table", "spawn", "pocket", "boundary", "main", "agent", "quartermaster", "reserve", "placement", "menu", "audio"],
         "notes": [
             "Table.gd should coordinate systems without absorbing new feature logic.",
             "Scene-authored geometry remains the source of truth.",
+            "MainMenu.gd owns title-screen presentation and scene transition without becoming a gameplay app shell.",
+            "QuartermasterSystem.gd owns rotating offers; ReserveSystem.gd owns slot data; BallPlacementSystem.gd owns item-agnostic placement.",
+            "BallAudioSystem.gd owns pooled event-driven collision SFX instead of burying audio in physics.",
             "TableImpactShakeSystem.gd owns presentation-only fake-3D table shake so gameplay geometry and HUD stay stable.",
             "Coalesce repeated input/event work in the owning coordinator instead of letting systems rebuild many times per frame.",
             "Prefer event/state-driven updates over continuous rescans when systems can track meaningful changes safely.",
         ],
         "questions": [
-            "What reward decisions should BallDropSystem.gd own before tuning starts?",
+            "Which future systems should reuse BallPlacementSystem.gd before adding new placement code?",
             "Which debug surfaces should graduate into permanent quality settings?",
         ],
     },
@@ -124,9 +140,13 @@ AGENT_DEFINITIONS = {
     },
     "ui_agent": {
         "display": "UI Agent",
-        "responsibility": "Tracks HUD, debug panels, score popups, callouts, cue presentation, and player-facing text.",
-        "watch_keywords": ["debug", "score", "ui", "main", "cue", "popup", "label", "scene", "shake"],
+        "responsibility": "Tracks HUD, title screen, pause menu, modular debug panels, score popups, callouts, cue presentation, shop/reserve UI, and player-facing text.",
+        "watch_keywords": ["debug", "score", "ui", "main", "menu", "pause", "quartermaster", "reserve", "cue", "popup", "label", "scene", "shake"],
         "notes": [
+            "MainMenu.tscn uses layered artwork with lightweight moon glow, star, shimmer, and fog overlays.",
+            "PauseMenu.gd owns menu tabs, Quartermaster UI, and modular debug-panel toggles while gameplay is paused.",
+            "DebugPanel.gd owns draggable pause-safe panel shells; DebugOverlay.gd formats visible panel content and the full F3 overlay.",
+            "ReserveSlotsUI.gd owns icon-only table-frame slots; ReserveDeploymentPresenter.gd owns cursor icon/tether presentation.",
             "Score popups are pocket-side arcade celebrations, not generic UI spam.",
             "Debug labels should stay clearly marked and not leak temporary test wording into player-facing strings.",
             "BallDropSystem.gd owns rotating score-earned drop-message selection; SpawnSystem/Table carry those messages to callouts.",
@@ -134,19 +154,23 @@ AGENT_DEFINITIONS = {
             "TableImpactShakeSystem.gd owns fake-3D table impact shake and draw-only ball shimmy presentation.",
         ],
         "questions": [
-            "Should ball drop callouts get themed variants now that the BallDropSystem spine exists?",
+            "Which debug panels should become default-on for regular playtesting?",
             "Which popup effects should degrade first on low-end machines?",
         ],
     },
     "performance_agent": {
         "display": "Performance Agent",
         "responsibility": "Tracks visual cost, broad-phase health, trail redraws, particle load, and stress-test readiness.",
-        "watch_keywords": ["performance", "debug", "trail", "particle", "anchor", "powder", "treasure", "boundary", "pocket", "aim", "shake"],
+        "watch_keywords": ["performance", "debug", "trail", "particle", "anchor", "powder", "treasure", "boundary", "pocket", "aim", "shake", "audio", "quartermaster", "reserve", "menu"],
         "notes": [
             "Do not solve chaos by preventing chaos; degrade visuals first.",
             "High ball counts and large earned chain reactions are intended.",
             "Coalesce repeated work before reducing gameplay ambition; avoid unnecessary redraws and reuse/pool temporary visuals where practical.",
             "Optimization should preserve readability as well as performance.",
+            "Hidden debug panels/overlays should not keep formatting strings or requesting broad snapshots every frame.",
+            "BallAudioSystem.gd uses pooled players, thresholds, and cooldowns so collision SFX scales with chaos.",
+            "Quartermaster stock refresh is event-driven; Reserve and placement presentation should avoid continuous scans.",
+            "Main menu atmosphere is draw-only/lightweight and should stay presentation-only.",
             "BallDropSystem.gd exists as the score-tied drop spine and should be watched for high-count visual scaling pressure.",
             "AimPreview.gd uses broad-phase filtering, rebuild coalescing, and debug counters to keep swept prediction affordable without lying about grazes.",
         ],
@@ -158,9 +182,11 @@ AGENT_DEFINITIONS = {
     "lore_agent": {
         "display": "Lore/Theme Agent",
         "responsibility": "Tracks pirate/kraken tone, anomaly fantasy, callout language, and presentation consistency.",
-        "watch_keywords": ["agents", "notes", "stack", "score", "spawn", "main"],
+        "watch_keywords": ["agents", "notes", "stack", "score", "spawn", "main", "menu", "quartermaster", "reserve"],
         "notes": [
             "Tone is pirate arcade chaos with readable eldritch flair and a little mischievous weirdness.",
+            "The title screen leans pirate arcade adventure and dangerous ocean night, not oppressive cosmic horror.",
+            "The Quartermaster/Reserve loop should feel like tactical pirate preparation rather than a debug catalog.",
             "Doubloons belong to this game; Insight is reserved for the larger future Cuethulhu direction.",
         ],
         "questions": [
@@ -171,10 +197,11 @@ AGENT_DEFINITIONS = {
     "cleanup_agent": {
         "display": "Cleanup Agent",
         "responsibility": "Tracks stale comments, unclear names, ownership drift, temporary debug leftovers, and documentation freshness.",
-        "watch_keywords": ["agent", "debug", "system", "table", "spawn", "score", "shot"],
+        "watch_keywords": ["agent", "debug", "system", "table", "spawn", "score", "shot", "quartermaster", "reserve", "menu", "audio"],
         "notes": [
             "Cleanup should preserve gameplay behavior and avoid opportunistic physics retuning.",
-            "AGENTS.md and project_brain should be refreshed after major playable milestones.",
+            "AGENTS.md, NOTES.md, STACK.md, and project_brain should be refreshed after major playable milestones.",
+            "Generated docs should reflect Main Menu, BallAudioSystem, Quartermaster, Reserve, modular debug panels, and expanded shot events.",
         ],
         "questions": [
             "Which debug toggles should remain long-term?",
@@ -320,6 +347,10 @@ def guess_categories(rel_path: str) -> list[str]:
         categories.extend(["Anomaly Balls", "Performance Concerns"])
     if "debug" in lowered:
         categories.extend(["UI", "Debug Tools"])
+    if any(token in lowered for token in ["quartermaster", "reserve", "placement", "pause", "menu"]):
+        categories.extend(["Systems", "UI", "In Progress"])
+    if "audio" in lowered:
+        categories.extend(["Systems", "Performance Concerns"])
     if any(token in lowered for token in ["checkpoint", "notes", "stack"]):
         categories.append("Needs Review")
 
@@ -335,6 +366,8 @@ def guess_owner(rel_path: str) -> str:
         "TreasureBallSystem.gd": "anomaly_ball_agent",
         "WayfinderSystem.gd": "anomaly_ball_agent",
         "Ball.gd": "mechanics_agent",
+        "BallAudioSystem.gd": "systems_agent",
+        "BallPlacementSystem.gd": "systems_agent",
         "CueController.gd": "mechanics_agent",
         "ShotEventSystem.gd": "mechanics_agent",
         "Table.gd": "mechanics_agent",
@@ -343,9 +376,18 @@ def guess_owner(rel_path: str) -> str:
         "TableImpactShakeSystem.gd": "ui_agent",
         "PocketSystem.gd": "systems_agent",
         "SpawnSystem.gd": "systems_agent",
+        "QuartermasterSystem.gd": "systems_agent",
+        "ReserveSystem.gd": "systems_agent",
         "Main.gd": "systems_agent",
+        "MainMenu.gd": "ui_agent",
+        "MainMenuPresentationOverlay.gd": "ui_agent",
+        "PauseMenu.gd": "ui_agent",
         "DebugOverlay.gd": "ui_agent",
+        "DebugPanel.gd": "ui_agent",
         "BallDropMeter.gd": "ui_agent",
+        "QuartermasterOfferRefreshEffect.gd": "ui_agent",
+        "ReserveDeploymentPresenter.gd": "ui_agent",
+        "ReserveSlotsUI.gd": "ui_agent",
         "ScoreSystem.gd": "ui_agent",
         "BallDropSystem.gd": "systems_agent",
         "AGENTS.md": "cleanup_agent",
@@ -374,6 +416,18 @@ def guess_summary(rel_path: str) -> str:
         return "Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags."
     if name == "SpawnSystem.gd":
         return "Creates balls, queues reward drops, performs safe spawn searches, and owns regular anomaly plus Anchor priority spawn odds."
+    if name == "BallPlacementSystem.gd":
+        return "Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects."
+    if name == "QuartermasterSystem.gd":
+        return "Owns Quartermaster inventory, prices, affordability, active rotating offers, event-driven offer refresh, and purchase-to-Reserve state."
+    if name == "QuartermasterOfferRefreshEffect.gd":
+        return "Presentation-only fresh-stock glow/shimmer effect for newly refreshed Quartermaster offers."
+    if name == "ReserveSystem.gd":
+        return "Owns three Reserve slot contents, selected/deploying state, deployment confirm/cancel bookkeeping, snapshots, and simple debug counters."
+    if name == "ReserveSlotsUI.gd":
+        return "Icon-only upper table-frame Reserve slot UI with hover glow, click consumption, and deployment request wiring."
+    if name == "ReserveDeploymentPresenter.gd":
+        return "Draw-only cursor icon and dotted tether presentation while deploying a reserved item."
     if name == "BallDropSystem.gd":
         return "Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties."
     if name == "BallDropMeter.gd":
@@ -383,7 +437,7 @@ def guess_summary(rel_path: str) -> str:
     if name == "ScoreSystem.gd":
         return "Converts shot-event history into Doubloons and pocket-side score popup presentation."
     if name == "ShotEventSystem.gd":
-        return "Tracks causal per-shot scoring events for sunk balls."
+        return "Tracks causal per-shot foundational, skilled, heroic, and legendary scoring events for sunk balls."
     if name == "WayfinderSystem.gd":
         return "Handles Wayfinder activation and temporary guided-ball redirects."
     if name == "PowderKegSystem.gd":
@@ -395,7 +449,9 @@ def guess_summary(rel_path: str) -> str:
     if name == "TreasureBallSystem.gd":
         return "Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting."
     if name == "DebugOverlay.gd":
-        return "Formats debug menu, performance overlay, toggles, and physics debug text."
+        return "Formats debug menu, modular visible debug panels, requested-section performance snapshots, full F3 overlay, toggles, and physics debug text."
+    if name == "DebugPanel.gd":
+        return "Reusable draggable debug panel shell with pause-safe input consumption and lightweight text display."
     if name == "AimPreview.gd":
         return "Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure perception snapshots, and AimPreview broad-phase counters."
     if name == "BoundarySystem.gd":
@@ -406,6 +462,16 @@ def guess_summary(rel_path: str) -> str:
         return "Owns cue visuals, grab-zone hit testing, pullback, and strike presentation."
     if name == "Main.gd":
         return "Small app shell and top-level scene wiring."
+    if name == "MainMenu.gd":
+        return "Title-screen shell, layered menu presentation, button input, and transition into the gameplay scene."
+    if name == "MainMenuPresentationOverlay.gd":
+        return "Draw-only layered title-screen atmosphere for moon glow, stars, ocean shimmer, and fog."
+    if name == "PauseMenu.gd":
+        return "Pause menu tabs, resume/quit wiring, Quartermaster tab rendering, and debug panel toggles."
+    if name == "BallAudioSystem.gd":
+        return "Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering."
+    if name == "MainMenu.tscn":
+        return "Layered title-screen scene with background art, animated overlay passes, foreground art, fog, and menu UI."
     if lowered.endswith(".tscn"):
         return "Godot scene file used for authored node layout and scene wiring."
     if lowered.endswith(".md"):
@@ -451,8 +517,9 @@ def build_readme() -> str:
             "Current snapshot:",
             "",
             "- Kraken An Eight Ball is a systemic arcade-chaos billiards prototype.",
-            "- The current loop is better play -> more score -> more balls -> more chaos -> survive the escalating table.",
-            "- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, and Treasure perception grace/hiding are active modern systems.",
+            "- The current loop is better play -> more score/Doubloons -> more balls and Reserve choices -> more chaos -> survive the escalating table.",
+            "- Main Menu, pooled collision audio, rotating Quartermaster offers, Reserve slots/deployment, modular debug panels, and expanded shot-event tiers are active modern systems.",
+            "- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, and Treasure perception grace/hiding remain important active systems.",
             "- Generated reports are a project map only; `AGENTS.md` and the real scripts/scenes remain authoritative.",
             "",
             "Important rules:",
@@ -519,7 +586,13 @@ def build_project_index(files: list[FileInfo], changed_paths: list[str]) -> str:
         "",
         "- Kraken An Eight Ball is a systemic arcade-chaos billiards prototype with multiple active escalation systems.",
         "- Core loop: better play -> more Doubloons -> score-tied ball drops -> more balls -> more interactions -> survive the escalating table state.",
+        "- `MainMenu.tscn` / `MainMenu.gd` now provide an atmospheric layered title screen with lightweight animated overlays.",
         "- `BallDropSystem.gd` is active; cue-ball and eight-ball sinks are penalties and no longer end the run.",
+        "- `QuartermasterSystem.gd` now presents three rotating tactical offers; successful buys spend Doubloons and fill `ReserveSystem.gd` slots.",
+        "- Reserve deployment uses `BallPlacementSystem.gd`, with `ReserveSlotsUI.gd` and `ReserveDeploymentPresenter.gd` handling icon-only slots and tethered presentation.",
+        "- `BallAudioSystem.gd` owns pooled event-driven ball-to-ball collision sounds with spam filtering.",
+        "- `DebugOverlay.gd` supports modular draggable panels, pause-safe interaction, and requested-section hidden-work gating.",
+        "- `ShotEventSystem.gd` tracks foundational, skilled, heroic, and legendary scoring-event tiers for `ScoreSystem.gd` rewards.",
         "- Early cue reclaim lets players regain control after the cue ball stops under safe motion conditions.",
         "- `TableImpactShakeSystem.gd` owns fake-3D presentation-only impact shake for Powder Keg and Cannon events.",
         "- Cannon Ball is a debug-spawn delayed-chaos future-problem anomaly with heat presence and heavy-impact behavior.",
@@ -528,10 +601,10 @@ def build_project_index(files: list[FileInfo], changed_paths: list[str]) -> str:
         "",
         "## Next Major Goal",
         "",
-        "- Continue stabilizing the score-tied ball drop loop: better play creates more score events/Doubloons, more balls, more interactions, and higher score before the table empties.",
-        "- Score-earned drop messages rotate now; keep expanding/tuning the message pool as the loop gets juicier.",
-        "- Cue-ball and eight-ball sinks cost 25 Doubloons and remove one eligible object ball.",
-        "- Current penalty removal uses a simple scale/fade placeholder; a reversed ball-drop animation can replace it later.",
+        "- Continue stabilizing the score-tied ball drop plus tactical Reserve loop: better play creates score events/Doubloons, more balls, more tactical purchases, and higher score before the table empties.",
+        "- Tune new scoring-event thresholds only through focused passes; do not casually change score values during UI/docs/cleanup work.",
+        "- Future Quartermaster work can add more stock rules, rerolls, or unlocks, but the current event-driven rotating-offer spine should stay small.",
+        "- Cue-ball and eight-ball sinks cost 25 Doubloons and remove one eligible object ball; current penalty removal still uses a simple scale/fade placeholder.",
         "- System boundary: `BallDropSystem.gd` decides score-tied drop rewards, then `SpawnSystem.gd` performs drops while `Table.gd` coordinates only.",
         "",
         "## Metadata Comments",
@@ -752,10 +825,13 @@ def risks_for_agent(agent_id: str) -> list[str]:
             "BallDropSystem.gd is first-pass playable; drop tuning and penalty presentation still need playtesting.",
             "Cue/eight-ball sink penalties should not accidentally feed score-tied drop progress.",
             "Early cue reclaim must stay safe: cue-ball motion or reset/drop states should still block release.",
+            "Expanded shot-event thresholds may need conservative tuning after longer chaos-table sessions.",
         ],
         "systems_agent": [
             "Table.gd still owns BallPhysics; do not extract casually.",
             "Future reward logic could still bloat ScoreSystem or Table.gd if new BallDropSystem responsibilities are not respected.",
+            "Quartermaster, Reserve, and BallPlacement boundaries should stay separate as more purchasable/deployable effects are added.",
+            "BallAudioSystem should stay event-driven and not become a physics-side concern.",
         ],
         "anomaly_ball_agent": [
             "Anchor behavior is tuned by feel and should be adjusted incrementally.",
@@ -764,15 +840,20 @@ def risks_for_agent(agent_id: str) -> list[str]:
         ],
         "ui_agent": [
             "Score popup readability can regress when many events happen at once.",
-            "Debug overlay can become noisy as more counters are added.",
+            "Modular debug panels can become noisy as more sections are added; keep hidden-panel gating intact.",
+            "Main menu atmosphere should remain lightweight and layered correctly behind foreground silhouettes.",
+            "Quartermaster and Reserve UI should not steal active cue drag/release input.",
         ],
         "performance_agent": [
             "Visual effects should degrade before gameplay chaos is limited.",
             "Pooling/reuse is not broadly implemented for temporary visuals yet.",
             "AimPreview rebuild coalescing should preserve reliable graze behavior and avoid tolerance-based lies.",
+            "Hidden debug UI should remain logically cheap, not merely invisible.",
+            "Collision audio cooldowns should prevent spam without making meaningful impacts feel late.",
         ],
         "lore_agent": [
             "Score-earned drop callouts now rotate; future passes should tune message frequency and tone.",
+            "Quartermaster wording should stay pirate-tactical and not feel like a debug catalog.",
             "Keep Doubloons language here; do not import Insight terminology from future Cuethulhu work.",
         ],
         "cleanup_agent": [

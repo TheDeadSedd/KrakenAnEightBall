@@ -15,7 +15,12 @@ Core pillars:
 - Doubloons scoring driven by trick-shot event history.
 - Pocket-side score celebrations instead of generic center-screen scoring spam.
 - Score-tied ball drops that turn successful play into rising table pressure.
+- The Quartermaster tactical shop, rotating offers, reserve slots, and reusable ball placement flow.
 - Active anomaly balls: Wayfinder Ball, Powder Keg, Anchor Ball, Cannon Ball, and Treasure Ball experiments.
+- Expanded foundational, skilled, heroic, and legendary trick-shot event rewards.
+- Atmospheric layered main menu presentation with lightweight draw-only motion.
+- Pooled event-driven billiards collision audio that scales with chaos.
+- Modular draggable debug panels with pause-safe interaction and hidden-work gating.
 - Presentation-only fake-3D impact and heat/scuttle effects that add juice without moving authoritative gameplay geometry.
 - Fast iteration over broad systems while preserving shot feel.
 
@@ -44,9 +49,21 @@ Does not own table-wide gameplay rules, scoring, spawning decisions, pocket logi
 
 ### `scripts/DebugOverlay.gd`
 
-Owns debug menu UI, debug toggles, physics debug display, performance overlay formatting, overlay dragging, and hotkey display text.
+Owns debug menu UI, debug toggles, physics debug display, full F3 performance overlay formatting, modular debug-panel creation/wiring, section-specific panel text formatting, hotkey display text, and hidden-panel performance gating.
 
-Does not own gameplay counters themselves. `Table.gd` and systems provide snapshots; `DebugOverlay.gd` presents them.
+Does not own gameplay counters themselves. `Table.gd` and systems provide snapshots; `DebugOverlay.gd` presents them. Hidden modular panels should not format text every frame, and `DebugOverlay.gd` should request only the snapshot sections needed by currently visible panels unless the full overlay is enabled.
+
+### `scripts/DebugPanel.gd`
+
+Owns the reusable draggable debug panel shell: header dragging, panel visibility, panel-local mouse consumption, pause-safe panel interaction, and lightweight text display.
+
+Does not own debug counter meanings, snapshot generation, gameplay state, or pause rules. Empty HUD space should still pass through when unpaused, but panel/header input should not leak into cue grab/drag/release.
+
+### `scripts/PauseMenu.gd`
+
+Owns pause menu UI, tab presentation, resume/quit button wiring, Quartermaster tab rendering, and debug-panel toggles.
+
+Does not own gameplay simulation, physics, scoring, shot math, or anomaly updates. `get_tree().paused` freezes gameplay; pause menu, debug overlay, and debug panels are allowed to keep processing so the player can interact with UI while gameplay is frozen.
 
 ### `scripts/CueController.gd`
 
@@ -69,6 +86,44 @@ AimPreview.gd must remain prediction/presentation only. It must not change real 
 Owns cue ball start/reset helpers, starting rack/object-ball creation, reward spawns, debug ball spawns, safe spawn search, drop animation coordination, spawn-related callouts, regular anomaly pool odds, and Anchor priority spawn odds.
 
 Does not own scoring, pocket consequences, shot lifecycle, physics tuning, score-tied reward decisions, or anomaly behavior after a ball exists.
+
+### `scripts/BallPlacementSystem.gd`
+
+Owns reusable item-agnostic placement mode: placement item state, ghost preview, valid/invalid presentation, safe-position validation through existing spawn helpers, confirm/cancel flow, and placement input ownership.
+
+Does not own shop inventory, Reserve slot contents, Doubloon spending, score progress, or item-specific reward rules. It should remain reusable by Quartermaster, Reserve deployment, Treasure rewards, tutorials, debug tools, and future "place a ball" effects without becoming shop-specific.
+
+### `scripts/QuartermasterSystem.gd`
+
+Owns Quartermaster shop inventory, item IDs, prices, descriptions, affordability checks, purchase state, active rotating offer slots, deterministic/event-driven stock refresh, and shop debug snapshots/counters.
+
+Current economy flow is Quartermaster buy -> first open Reserve slot fills. Purchases are allowed only when the player can afford the item and Reserve has space. A successful purchase spends Doubloons, fills the first empty Reserve slot, and refreshes only the purchased offer slot.
+
+Does not place balls directly, emit `doubloons_awarded`, advance `BallDropSystem` progress, own placement validation, or own Reserve deployment presentation. No passive stock timers should be introduced unless explicitly requested; offer refresh should stay event-driven.
+
+### `scripts/QuartermasterOfferRefreshEffect.gd`
+
+Owns the presentation-only fresh-stock cue for a changed Quartermaster offer: soft gold glow, quick shimmer sweep, and fade/pop settling.
+
+Does not own stock selection, prices, affordability, Reserve behavior, spending, or gameplay state. It should remain lightweight UI tween/draw work and process while paused.
+
+### `scripts/ReserveSystem.gd`
+
+Owns the tactical Reserve data model: three slot contents, selected/deploying slot index, deployment start/confirm/cancel state, snapshots, and simple debug counters.
+
+Does not own visual slot drawing, cursor tether presentation, placement validation, ball spawning, Doubloon spending, or Quartermaster offer generation. Confirming a valid Reserve deployment clears the slot; canceling keeps the stored item.
+
+### `scripts/ReserveSlotsUI.gd`
+
+Owns the visible icon-only Reserve slots mounted on the upper-right table frame, hover glow/outline, slot click input, and forwarding filled-slot deployment requests.
+
+Slot UI consumes click input when starting Reserve interaction, but it should not steal an already active cue drag through hover/mouse motion. It does not own slot contents, placement validation, or ball spawning.
+
+### `scripts/ReserveDeploymentPresenter.gd`
+
+Owns Reserve deployment presentation only: cursor-attached item icon and curved dotted tether from the original Reserve slot to the cursor during placement.
+
+Does not own placement rules, deployment state, safe-position checks, spawning, or Reserve slot mutation. It should be draw-only/lightweight and work while paused.
 
 ### `scripts/WayfinderSystem.gd`
 
@@ -116,13 +171,22 @@ Does not own ball physics tuning, authored node placement, pocket checks, or pro
 
 ### `scripts/ShotEventSystem.gd`
 
-Owns passive per-shot event history: `BANK`, `CHAIN`, `MULTI_CHAIN`, `ANOMALY_TOUCH`, and `MULTI_SINK`.
+Owns passive per-shot event history and causal scoring context.
 
-Does not award Doubloons, show UI, change gameplay outcomes, or alter physics. It stores causal shot history per ball so sunk-ball scoring can consume it later.
+Current implemented event tiers:
+
+- Foundational: `BANK`, `CHAIN`, `MULTI_CHAIN`, `ANOMALY_TOUCH`, `MULTI_SINK`.
+- Skilled: `KRAKEN_KICK`, `DOUBLE_BANK`, `THIN_CUT`, `CLUSTER_BREAK`.
+- Heroic: `CROSS_CORNER_BANK`, `FULL_TABLE_KICK`, `POWDER_ROUTE`, `KRAKEN_CURRENT`.
+- Legendary: `TRIPLE_BANK`, `CANNON_CHAIN`, `TREASURE_SNARE`.
+
+`DEAD_MANS_BANK` and other named future events are not implemented yet.
+
+Does not award Doubloons, show UI, change gameplay outcomes, or alter physics. It stores causal shot history per ball so sunk-ball scoring can consume it later. Detection should remain event-driven through shot lifecycle, rail/contact/pocket events, and anomaly reports rather than full-table frame-loop scans.
 
 ### `scripts/ScoreSystem.gd`
 
-Owns Doubloons reward values, running Doubloons total, scoring breakdown debug logs, HUD total signal, and pocket-side score popup presentation.
+Owns Doubloons reward values for all implemented shot-event tiers, running Doubloons total, scoring breakdown debug logs, HUD total signal, and pocket-side score popup presentation.
 
 Does not own shot event tracking, pocket capture, physics, anomaly behavior, reward spawning, score-tied ball drop decisions, shops, progression, or heavy VFX.
 
@@ -157,6 +221,20 @@ Owns small app-shell behavior such as fullscreen toggling and top-level UI wirin
 
 Does not own table gameplay systems.
 
+### `scripts/MainMenu.gd`
+
+Owns title-screen presentation, main menu input, button wiring, and safe transition into the existing gameplay scene.
+
+Current main menu uses layered UI over authored art: `assets/ui/mainmenu_bg.png` for sky/moon/ocean/distant scenery, lightweight animated overlay passes, then `assets/ui/mainmenu_fg.png` for ship/tentacles/foreground waves, then fog and menu UI. Start Run loads `Main.tscn`, Options is placeholder/disabled-style shell behavior, and Quit exits the game.
+
+Does not own gameplay systems, pause menu state, debug systems, physics, scoring, BallDropSystem, Quartermaster/Reserve behavior, or persistent options.
+
+### `scripts/MainMenuPresentationOverlay.gd`
+
+Owns draw-only/lightweight title-screen atmosphere overlays: moon glow pulse, star twinkles, ocean shimmer lines, and broad drifting fog bands. It supports layered draw passes so twinkles/shimmer can sit behind foreground silhouettes while fog can sit above them.
+
+Does not own menu buttons, scene loading, gameplay state, shaders, particles, or asset pipelines. Effects should remain cheap, tweakable through exported values, and presentation-only.
+
 ### `scripts/BallDropMeter.gd`
 
 Owns player-facing progress presentation for the next score-earned ball drop.
@@ -172,6 +250,12 @@ Owns presentation-only fake-3D table impact shake for Powder Keg explosions and 
 Does not own gameplay positions, physics velocities, camera movement, HUD/debug UI, scoring, spawn timing, or anomaly force tuning. It should stay inactive when no shake is playing and must never move authoritative ball/table geometry.
 
 Fake-3D presentation systems should move only drawn presentation layers or draw offsets. HUD/debug UI should remain readable, floor/background should stay still or barely move, and any ball shimmy must be visual-only.
+
+### `scripts/BallAudioSystem.gd`
+
+Owns pooled event-driven billiards collision audio: random hit selection, pitch variation, intensity scaling, cooldown filtering, and collision SFX playback routing.
+
+Does not own collision math, physics timing, scoring, anomaly logic, or gameplay state. Audio should remain event-driven and lightweight rather than becoming a physics-side concern.
 
 ## Physics Rules
 
@@ -266,30 +350,70 @@ Do not bury score-tied reward decisions inside `ScoreSystem.gd`, and do not add 
 
 - `ShotEventSystem.gd` tracks ordered per-ball shot history.
 - `ScoreSystem.gd` converts sunk-ball histories into Doubloon rewards.
+- Current event tiers are foundational (`BANK`, `CHAIN`, `MULTI_CHAIN`, `ANOMALY_TOUCH`, `MULTI_SINK`), skilled (`KRAKEN_KICK`, `DOUBLE_BANK`, `THIN_CUT`, `CLUSTER_BREAK`), heroic (`CROSS_CORNER_BANK`, `FULL_TABLE_KICK`, `POWDER_ROUTE`, `KRAKEN_CURRENT`), and legendary (`TRIPLE_BANK`, `CANNON_CHAIN`, `TREASURE_SNARE`).
 - Sunk-ball scoring should use the ball's own event history, not unrelated global shot events.
 - `MULTI_SINK` applies to the second and later object balls sunk in the same shot, not retroactively to earlier popups.
 - `MULTI_CHAIN` is repeatable and represents additional causal chain depth beyond the first `CHAIN`.
 - Score popups should remain pocket-side, arcade-readable, and tied to the captured pocket.
 - Drop/spawn notifications may still use top/center callouts; scoring feedback should not return there unless explicitly requested.
-- Do not add coin sprays, shops, progression, or large score VFX without permission.
+- Quartermaster spending is not score awarding. Shop purchases should not emit `doubloons_awarded`, feed `BallDropSystem` progress, or appear as sink-score rewards.
+- Do not add coin sprays, progression, or large score VFX without permission.
 - Normal gameplay reward drops should come from score-tied `BallDropSystem.gd` progress, not legacy pocket-count, bank, or multi-pocket reward paths.
+
+## Shot Event Philosophy
+
+Shot events reward recovery, geometry, improvisation, chaos control, anomaly-assisted creativity, and legendary moments. The goal is not strict billiards simulation realism; the goal is readable arcade billiards mythology where the player understands why a wild shot mattered and why the table celebrated it.
+
+## Quartermaster, Reserve, And Placement Rules
+
+- Quartermaster currently presents three rotating tactical offers selected from the purchasable item pool.
+- Current purchasable items are Loose Object Ball, Wayfinder Ball, and Powder Keg.
+- Buying an offer fills the first empty Reserve slot instead of immediately entering placement mode.
+- Reserve has exactly three slots in the current implementation.
+- Reserve deployment clicks a filled slot, pauses gameplay if needed, enters `BallPlacementSystem.gd`, and keeps the item in the slot until valid confirm.
+- Confirming a valid deployment places the ball and clears the Reserve slot.
+- Canceling deployment keeps the item and restores the previous pause state.
+- Ball placement must use existing safe placement helpers and must not fight cue drag/release input.
+- Cursor-attached Reserve icons and dotted tethers are presentation-only and should not affect placement validity.
+- Do not bury future reward placement, tutorials, debug placement, or Treasure reward deployment inside Quartermaster; use `BallPlacementSystem.gd` and focused owners.
+
+## Main Menu And Title Screen Rules
+
+- `MainMenu.tscn` / `MainMenu.gd` are separate from gameplay scenes and own title-screen presentation and menu input only.
+- The title screen uses layered authored art: background image, animated overlay passes, foreground image, fog, then menu UI.
+- Star twinkles and ocean shimmer should render behind ship/tentacle foreground silhouettes; fog can remain above the foreground if it reads naturally.
+- Title-screen overlays must remain lightweight and presentation-only: draw code or simple UI nodes, no heavy shaders or particle systems unless explicitly requested.
+- Start Run should load the existing gameplay scene without turning `Main.gd` into a large app shell.
+- Menu polish should not touch gameplay, pause/debug architecture, scoring, BallDropSystem, Quartermaster, Reserve, or anomalies.
+
+## Audio Rules
+
+- Ball-to-ball collision audio is event-driven from meaningful collision reports, not continuous scanning.
+- `BallAudioSystem.gd` owns pooling, stream selection, pitch variation, volume scaling, and cooldown/spam filtering.
+- Tiny settling contacts should remain filtered so high ball counts do not become machine-gun audio.
+- Audio should feel responsive to visible impact timing, but must not change collision math, cue feel, shot velocity, scoring, or anomaly behavior.
+- Add rail, pocket, UI, music, or anomaly-specific audio only in focused future passes.
 
 ## Performance Rules
 
 - Stopped-ball filtering exists and should be preserved.
 - Ball-vs-ball broad-phase spatial grid exists and should be preserved.
 - Rail checks and pocket checks should run only for moving gameplay-active balls.
-- Performance overlay/debug tools exist in `DebugOverlay.gd` and use snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, `CannonBallSystem.gd`, `TreasureBallSystem.gd`, and `BallDropSystem.gd`.
+- Performance overlay/debug tools exist in `DebugOverlay.gd` and use requested-section snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, `CannonBallSystem.gd`, `TreasureBallSystem.gd`, `BallDropSystem.gd`, `QuartermasterSystem.gd`, and `ReserveSystem.gd`.
+- Hidden debug panels/overlays should not format text or refresh panel content every frame. If no modular panels and no full overlay are visible, debug formatting work should be minimal.
 - Do not remove counters or make them misleading during optimization.
 - Do not add spatial partition rewrites or alternate physics engines without a focused request.
 - Do not solve chaos by preventing chaos. Large earned chain reactions and high ball counts are intended.
 - Do not hard-cap normal gameplay ball counts as the primary optimization strategy unless explicitly requested.
 - Keep physics/gameplay authoritative and correct. Degrade visual effects first under load.
 - Prefer event/state-driven updates over continuous rescanning. Systems should track meaningful state changes when practical instead of rebuilding full-table answers every frame.
+- Quartermaster stock refresh should be deterministic/event-driven rather than timer-driven frame churn.
+- Reserve deployment presentation, title-screen atmosphere, fake-3D shake, Treasure legs, Cannon heat, and Quartermaster refresh glow should stay draw-only/lightweight.
+- Collision audio should reuse pooled players and filter micro-collisions so SFX scales with chaos.
 - Coalesce repeated work before reducing gameplay ambition or visual fidelity. Input/event spam should mark systems dirty, then a single owner should process the newest state once per frame or once per relevant physics step.
 - Optimization should preserve readability as well as raw performance; a faster effect that hides cause/effect relationships is usually not a good trade.
 - AimPreview rebuilds are the canonical example: mouse/input events should not trigger dozens of same-frame prediction rebuilds; `Table.gd` should collapse them into one accurate rebuild without tolerance caching that lies about grazes.
-- Good first optimization targets include particles, trails, aura effects, popup labels, redraw frequency, prediction rebuild frequency, pooling/reuse, and offscreen or low-priority visual simplification.
+- Good first optimization targets include hidden debug formatting, particles, trails, aura effects, popup labels, redraw frequency, prediction rebuild frequency, pooled audio, pooled/reused UI effects, and offscreen or low-priority visual simplification.
 - Debug/stress testing should continue to support 100+ balls.
 
 ## Project Brain And Debug Media
