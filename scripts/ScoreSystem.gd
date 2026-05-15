@@ -15,6 +15,17 @@ const CHAIN_REWARD := 5
 const MULTI_CHAIN_REWARD := 5
 const MULTI_SINK_REWARD := 5
 const ANOMALY_TOUCH_REWARD := 2
+const KRAKEN_KICK_REWARD := 10
+const DOUBLE_BANK_REWARD := 10
+const THIN_CUT_REWARD := 6
+const CLUSTER_BREAK_REWARD := 8
+const CROSS_CORNER_BANK_REWARD := 14
+const FULL_TABLE_KICK_REWARD := 12
+const POWDER_ROUTE_REWARD := 10
+const KRAKEN_CURRENT_REWARD := 10
+const TRIPLE_BANK_REWARD := 18
+const CANNON_CHAIN_REWARD := 16
+const TREASURE_SNARE_REWARD := 12
 const SCORE_POPUP_REVEAL_DELAY := 0.5
 const SCORE_POPUP_MIN_HOLD_TIME := 1.0
 const SCORE_POPUP_HOLD_PER_ITEM := 0.35
@@ -57,11 +68,22 @@ const SCORE_LABEL_GLOW_FONT_COLOR := Color(1.0, 0.96, 0.8, 0.18)
 const SCORE_LABEL_GLOW_OUTLINE_COLOR := Color(1.0, 0.88, 0.45, 0.78)
 const SCORE_LABEL_GLOW_OUTLINE_SIZE := 10
 const EVENT_REWARDS := {
-	"BANK": BANK_REWARD,
-	"CHAIN": CHAIN_REWARD,
-	"MULTI_CHAIN": MULTI_CHAIN_REWARD,
-	"MULTI_SINK": MULTI_SINK_REWARD,
-	"ANOMALY_TOUCH": ANOMALY_TOUCH_REWARD,
+	ShotEventSystem.EVENT_BANK: BANK_REWARD,
+	ShotEventSystem.EVENT_CHAIN: CHAIN_REWARD,
+	ShotEventSystem.EVENT_MULTI_CHAIN: MULTI_CHAIN_REWARD,
+	ShotEventSystem.EVENT_MULTI_SINK: MULTI_SINK_REWARD,
+	ShotEventSystem.EVENT_ANOMALY_TOUCH: ANOMALY_TOUCH_REWARD,
+	ShotEventSystem.EVENT_KRAKEN_KICK: KRAKEN_KICK_REWARD,
+	ShotEventSystem.EVENT_DOUBLE_BANK: DOUBLE_BANK_REWARD,
+	ShotEventSystem.EVENT_THIN_CUT: THIN_CUT_REWARD,
+	ShotEventSystem.EVENT_CLUSTER_BREAK: CLUSTER_BREAK_REWARD,
+	ShotEventSystem.EVENT_CROSS_CORNER_BANK: CROSS_CORNER_BANK_REWARD,
+	ShotEventSystem.EVENT_FULL_TABLE_KICK: FULL_TABLE_KICK_REWARD,
+	ShotEventSystem.EVENT_POWDER_ROUTE: POWDER_ROUTE_REWARD,
+	ShotEventSystem.EVENT_KRAKEN_CURRENT: KRAKEN_CURRENT_REWARD,
+	ShotEventSystem.EVENT_TRIPLE_BANK: TRIPLE_BANK_REWARD,
+	ShotEventSystem.EVENT_CANNON_CHAIN: CANNON_CHAIN_REWARD,
+	ShotEventSystem.EVENT_TREASURE_SNARE: TREASURE_SNARE_REWARD,
 }
 
 class ScorePopup:
@@ -274,7 +296,7 @@ func _get_next_snapshot_event_count(event_type: String, snapshot_event_counts: D
 
 
 func _is_repeatable_event(event_type: String) -> bool:
-	return event_type == "MULTI_CHAIN"
+	return event_type == ShotEventSystem.EVENT_MULTI_CHAIN
 
 
 func _get_or_make_awarded_event_set(ball_id: int) -> Dictionary:
@@ -465,19 +487,39 @@ func _print_score_breakdown(
 
 
 func _get_event_reward_label(event_type: String) -> String:
-	match event_type:
-		"BANK":
-			return "Bank"
-		"CHAIN":
-			return "Chain"
-		"MULTI_CHAIN":
-			return "Multi Chain"
-		"MULTI_SINK":
-			return "Multi Sink"
-		"ANOMALY_TOUCH":
-			return "Anomaly Touch"
-		_:
-			return event_type.capitalize()
+	if event_type == ShotEventSystem.EVENT_BANK:
+		return "Bank"
+	if event_type == ShotEventSystem.EVENT_CHAIN:
+		return "Chain"
+	if event_type == ShotEventSystem.EVENT_MULTI_CHAIN:
+		return "Multi Chain"
+	if event_type == ShotEventSystem.EVENT_MULTI_SINK:
+		return "Multi Sink"
+	if event_type == ShotEventSystem.EVENT_ANOMALY_TOUCH:
+		return "Anomaly Touch"
+	if event_type == ShotEventSystem.EVENT_KRAKEN_KICK:
+		return "Kraken Kick"
+	if event_type == ShotEventSystem.EVENT_DOUBLE_BANK:
+		return "Double Bank"
+	if event_type == ShotEventSystem.EVENT_THIN_CUT:
+		return "Thin Cut"
+	if event_type == ShotEventSystem.EVENT_CLUSTER_BREAK:
+		return "Cluster Break"
+	if event_type == ShotEventSystem.EVENT_CROSS_CORNER_BANK:
+		return "Cross-Corner Bank"
+	if event_type == ShotEventSystem.EVENT_FULL_TABLE_KICK:
+		return "Full-Table Kick"
+	if event_type == ShotEventSystem.EVENT_POWDER_ROUTE:
+		return "Powder Route"
+	if event_type == ShotEventSystem.EVENT_KRAKEN_CURRENT:
+		return "Kraken Current"
+	if event_type == ShotEventSystem.EVENT_TRIPLE_BANK:
+		return "Triple Bank"
+	if event_type == ShotEventSystem.EVENT_CANNON_CHAIN:
+		return "Cannon Chain"
+	if event_type == ShotEventSystem.EVENT_TREASURE_SNARE:
+		return "Treasure Snare"
+	return event_type.capitalize()
 
 
 func _sync_score_segment_labels(popup: ScorePopup, score_segments: Array[String]) -> void:

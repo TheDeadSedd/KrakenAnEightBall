@@ -100,11 +100,15 @@ func try_apply_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2, i
 	if ball_a.is_cannon_ball or ball_b.is_cannon_ball:
 		return false
 	if ball_a.is_treasure_ball and _is_self_steering_treasure_driving(ball_a, ball_b, normal):
+		var soft_impulse_to_other: Vector2 = _get_soft_scuttle_impulse(impulse)
 		ball_a.velocity -= impulse
-		ball_b.velocity += _get_soft_scuttle_impulse(impulse)
+		ball_b.velocity += soft_impulse_to_other
+		_report_treasure_snare_influence(ball_b, soft_impulse_to_other)
 		return true
 	if ball_b.is_treasure_ball and _is_self_steering_treasure_driving(ball_b, ball_a, -normal):
-		ball_a.velocity -= _get_soft_scuttle_impulse(impulse)
+		var soft_impulse_to_ball_a: Vector2 = _get_soft_scuttle_impulse(impulse)
+		ball_a.velocity -= soft_impulse_to_ball_a
+		_report_treasure_snare_influence(ball_a, -soft_impulse_to_ball_a)
 		ball_b.velocity += impulse
 		return true
 	return false
@@ -1063,6 +1067,13 @@ func _get_soft_scuttle_impulse(impulse: Vector2) -> Vector2:
 	if self_steer_collision_impulse_cap > 0.0:
 		soft_impulse = soft_impulse.limit_length(self_steer_collision_impulse_cap)
 	return soft_impulse
+
+
+func _report_treasure_snare_influence(target_ball: Ball, velocity_delta: Vector2) -> void:
+	if table == null:
+		return
+
+	table.shot_event_system.record_treasure_snare_influence(target_ball, velocity_delta)
 
 
 func _is_self_steering_treasure_driving(treasure_ball: Ball, other_ball: Ball, treasure_to_other_normal: Vector2) -> bool:

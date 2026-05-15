@@ -7,7 +7,7 @@ signal reserve_slot_clicked(slot_index: int)
 # index:category UI / Systems / In Progress
 # index:status In Progress
 # index:owner ui_agent
-# index:notes Draws icon-only reserve slots, emits filled-slot deploy requests, and consumes slot mouse input.
+# index:notes Draws icon-only reserve slots, emits filled-slot deploy requests, and consumes slot press input.
 
 # Draw-only reserve slot UI. ReserveSystem owns slot data and deployment state.
 const SLOT_COUNT := 3
@@ -34,7 +34,7 @@ var slot_snapshots: Array = []
 var hovered_slot_index := -1
 var hover_changes := 0
 var clicks_consumed := 0
-var motion_events_consumed := 0
+var motion_events_seen := 0
 
 var empty_slot_style := StyleBoxFlat.new()
 var hover_slot_style := StyleBoxFlat.new()
@@ -44,7 +44,7 @@ var hover_glow_style := StyleBoxFlat.new()
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	mouse_filter = Control.MOUSE_FILTER_STOP
+	mouse_filter = Control.MOUSE_FILTER_PASS
 	focus_mode = Control.FOCUS_NONE
 	z_index = 24
 	_configure_styles()
@@ -70,7 +70,7 @@ func get_debug_snapshot() -> Dictionary:
 		"hovered_slot_index": hovered_slot_index,
 		"hover_changes": hover_changes,
 		"clicks_consumed": clicks_consumed,
-		"motion_events_consumed": motion_events_consumed,
+		"motion_events_seen": motion_events_seen,
 		"snapshot_count": slot_snapshots.size(),
 	}
 
@@ -87,21 +87,25 @@ func get_slot_icon_key(slot_index: int) -> String:
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
-		motion_events_consumed += 1
+		motion_events_seen += 1
 		_update_hovered_slot(event.position)
-		accept_event()
 		return
 
 	if event is InputEventMouseButton:
 		var mouse_event: InputEventMouseButton = event
 		_update_hovered_slot(mouse_event.position)
-		if mouse_event.pressed:
+		if mouse_event.pressed and mouse_event.button_index == MOUSE_BUTTON_LEFT:
+			if _is_cue_drag_active():
+				return
+			if hovered_slot_index == -1:
+				return
+
 			clicks_consumed += 1
-			if hovered_slot_index != -1 and reserve_system != null:
+			if reserve_system != null:
 				reserve_system.record_slot_clicked(hovered_slot_index)
 				if _is_slot_filled(hovered_slot_index):
 					reserve_slot_clicked.emit(hovered_slot_index)
-		accept_event()
+			accept_event()
 
 
 func _draw() -> void:
@@ -195,6 +199,10 @@ func _get_slot_index_at_position(local_position: Vector2) -> int:
 		if _get_slot_rect(slot_index).has_point(local_position):
 			return slot_index
 	return -1
+
+
+func _is_cue_drag_active() -> bool:
+	return table != null and table.is_cue_drag_active()
 
 
 func _get_slot_rect(slot_index: int) -> Rect2:

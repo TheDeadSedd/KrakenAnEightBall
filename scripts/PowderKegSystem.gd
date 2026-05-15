@@ -105,6 +105,7 @@ func _push_nearby_balls(powder_keg: Ball, explosion_center: Vector2) -> Dictiona
 		if suppress_trails_after_explosion:
 			other_ball.suppress_trail_for(trail_suppression_duration)
 		if _is_anomaly_scoring_target(other_ball):
+			table.shot_event_system.record_powder_route_influence(other_ball, explosion_delta)
 			table.shot_event_system.record_anomaly_touch(other_ball)
 
 	return impact_data

@@ -469,6 +469,7 @@ func _apply_anchor_pull_candidate(candidate: Dictionary) -> void:
 	var pull_direction: Vector2 = candidate["pull_direction"]
 	var offset: Vector2 = candidate["offset"]
 	target_ball.velocity += velocity_delta
+	table.shot_event_system.record_anchor_influence(target_ball, velocity_delta)
 	if bool(candidate["is_stationary_batch"]):
 		_start_stationary_wake_cooldown(anchor_ball, target_ball)
 

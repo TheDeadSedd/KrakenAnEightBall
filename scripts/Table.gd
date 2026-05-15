@@ -114,6 +114,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var shot_event_system: ShotEventSystem = $ShotEventSystem
 @onready var score_system: ScoreSystem = $ScoreSystem
 @onready var ball_drop_system: BallDropSystem = $BallDropSystem
+@onready var ball_audio_system: BallAudioSystem = $BallAudioSystem
 @onready var aim_preview: AimPreview = $AimPreview
 @onready var spawn_system: SpawnSystem = $SpawnSystem
 @onready var ball_placement_system: BallPlacementSystem = $BallPlacementSystem
@@ -187,6 +188,7 @@ func _ready() -> void:
 	shot_event_system.setup(self)
 	score_system.setup(self)
 	ball_drop_system.setup(self)
+	ball_audio_system.setup(self)
 	_connect_score_drop_events()
 	aim_preview.setup(self)
 	spawn_system.setup(self)
@@ -554,10 +556,14 @@ func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
 
 	var pre_collision_velocity_a: Vector2 = ball_a.velocity
 	var pre_collision_velocity_b: Vector2 = ball_b.velocity
-	if _apply_ball_collision_response(ball_a, ball_b, normal):
+	var collision_impact_speed: float = _get_ball_collision_impact_speed(ball_a, ball_b, normal)
+	if collision_impact_speed > 0.0:
+		ball_audio_system.handle_ball_collision(ball_a, ball_b, collision_impact_speed)
+	if _apply_ball_collision_response(ball_a, ball_b, normal, collision_impact_speed):
 		perf_ball_collisions_resolved += 1
-		_note_cue_object_contact(ball_a, ball_b)
+		_note_cue_object_contact(ball_a, ball_b, normal, collision_impact_speed, pre_collision_velocity_a, pre_collision_velocity_b)
 		_note_chain_contact(ball_a, ball_b, pre_collision_velocity_a, pre_collision_velocity_b)
+		shot_event_system.record_collision_motion(ball_a, ball_b, pre_collision_velocity_a, pre_collision_velocity_b)
 	_note_actual_cue_ball_hit(ball_a, ball_b)
 	wayfinder_system.handle_collision(ball_a, ball_b)
 	powder_keg_system.handle_collision(ball_a, ball_b)
@@ -570,9 +576,12 @@ func _separate_overlapping_balls(ball_a: Ball, ball_b: Ball, normal: Vector2, ov
 	ball_b.global_position += correction
 
 
-func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2) -> bool:
+func _get_ball_collision_impact_speed(ball_a: Ball, ball_b: Ball, normal: Vector2) -> float:
 	var relative_velocity: Vector2 = ball_a.velocity - ball_b.velocity
-	var speed_along_normal: float = relative_velocity.dot(normal)
+	return relative_velocity.dot(normal)
+
+
+func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2, speed_along_normal: float) -> bool:
 	if speed_along_normal <= 0.0:
 		return false
 
@@ -607,7 +616,7 @@ func _resolve_rail_collisions() -> void:
 		var hit_events: Array = boundary_system.resolve_ball_against_boundaries(ball, RAIL_RESTITUTION)
 		for hit_event in hit_events:
 			_note_cue_rail_touch(ball)
-			shot_event_system.record_bank(ball)
+			shot_event_system.record_rail_contact(ball, hit_event.position)
 			aim_preview.record_actual_bank_debug(
 				ball,
 				hit_event.position,
@@ -654,6 +663,7 @@ func _reset_performance_frame_stats() -> void:
 	boundary_system.reset_frame_stats()
 	pocket_system.reset_frame_stats()
 	aim_preview.reset_frame_stats()
+	ball_audio_system.reset_frame_stats()
 	perf_physics_process_ms = 0.0
 	perf_ball_collision_ms = 0.0
 	perf_rail_collision_ms = 0.0
@@ -686,6 +696,10 @@ func cancel_active_cue_drag_for_pause() -> void:
 		cue_controller.stop_recoil()
 	_clear_aim_preview_now()
 	queue_redraw()
+
+
+func is_cue_drag_active() -> bool:
+	return is_dragging
 
 
 func _try_start_drag(mouse_position: Vector2) -> void:
@@ -867,7 +881,7 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 	var score_context: Dictionary = _make_sink_score_context(ball)
 	ball.sink()
 	ball.queue_free()
-	_note_object_ball_pocketed(ball)
+	_note_object_ball_pocketed(ball, score_context)
 	var score_snapshot: Dictionary = shot_event_system.get_sunk_ball_score_snapshot(int(score_context["ball_id"]))
 	score_system.score_sunk_ball_snapshot(score_snapshot, score_context)
 	status_text_changed.emit("Ball %s sunk." % ball.ball_number)
@@ -974,7 +988,7 @@ func _start_shot_tracking() -> void:
 	shot_multi_pocket_bonus_awarded = false
 	shot_bank_bonus_awarded = false
 	shot_bank_eligible_ball_ids.clear()
-	shot_event_system.start_shot()
+	shot_event_system.start_shot(cue_ball.global_position)
 
 
 func _note_cue_rail_touch(ball: Ball) -> void:
@@ -982,7 +996,14 @@ func _note_cue_rail_touch(ball: Ball) -> void:
 		shot_cue_touched_rail = true
 
 
-func _note_cue_object_contact(ball_a: Ball, ball_b: Ball) -> void:
+func _note_cue_object_contact(
+	ball_a: Ball,
+	ball_b: Ball,
+	normal: Vector2,
+	impact_speed: float,
+	pre_collision_velocity_a: Vector2,
+	pre_collision_velocity_b: Vector2
+) -> void:
 	if not shot_active:
 		return
 
@@ -990,7 +1011,14 @@ func _note_cue_object_contact(ball_a: Ball, ball_b: Ball) -> void:
 	if object_ball == null:
 		return
 
-	shot_event_system.record_cue_object_contact(object_ball)
+	var center_alignment: float = _get_cue_object_contact_alignment(
+		ball_a,
+		ball_b,
+		normal,
+		pre_collision_velocity_a,
+		pre_collision_velocity_b
+	)
+	shot_event_system.record_cue_object_contact(object_ball, center_alignment, impact_speed, cue_ball.global_position)
 	_note_cue_object_contact_for_bank(object_ball)
 
 
@@ -1015,15 +1043,20 @@ func _note_chain_contact(
 	if not _is_scoring_object_ball(ball_a) or not _is_scoring_object_ball(ball_b):
 		return
 
-	if _did_ball_gain_chain_motion(ball_a, pre_collision_velocity_a):
-		shot_event_system.record_chain_transfer(ball_b, ball_a)
+	var ball_a_speed_gain: float = _get_ball_collision_speed_gain(ball_a, pre_collision_velocity_a)
+	var ball_b_speed_gain: float = _get_ball_collision_speed_gain(ball_b, pre_collision_velocity_b)
+	if _did_ball_gain_chain_motion(ball_a_speed_gain):
+		shot_event_system.record_chain_transfer(ball_b, ball_a, ball_a_speed_gain)
 
-	if _did_ball_gain_chain_motion(ball_b, pre_collision_velocity_b):
-		shot_event_system.record_chain_transfer(ball_a, ball_b)
+	if _did_ball_gain_chain_motion(ball_b_speed_gain):
+		shot_event_system.record_chain_transfer(ball_a, ball_b, ball_b_speed_gain)
 
 
-func _did_ball_gain_chain_motion(ball: Ball, pre_collision_velocity: Vector2) -> bool:
-	var speed_gain: float = ball.velocity.length() - pre_collision_velocity.length()
+func _get_ball_collision_speed_gain(ball: Ball, pre_collision_velocity: Vector2) -> float:
+	return ball.velocity.length() - pre_collision_velocity.length()
+
+
+func _did_ball_gain_chain_motion(speed_gain: float) -> bool:
 	return speed_gain >= CHAIN_EVENT_SPEED_GAIN_MIN
 
 
@@ -1033,6 +1066,29 @@ func _get_cue_contacted_object_ball(ball_a: Ball, ball_b: Ball) -> Ball:
 	if ball_b == cue_ball:
 		return ball_a if _is_scoring_object_ball(ball_a) else null
 	return null
+
+
+func _get_cue_object_contact_alignment(
+	ball_a: Ball,
+	ball_b: Ball,
+	normal: Vector2,
+	pre_collision_velocity_a: Vector2,
+	pre_collision_velocity_b: Vector2
+) -> float:
+	var cue_velocity: Vector2 = Vector2.ZERO
+	var cue_to_object_normal: Vector2 = Vector2.RIGHT
+	if ball_a == cue_ball:
+		cue_velocity = pre_collision_velocity_a
+		cue_to_object_normal = normal
+	elif ball_b == cue_ball:
+		cue_velocity = pre_collision_velocity_b
+		cue_to_object_normal = -normal
+	else:
+		return 1.0
+
+	if cue_velocity.length_squared() <= 0.001:
+		return 1.0
+	return maxf(cue_velocity.normalized().dot(cue_to_object_normal), 0.0)
 
 
 func _make_sink_score_context(ball: Ball) -> Dictionary:
@@ -1049,11 +1105,11 @@ func _is_scoring_object_ball(ball: Ball) -> bool:
 	return ball != null and ball.ball_type == Ball.BallType.OBJECT
 
 
-func _note_object_ball_pocketed(ball: Ball) -> void:
+func _note_object_ball_pocketed(ball: Ball, score_context: Dictionary) -> void:
 	if not shot_active:
 		return
 
-	shot_event_system.record_ball_sunk(ball)
+	shot_event_system.record_ball_sunk(ball, score_context)
 	shot_pocketed_object_balls += 1
 
 	if shot_bank_eligible_ball_ids.has(ball.get_instance_id()):

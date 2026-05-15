@@ -138,6 +138,7 @@ func _apply_cannon_collision(
 ) -> void:
 	collisions_this_frame += 1
 	var cannon_pre_collision_velocity: Vector2 = cannon_ball.velocity
+	var other_pre_collision_velocity: Vector2 = other_ball.velocity
 	if _is_cannon_driving_collision(cannon_ball, other_ball, cannon_to_other_normal):
 		var impact_multiplier: float = _get_outgoing_impact_multiplier(cannon_ball)
 		other_ball.velocity += base_other_delta * impact_multiplier
@@ -149,10 +150,36 @@ func _apply_cannon_collision(
 		if impact_multiplier > 1.0:
 			heavy_impacts_this_frame += 1
 			_try_request_cannon_impact_feedback(cannon_ball, cannon_pre_collision_velocity, cannon_to_other_normal)
+		_report_cannon_chain_influence(
+			cannon_ball,
+			other_ball,
+			cannon_pre_collision_velocity,
+			cannon_to_other_normal,
+			other_ball.velocity - other_pre_collision_velocity
+		)
 		return
 
 	other_ball.velocity += base_other_delta
 	cannon_ball.velocity += base_cannon_delta * incoming_velocity_gain_multiplier
+
+
+func _report_cannon_chain_influence(
+	cannon_ball: Ball,
+	other_ball: Ball,
+	cannon_velocity: Vector2,
+	cannon_to_other_normal: Vector2,
+	other_velocity_delta: Vector2
+) -> void:
+	if table == null:
+		return
+
+	var impact_speed: float = maxf(cannon_velocity.dot(cannon_to_other_normal), 0.0)
+	table.shot_event_system.record_cannon_chain_influence(
+		cannon_ball,
+		other_ball,
+		impact_speed,
+		other_velocity_delta
+	)
 
 
 func _is_cannon_driving_collision(cannon_ball: Ball, other_ball: Ball, cannon_to_other_normal: Vector2) -> bool:
