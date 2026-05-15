@@ -57,8 +57,15 @@ class AimPrediction:
 	var position := Vector2.ZERO
 	var ball: Ball = null
 	var target_direction := Vector2.ZERO
+	var impact_incoming_direction := Vector2.ZERO
+	var predicted_target_velocity := Vector2.ZERO
+	var rail_hit_count_before_target: int = 0
+	var cue_target_impact_segment_index: int = -1
 	var target_path_points: Array[Vector2] = []
 	var target_ends_in_pocket := false
+	var target_prediction_steps: int = 0
+	var target_first_stop_reason: String = "inactive"
+	var target_path_length: float = 0.0
 	var path_points: Array[Vector2] = []
 	var rail_position := Vector2.ZERO
 	var rail_normal := Vector2.ZERO
@@ -84,6 +91,9 @@ class AimPocketHit:
 class AimTargetPath:
 	var points: Array[Vector2] = []
 	var ends_in_pocket := false
+	var steps: int = 0
+	var first_stop_reason: String = "inactive"
+	var path_length: float = 0.0
 
 class BallMotionState:
 	var position := Vector2.ZERO
@@ -300,7 +310,7 @@ func reset_frame_stats() -> void:
 
 
 func get_debug_snapshot() -> Dictionary:
-	return {
+	var snapshot: Dictionary = {
 		"prediction_ms": prediction_ms,
 		"prediction_frame_ms": prediction_frame_ms,
 		"prediction_recalculations": prediction_recalculations_this_frame,
@@ -321,6 +331,8 @@ func get_debug_snapshot() -> Dictionary:
 		"draw_segments": draw_segments_last_draw,
 		"draw_calls": draw_calls_last_draw,
 	}
+	snapshot.merge(_get_hit_ball_prediction_debug_snapshot())
+	return snapshot
 
 
 func get_treasure_perception_snapshot() -> Dictionary:
@@ -336,6 +348,56 @@ func get_treasure_perception_snapshot() -> Dictionary:
 		"seen_treasure_balls": _treasure_seen_entries.duplicate(),
 		"cover_candidates": _treasure_cover_candidate_entries.duplicate(),
 		"visibility_debug_entries": _treasure_visibility_debug_entries.duplicate(),
+	}
+
+
+func _get_hit_ball_prediction_debug_snapshot() -> Dictionary:
+	var prediction: AimPrediction = current_prediction
+	var hit_prediction_active: bool = (
+		preview_active
+		and prediction != null
+		and prediction.collision_type == "ball"
+		and is_instance_valid(prediction.ball)
+	)
+	if not hit_prediction_active:
+		return {
+			"hit_ball_prediction_active": false,
+			"hit_ball_target_ball_id": -1,
+			"hit_ball_target_number": -1,
+			"hit_ball_route": "none",
+			"hit_ball_impact_point": Vector2.ZERO,
+			"hit_ball_impact_normal": Vector2.ZERO,
+			"hit_ball_impact_incoming_direction": Vector2.ZERO,
+			"hit_ball_transferred_velocity": Vector2.ZERO,
+			"hit_ball_transferred_direction": Vector2.ZERO,
+			"hit_ball_target_prediction_steps": 0,
+			"hit_ball_target_first_stop_reason": "inactive",
+			"hit_ball_target_path_length": 0.0,
+			"hit_ball_target_path_point_count": 0,
+			"hit_ball_rail_hits_before_impact": 0,
+			"hit_ball_cue_impact_segment_index": -1,
+		}
+
+	var transferred_direction: Vector2 = Vector2.ZERO
+	if prediction.predicted_target_velocity.length_squared() > 0.001:
+		transferred_direction = prediction.predicted_target_velocity.normalized()
+
+	return {
+		"hit_ball_prediction_active": true,
+		"hit_ball_target_ball_id": prediction.ball.get_instance_id(),
+		"hit_ball_target_number": prediction.ball.ball_number,
+		"hit_ball_route": "after_rail" if prediction.rail_hit_count_before_target > 0 else "direct",
+		"hit_ball_impact_point": prediction.position,
+		"hit_ball_impact_normal": prediction.target_direction,
+		"hit_ball_impact_incoming_direction": prediction.impact_incoming_direction,
+		"hit_ball_transferred_velocity": prediction.predicted_target_velocity,
+		"hit_ball_transferred_direction": transferred_direction,
+		"hit_ball_target_prediction_steps": prediction.target_prediction_steps,
+		"hit_ball_target_first_stop_reason": prediction.target_first_stop_reason,
+		"hit_ball_target_path_length": prediction.target_path_length,
+		"hit_ball_target_path_point_count": prediction.target_path_points.size(),
+		"hit_ball_rail_hits_before_impact": prediction.rail_hit_count_before_target,
+		"hit_ball_cue_impact_segment_index": prediction.cue_target_impact_segment_index,
 	}
 #endregion
 
@@ -644,7 +706,15 @@ func _get_first_aim_collision(origin: Vector2, initial_velocity: Vector2) -> Aim
 		var movement_end: Vector2 = simulated_position + simulated_velocity * step_delta
 		var ball_hit: AimBallHit = _get_first_aim_ball_hit_on_segment(previous_position, movement_end)
 		if ball_hit.ball != null:
-			return _make_ball_prediction_from_position(prediction, simulated_velocity, ball_hit.ball, ball_hit.position)
+			var cue_target_impact_segment_index: int = maxi(prediction.path_points.size() - 1, 0)
+			return _make_ball_prediction_from_position(
+				prediction,
+				simulated_velocity,
+				ball_hit.ball,
+				ball_hit.position,
+				bounce_count,
+				cue_target_impact_segment_index
+			)
 
 		var step_result: BallMotionState = _simulate_aim_cue_step(movement_end, simulated_velocity, step_delta)
 		simulated_position = step_result.position
@@ -1178,7 +1248,9 @@ func _make_ball_prediction_from_position(
 	prediction: AimPrediction,
 	incoming_velocity: Vector2,
 	target_ball: Ball,
-	cue_center_at_impact: Vector2
+	cue_center_at_impact: Vector2,
+	rail_hit_count_before_target: int,
+	cue_target_impact_segment_index: int
 ) -> AimPrediction:
 	var target_direction: Vector2 = target_ball.global_position - cue_center_at_impact
 	if target_direction.length() > 0.0:
@@ -1192,9 +1264,16 @@ func _make_ball_prediction_from_position(
 	prediction.position = cue_center_at_impact
 	prediction.ball = target_ball
 	prediction.target_direction = target_direction
+	prediction.impact_incoming_direction = incoming_velocity.normalized()
+	prediction.predicted_target_velocity = predicted_target_velocity
+	prediction.rail_hit_count_before_target = rail_hit_count_before_target
+	prediction.cue_target_impact_segment_index = cue_target_impact_segment_index
 	var target_prediction: AimTargetPath = _get_predicted_target_path(target_ball, predicted_target_velocity)
 	prediction.target_path_points = target_prediction.points
 	prediction.target_ends_in_pocket = target_prediction.ends_in_pocket
+	prediction.target_prediction_steps = target_prediction.steps
+	prediction.target_first_stop_reason = target_prediction.first_stop_reason
+	prediction.target_path_length = target_prediction.path_length
 	prediction.path_points.append(cue_center_at_impact)
 	return prediction
 
@@ -1224,10 +1303,15 @@ func _get_predicted_target_path(target_ball: Ball, starting_velocity: Vector2) -
 
 	for _step_index in range(AIM_TARGET_PREDICTION_MAX_STEPS):
 		var speed: float = simulated_velocity.length()
-		if speed <= target_ball.stop_threshold or travel_distance >= AIM_TARGET_PREDICTION_MAX_DISTANCE:
+		if speed <= target_ball.stop_threshold:
+			target_prediction.first_stop_reason = "stopped"
+			break
+		if travel_distance >= AIM_TARGET_PREDICTION_MAX_DISTANCE:
+			target_prediction.first_stop_reason = "max_distance"
 			break
 
 		target_prediction_steps_this_frame += 1
+		target_prediction.steps += 1
 		var previous_position: Vector2 = simulated_position
 		var movement_delta: Vector2 = simulated_velocity * step_delta
 		var remaining_distance: float = AIM_TARGET_PREDICTION_MAX_DISTANCE - travel_distance
@@ -1259,6 +1343,8 @@ func _get_predicted_target_path(target_ball: Ball, starting_velocity: Vector2) -
 		if stop_type != "":
 			_append_target_path_point(target_prediction.points, stop_position, true)
 			target_prediction.ends_in_pocket = stop_type == "pocket"
+			target_prediction.first_stop_reason = stop_type
+			target_prediction.path_length = travel_distance + previous_position.distance_to(stop_position)
 			return target_prediction
 
 		var next_position: Vector2 = step_result.position
@@ -1268,6 +1354,14 @@ func _get_predicted_target_path(target_ball: Ball, starting_velocity: Vector2) -
 
 		simulated_velocity = step_result.velocity
 
+	if target_prediction.first_stop_reason == "inactive":
+		if travel_distance >= AIM_TARGET_PREDICTION_MAX_DISTANCE:
+			target_prediction.first_stop_reason = "max_distance"
+		elif target_prediction.steps >= AIM_TARGET_PREDICTION_MAX_STEPS:
+			target_prediction.first_stop_reason = "max_steps"
+		else:
+			target_prediction.first_stop_reason = "stopped"
+	target_prediction.path_length = travel_distance
 	_append_target_path_point(target_prediction.points, simulated_position, true)
 	return target_prediction
 

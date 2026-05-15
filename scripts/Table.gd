@@ -21,6 +21,19 @@ class ResultCallout:
 const DEBUG_DRAW_BOUNDARY_RECTS := false
 const DEBUG_PHYSICS_PANEL_ENABLED := true
 const DEBUG_SHOT_POWER := false
+const PERFORMANCE_SECTION_ALL := "all"
+const PERFORMANCE_SECTION_CORE := "core"
+const PERFORMANCE_SECTION_TIMING := "timing"
+const PERFORMANCE_SECTION_BALL_DROPS_SCORE := "ball_drops_score"
+const PERFORMANCE_SECTION_WAYFINDER := "wayfinder"
+const PERFORMANCE_SECTION_ANCHOR := "anchor"
+const PERFORMANCE_SECTION_CANNON := "cannon"
+const PERFORMANCE_SECTION_TREASURE := "treasure"
+const PERFORMANCE_SECTION_POWDER_KEG_WAYFINDER := "powder_keg_wayfinder"
+const PERFORMANCE_SECTION_VISUAL_COST := "visual_cost"
+const PERFORMANCE_SECTION_AIM_PREVIEW := "aim_preview"
+const PERFORMANCE_SECTION_PHYSICS := "physics"
+const PERFORMANCE_SECTION_QUARTERMASTER := "quartermaster"
 const SHIP_FLOOR_TEXTURE := preload("res://assets/table_art/ship_floor.png")
 const TABLE_FRAME_TEXTURE := preload("res://assets/table_art/pool_table_frame.png")
 const KRAKEN_SILHOUETTE_TEXTURE := preload("res://assets/table_art/kraken_silhouette.png")
@@ -1083,25 +1096,61 @@ func get_physics_debug_snapshot() -> Dictionary:
 	}
 
 
-func get_performance_debug_snapshot() -> Dictionary:
-	var counts: Dictionary = _get_performance_ball_counts()
-	var anchor_snapshot: Dictionary = anchor_ball_system.get_debug_snapshot()
-	var cannon_snapshot: Dictionary = cannon_ball_system.get_debug_snapshot()
-	var treasure_snapshot: Dictionary = treasure_ball_system.get_debug_snapshot()
-	var ball_drop_snapshot: Dictionary = ball_drop_system.get_debug_snapshot()
-	var aim_snapshot: Dictionary = aim_preview.get_debug_snapshot()
-	var quartermaster_snapshot: Dictionary = quartermaster_system.get_debug_snapshot()
+func get_performance_debug_snapshot(requested_sections: Dictionary = {}) -> Dictionary:
+	var include_all: bool = _should_collect_all_performance_sections(requested_sections)
+	var needs_core: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_CORE)
+	var needs_timing: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_TIMING)
+	var needs_ball_drops_score: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_BALL_DROPS_SCORE)
+	var needs_wayfinder: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_WAYFINDER)
+	var needs_anchor: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_ANCHOR)
+	var needs_cannon: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_CANNON)
+	var needs_treasure: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_TREASURE)
+	var needs_powder_keg_wayfinder: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_POWDER_KEG_WAYFINDER)
+	var needs_visual_cost: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_VISUAL_COST)
+	var needs_aim_preview: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_AIM_PREVIEW)
+	var needs_physics: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_PHYSICS)
+	var needs_quartermaster: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_QUARTERMASTER)
+	var needs_counts: bool = needs_core or needs_wayfinder or needs_powder_keg_wayfinder or needs_visual_cost
 
-	var snapshot := {}
-	snapshot.merge(_get_table_performance_snapshot(counts))
-	snapshot.merge(_get_anomaly_performance_snapshot(counts, anchor_snapshot, cannon_snapshot, treasure_snapshot))
-	snapshot.merge(_get_ball_drop_performance_snapshot(ball_drop_snapshot))
-	snapshot.merge(_get_quartermaster_performance_snapshot(quartermaster_snapshot))
-	snapshot.merge(_get_visual_cost_performance_snapshot(counts))
-	snapshot.merge(_get_physics_performance_snapshot())
-	snapshot.merge(_get_aim_performance_snapshot(aim_snapshot))
-	snapshot.merge(_get_timing_performance_snapshot())
+	var counts: Dictionary = {}
+	if needs_counts:
+		counts = _get_performance_ball_counts(needs_visual_cost)
+
+	var snapshot: Dictionary = {}
+	if needs_core:
+		snapshot.merge(_get_table_performance_snapshot(counts))
+	if needs_ball_drops_score:
+		snapshot.merge(_get_ball_drop_performance_snapshot(ball_drop_system.get_debug_snapshot()))
+		snapshot.merge(_get_score_popup_performance_snapshot())
+	if needs_wayfinder or needs_powder_keg_wayfinder:
+		snapshot.merge(_get_wayfinder_performance_snapshot(counts))
+	if needs_anchor:
+		snapshot.merge(_get_anchor_performance_snapshot(anchor_ball_system.get_debug_snapshot()))
+	if needs_cannon:
+		snapshot.merge(_get_cannon_performance_snapshot(cannon_ball_system.get_debug_snapshot()))
+	if needs_treasure:
+		snapshot.merge(_get_treasure_performance_snapshot(treasure_ball_system.get_debug_snapshot()))
+	if needs_powder_keg_wayfinder:
+		snapshot.merge(_get_powder_keg_performance_snapshot())
+	if needs_quartermaster:
+		snapshot.merge(_get_quartermaster_performance_snapshot(quartermaster_system.get_debug_snapshot()))
+	if needs_visual_cost:
+		snapshot.merge(_get_visual_cost_performance_snapshot(counts))
+	if needs_physics:
+		snapshot.merge(_get_physics_performance_snapshot())
+	if needs_aim_preview:
+		snapshot.merge(_get_aim_performance_snapshot(aim_preview.get_debug_snapshot()))
+	if needs_timing:
+		snapshot.merge(_get_timing_performance_snapshot())
 	return snapshot
+
+
+func _should_collect_all_performance_sections(requested_sections: Dictionary) -> bool:
+	return requested_sections.is_empty() or bool(requested_sections.get(PERFORMANCE_SECTION_ALL, false))
+
+
+func _is_performance_section_requested(requested_sections: Dictionary, section_id: String) -> bool:
+	return bool(requested_sections.get(section_id, false))
 
 
 func _get_table_performance_snapshot(counts: Dictionary) -> Dictionary:
@@ -1116,15 +1165,15 @@ func _get_table_performance_snapshot(counts: Dictionary) -> Dictionary:
 	}
 
 
-func _get_anomaly_performance_snapshot(
-	counts: Dictionary,
-	anchor_snapshot: Dictionary,
-	cannon_snapshot: Dictionary,
-	treasure_snapshot: Dictionary
-) -> Dictionary:
+func _get_wayfinder_performance_snapshot(counts: Dictionary) -> Dictionary:
 	return {
 		"active_wayfinders": counts["active_wayfinders"],
 		"guided_wayfinder_targets": wayfinder_system.get_guided_target_count(),
+	}
+
+
+func _get_anchor_performance_snapshot(anchor_snapshot: Dictionary) -> Dictionary:
+	return {
 		"anchor_balls": anchor_snapshot["active_anchor_balls"],
 		"anchor_affected_balls": anchor_snapshot["affected_balls"],
 		"anchor_force_applications": anchor_snapshot["force_applications"],
@@ -1146,9 +1195,19 @@ func _get_anomaly_performance_snapshot(
 		"anchor_max_visible_field_auras": anchor_snapshot["max_visible_field_auras"],
 		"anchor_spawn_cap_enabled": anchor_snapshot["spawn_cap_enabled"],
 		"anchor_spawn_cap": anchor_snapshot["max_anchor_balls_on_table"],
+	}
+
+
+func _get_cannon_performance_snapshot(cannon_snapshot: Dictionary) -> Dictionary:
+	return {
 		"cannon_balls": cannon_snapshot["active_cannon_balls"],
 		"cannon_collisions": cannon_snapshot["collisions"],
 		"cannon_heavy_impacts": cannon_snapshot["heavy_impacts"],
+	}
+
+
+func _get_treasure_performance_snapshot(treasure_snapshot: Dictionary) -> Dictionary:
+	return {
 		"treasure_balls": treasure_snapshot["active_treasure_balls"],
 		"treasure_balls_seen": treasure_snapshot["seen_treasure_balls"],
 		"treasure_hide_targets": treasure_snapshot["hide_targets"],
@@ -1196,10 +1255,22 @@ func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dict
 	}
 
 
+func _get_score_popup_performance_snapshot() -> Dictionary:
+	return {
+		"active_score_popup_labels": score_system.get_active_popup_label_count(),
+	}
+
+
 func _get_quartermaster_performance_snapshot(quartermaster_snapshot: Dictionary) -> Dictionary:
 	return {
 		"quartermaster_offer_item_ids": quartermaster_snapshot["active_offer_item_ids"],
 		"quartermaster_last_refreshed_offer_index": quartermaster_snapshot["last_refreshed_offer_index"],
+	}
+
+
+func _get_powder_keg_performance_snapshot() -> Dictionary:
+	return {
+		"active_powder_keg_particle_bursts": powder_keg_system.get_active_particle_burst_count(),
 	}
 
 
@@ -1247,6 +1318,21 @@ func _get_aim_performance_snapshot(aim_snapshot: Dictionary) -> Dictionary:
 		"aim_draw_ms": aim_snapshot["draw_ms"],
 		"aim_draw_segments": aim_snapshot["draw_segments"],
 		"aim_draw_calls": aim_snapshot["draw_calls"],
+		"aim_hit_ball_prediction_active": aim_snapshot["hit_ball_prediction_active"],
+		"aim_hit_ball_target_ball_id": aim_snapshot["hit_ball_target_ball_id"],
+		"aim_hit_ball_target_number": aim_snapshot["hit_ball_target_number"],
+		"aim_hit_ball_route": aim_snapshot["hit_ball_route"],
+		"aim_hit_ball_impact_point": aim_snapshot["hit_ball_impact_point"],
+		"aim_hit_ball_impact_normal": aim_snapshot["hit_ball_impact_normal"],
+		"aim_hit_ball_impact_incoming_direction": aim_snapshot["hit_ball_impact_incoming_direction"],
+		"aim_hit_ball_transferred_velocity": aim_snapshot["hit_ball_transferred_velocity"],
+		"aim_hit_ball_transferred_direction": aim_snapshot["hit_ball_transferred_direction"],
+		"aim_hit_ball_target_prediction_steps": aim_snapshot["hit_ball_target_prediction_steps"],
+		"aim_hit_ball_target_first_stop_reason": aim_snapshot["hit_ball_target_first_stop_reason"],
+		"aim_hit_ball_target_path_length": aim_snapshot["hit_ball_target_path_length"],
+		"aim_hit_ball_target_path_point_count": aim_snapshot["hit_ball_target_path_point_count"],
+		"aim_hit_ball_rail_hits_before_impact": aim_snapshot["hit_ball_rail_hits_before_impact"],
+		"aim_hit_ball_cue_impact_segment_index": aim_snapshot["hit_ball_cue_impact_segment_index"],
 	}
 
 
@@ -1259,7 +1345,7 @@ func _get_timing_performance_snapshot() -> Dictionary:
 	}
 
 
-func _get_performance_ball_counts() -> Dictionary:
+func _get_performance_ball_counts(include_visual_cost: bool = true) -> Dictionary:
 	var counts := {
 		"total": 0,
 		"moving": 0,
@@ -1277,12 +1363,14 @@ func _get_performance_ball_counts() -> Dictionary:
 		counts["total"] += 1
 		counts["moving"] += 1 if ball.is_moving() else 0
 		counts["active_wayfinders"] += 1 if ball.is_wayfinder and ball.wayfinder_active else 0
+		if not include_visual_cost:
+			continue
 		var trail_point_count: int = ball.get_trail_point_count()
 		counts["trail_points"] += trail_point_count
 		counts["balls_with_trails"] += 1 if trail_point_count > 0 else 0
 		counts["trail_redraws"] += ball.get_trail_redraw_count()
 
-	counts["stopped"] = max(counts["total"] - counts["moving"], 0)
+	counts["stopped"] = maxi(int(counts["total"]) - int(counts["moving"]), 0)
 	return counts
 
 

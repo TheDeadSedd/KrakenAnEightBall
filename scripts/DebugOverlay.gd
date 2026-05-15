@@ -120,11 +120,15 @@ func _process(_delta: float) -> void:
 
 	var full_performance_visible := performance_overlay_panel.visible
 	var modular_performance_visible := _has_visible_modular_debug_panels()
-	if full_performance_visible or modular_performance_visible:
+	if full_performance_visible:
 		var snapshot: Dictionary = table.get_performance_debug_snapshot()
-		if full_performance_visible:
-			performance_overlay_label.text = _make_performance_debug_text_from_snapshot(snapshot)
+		performance_overlay_label.text = _make_performance_debug_text_from_snapshot(snapshot)
 		if modular_performance_visible:
+			_refresh_visible_modular_debug_panels(snapshot)
+	elif modular_performance_visible:
+		var requested_sections: Dictionary = _get_visible_modular_performance_sections()
+		if not requested_sections.is_empty():
+			var snapshot: Dictionary = table.get_performance_debug_snapshot(requested_sections)
 			_refresh_visible_modular_debug_panels(snapshot)
 
 
@@ -135,7 +139,8 @@ func set_modular_debug_panel_visible(panel_id: String, enabled: bool) -> void:
 
 	panel.visible = enabled
 	if enabled and table != null:
-		_refresh_modular_debug_panel(panel_id, table.get_performance_debug_snapshot())
+		var requested_sections: Dictionary = _get_modular_panel_performance_sections(panel_id)
+		_refresh_modular_debug_panel(panel_id, table.get_performance_debug_snapshot(requested_sections))
 
 
 func get_modular_debug_panel_states() -> Dictionary:
@@ -176,6 +181,58 @@ func _has_visible_modular_debug_panels() -> bool:
 		or visual_effects_panel.visible
 		or physics_performance_panel.visible
 	)
+
+
+func _get_visible_modular_performance_sections() -> Dictionary:
+	var requested_sections: Dictionary = {}
+	if core_performance_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_CORE_PERFORMANCE))
+	if aim_preview_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_AIM_PREVIEW))
+	if treasure_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_TREASURE))
+	if anchor_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_ANCHOR))
+	if ball_drops_score_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_BALL_DROPS_SCORE))
+	if cannon_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_CANNON))
+	if powder_keg_wayfinder_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_POWDER_KEG_WAYFINDER))
+	if visual_effects_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_VISUAL_EFFECTS))
+	if physics_performance_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_PHYSICS))
+	return requested_sections
+
+
+func _get_modular_panel_performance_sections(panel_id: String) -> Dictionary:
+	var requested_sections: Dictionary = {}
+	match panel_id:
+		PANEL_CORE_PERFORMANCE:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_CORE)
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_TIMING)
+		PANEL_AIM_PREVIEW:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_AIM_PREVIEW)
+		PANEL_TREASURE:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_TREASURE)
+		PANEL_ANCHOR:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_ANCHOR)
+		PANEL_BALL_DROPS_SCORE:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_BALL_DROPS_SCORE)
+		PANEL_CANNON:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_CANNON)
+		PANEL_POWDER_KEG_WAYFINDER:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_POWDER_KEG_WAYFINDER)
+		PANEL_VISUAL_EFFECTS:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_VISUAL_COST)
+		PANEL_PHYSICS:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_PHYSICS)
+	return requested_sections
+
+
+func _request_performance_section(requested_sections: Dictionary, section_id: String) -> void:
+	requested_sections[section_id] = true
 
 
 func _refresh_visible_modular_debug_panels(snapshot: Dictionary) -> void:
@@ -589,7 +646,7 @@ func _make_visual_cost_performance_lines(snapshot: Dictionary) -> Array:
 
 
 func _make_aim_preview_performance_lines(snapshot: Dictionary) -> Array:
-	return [
+	var lines: Array = [
 		"AIM PREVIEW",
 		"Aim: %s / comparison %s / frame %.2f ms / last %.2f ms" % [
 			_debug_bool_text(bool(snapshot["aim_prediction_enabled"])),
@@ -621,6 +678,43 @@ func _make_aim_preview_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["aim_draw_calls"],
 		],
 	]
+	lines.append("")
+	lines.append_array(_make_hit_ball_prediction_lines(snapshot))
+	return lines
+
+
+func _make_hit_ball_prediction_lines(snapshot: Dictionary) -> Array:
+	var lines: Array = ["HIT-BALL PREDICTION"]
+	var active: bool = bool(snapshot["aim_hit_ball_prediction_active"])
+	lines.append("Active: %s / route: %s" % [
+		_debug_true_false_text(active),
+		snapshot["aim_hit_ball_route"],
+	])
+	if not active:
+		return lines
+
+	lines.append("Target: %s (#%s) / cue segment: %s / pre-hit rails: %s" % [
+		_debug_id_text(int(snapshot["aim_hit_ball_target_ball_id"])),
+		snapshot["aim_hit_ball_target_number"],
+		snapshot["aim_hit_ball_cue_impact_segment_index"],
+		snapshot["aim_hit_ball_rail_hits_before_impact"],
+	])
+	lines.append("Impact point: %s" % _debug_vector_text(snapshot["aim_hit_ball_impact_point"]))
+	lines.append("Impact normal: %s / incoming: %s" % [
+		_debug_vector_text(snapshot["aim_hit_ball_impact_normal"]),
+		_debug_vector_text(snapshot["aim_hit_ball_impact_incoming_direction"]),
+	])
+	lines.append("Transfer velocity: %s / direction: %s" % [
+		_debug_vector_text(snapshot["aim_hit_ball_transferred_velocity"]),
+		_debug_vector_text(snapshot["aim_hit_ball_transferred_direction"]),
+	])
+	lines.append("Target path: %s steps / %s pts / %s px" % [
+		snapshot["aim_hit_ball_target_prediction_steps"],
+		snapshot["aim_hit_ball_target_path_point_count"],
+		_debug_distance_text(float(snapshot["aim_hit_ball_target_path_length"])),
+	])
+	lines.append("Target stop: %s" % snapshot["aim_hit_ball_target_first_stop_reason"])
+	return lines
 
 
 func _make_physics_performance_lines(snapshot: Dictionary) -> Array:
@@ -718,6 +812,13 @@ func _debug_distance_text(distance: float) -> String:
 	if distance < 0.0:
 		return "none"
 	return "%.1f" % distance
+
+
+func _debug_vector_text(value: Variant) -> String:
+	if not (value is Vector2):
+		return "none"
+	var vector_value: Vector2 = value
+	return "(%.1f, %.1f)" % [vector_value.x, vector_value.y]
 
 
 func _debug_id_text(id_value: int) -> String:
