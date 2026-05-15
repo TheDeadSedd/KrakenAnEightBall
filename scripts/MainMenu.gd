@@ -5,14 +5,18 @@ class_name MainMenu
 # index:category UI / Presentation
 # index:status In Progress
 # index:owner ui_agent
-# index:notes Lightweight title screen shell using the main menu artwork as the primary visual foundation.
+# index:notes Lightweight title screen shell using layered main menu artwork as the primary visual foundation.
 
 const GAMEPLAY_SCENE_PATH := "res://scenes/Main.tscn"
 const UI_FONT := preload("res://assets/fonts/Gothic Pixels.ttf")
-const BACKGROUND_TEXTURE := preload("res://assets/ui/mainmenu.png")
+const BACKGROUND_TEXTURE := preload("res://assets/ui/mainmenu_bg.png")
+const FOREGROUND_TEXTURE := preload("res://assets/ui/mainmenu_fg.png")
+const PRESENTATION_OVERLAY_SCRIPT := preload("res://scripts/MainMenuPresentationOverlay.gd")
 
-var background_image: TextureRect
-var background_scrim: ColorRect
+var background_layer: TextureRect
+var behind_foreground_overlay: MainMenuPresentationOverlay
+var foreground_layer: TextureRect
+var fog_overlay: MainMenuPresentationOverlay
 var menu_panel: PanelContainer
 var title_label: Label
 var subtitle_label: Label
@@ -38,21 +42,39 @@ func _notification(what: int) -> void:
 
 
 func _build_background() -> void:
-	background_image = TextureRect.new()
-	background_image.name = "BackgroundImage"
-	background_image.texture = BACKGROUND_TEXTURE
-	background_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	background_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	background_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_set_full_rect(background_image)
-	add_child(background_image)
+	background_layer = _make_fullscreen_texture_layer("BackgroundLayer", BACKGROUND_TEXTURE)
+	add_child(background_layer)
 
-	background_scrim = ColorRect.new()
-	background_scrim.name = "ReadabilityScrim"
-	background_scrim.color = Color(0.0, 0.018, 0.035, 0.16)
-	background_scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_set_full_rect(background_scrim)
-	add_child(background_scrim)
+	behind_foreground_overlay = _make_presentation_overlay("BehindForegroundOverlay")
+	behind_foreground_overlay.draw_fog_enabled = false
+	add_child(behind_foreground_overlay)
+
+	foreground_layer = _make_fullscreen_texture_layer("ForegroundLayer", FOREGROUND_TEXTURE)
+	add_child(foreground_layer)
+
+	fog_overlay = _make_presentation_overlay("FogOverlay")
+	fog_overlay.draw_moon_glow_enabled = false
+	fog_overlay.draw_star_twinkles_enabled = false
+	fog_overlay.draw_ocean_shimmer_enabled = false
+	add_child(fog_overlay)
+
+
+func _make_fullscreen_texture_layer(layer_name: String, texture: Texture2D) -> TextureRect:
+	var layer := TextureRect.new()
+	layer.name = layer_name
+	layer.texture = texture
+	layer.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	layer.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_set_full_rect(layer)
+	return layer
+
+
+func _make_presentation_overlay(layer_name: String) -> MainMenuPresentationOverlay:
+	var overlay: MainMenuPresentationOverlay = PRESENTATION_OVERLAY_SCRIPT.new()
+	overlay.name = layer_name
+	_set_full_rect(overlay)
+	return overlay
 
 
 func _build_interface() -> void:
