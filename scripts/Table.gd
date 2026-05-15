@@ -1090,11 +1090,13 @@ func get_performance_debug_snapshot() -> Dictionary:
 	var treasure_snapshot: Dictionary = treasure_ball_system.get_debug_snapshot()
 	var ball_drop_snapshot: Dictionary = ball_drop_system.get_debug_snapshot()
 	var aim_snapshot: Dictionary = aim_preview.get_debug_snapshot()
+	var quartermaster_snapshot: Dictionary = quartermaster_system.get_debug_snapshot()
 
 	var snapshot := {}
 	snapshot.merge(_get_table_performance_snapshot(counts))
 	snapshot.merge(_get_anomaly_performance_snapshot(counts, anchor_snapshot, cannon_snapshot, treasure_snapshot))
 	snapshot.merge(_get_ball_drop_performance_snapshot(ball_drop_snapshot))
+	snapshot.merge(_get_quartermaster_performance_snapshot(quartermaster_snapshot))
 	snapshot.merge(_get_visual_cost_performance_snapshot(counts))
 	snapshot.merge(_get_physics_performance_snapshot())
 	snapshot.merge(_get_aim_performance_snapshot(aim_snapshot))
@@ -1191,6 +1193,13 @@ func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dict
 		"ball_drop_last_score_queued": ball_drop_snapshot["last_score_drops_queued"],
 		"ball_drop_total_queued": ball_drop_snapshot["total_drops_queued"],
 		"ball_drop_pending_spawns": ball_drop_snapshot["pending_spawn_drops"],
+	}
+
+
+func _get_quartermaster_performance_snapshot(quartermaster_snapshot: Dictionary) -> Dictionary:
+	return {
+		"quartermaster_offer_item_ids": quartermaster_snapshot["active_offer_item_ids"],
+		"quartermaster_last_refreshed_offer_index": quartermaster_snapshot["last_refreshed_offer_index"],
 	}
 
 

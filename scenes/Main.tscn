@@ -946,26 +946,26 @@ theme_override_font_sizes/font_size = 18
 horizontal_alignment = 1
 text = "Doubloons Available: 0"
 
-[node name="PlainObjectBallButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+[node name="QuartermasterOfferButton0" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
 custom_minimum_size = Vector2(0, 86)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 16
-text = "Loose Object Ball"
+text = "Offer 1"
 
-[node name="WayfinderBallButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+[node name="QuartermasterOfferButton1" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
 custom_minimum_size = Vector2(0, 86)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 16
-text = "Wayfinder Ball"
+text = "Offer 2"
 
-[node name="PowderKegBallButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+[node name="QuartermasterOfferButton2" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
 custom_minimum_size = Vector2(0, 86)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 16
-text = "Powder Keg"
+text = "Offer 3"
 
 [node name="DebugSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
 visible = false

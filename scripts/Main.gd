@@ -36,8 +36,8 @@ func _ready() -> void:
 		pause_menu.resume_requested.connect(_on_pause_resume_requested)
 	if not pause_menu.debug_panel_toggled.is_connected(_on_pause_debug_panel_toggled):
 		pause_menu.debug_panel_toggled.connect(_on_pause_debug_panel_toggled)
-	if not pause_menu.quartermaster_item_requested.is_connected(_on_pause_quartermaster_item_requested):
-		pause_menu.quartermaster_item_requested.connect(_on_pause_quartermaster_item_requested)
+	if not pause_menu.quartermaster_offer_requested.is_connected(_on_pause_quartermaster_offer_requested):
+		pause_menu.quartermaster_offer_requested.connect(_on_pause_quartermaster_offer_requested)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 	result_label.text = ""
@@ -113,8 +113,8 @@ func _on_pause_debug_panel_toggled(panel_id: String, enabled: bool) -> void:
 	debug_overlay.set_modular_debug_panel_visible(panel_id, enabled)
 
 
-func _on_pause_quartermaster_item_requested(item_id: String) -> void:
-	table.quartermaster_system.request_purchase(item_id)
+func _on_pause_quartermaster_offer_requested(offer_index: int) -> void:
+	table.quartermaster_system.request_purchase_offer(offer_index)
 
 
 func _on_pause_quartermaster_cancel_placement_requested() -> void:
