@@ -738,18 +738,20 @@ theme_override_font_sizes/font_size = 14
 text = "Anchor Visuals"
 
 [node name="AnchorDebugVisualCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
-text = "Show Anchor Pull Debug"
+text = "Retired Anchor Pull Debug"
 
 [node name="AnchorSingleLatchCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
-text = "One Anchor Per Target"
+text = "Retired Anchor Pull Latch"
 
 [node name="TreasureDebugVisualCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
 layout_mode = 2
@@ -786,7 +788,7 @@ theme_override_colors/font_outline_color = Color(0.02, 0.03, 0.03, 0.82)
 theme_override_constants/outline_size = 1
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 13
-text = "F: Spawn Wayfinder Ball\nH: Spawn Powder Keg\nJ: Spawn Anchor Ball\nK: Spawn Cannon Ball\nL: Spawn Treasure Ball\nG: Spawn Normal Ball\nF3: Performance Overlay"
+text = "F: Spawn Wayfinder Ball\nH: Spawn Powder Keg\nJ: Create Anchor Curse Seed\nK: Spawn Cannon Ball\nL: Spawn Treasure Ball\nG: Spawn Normal Ball\nF3: Performance Overlay"
 
 [node name="PauseMenu" type="Control" parent="CanvasLayer/HUD"]
 visible = false

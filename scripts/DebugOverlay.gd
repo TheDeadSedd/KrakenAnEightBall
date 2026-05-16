@@ -51,6 +51,7 @@ const PANEL_PHYSICS := "physics"
 @onready var debug_hotkey_label: Label = $DebugMenuPanel/Margin/VBox/DebugHotkeyLabel
 
 var table: BilliardsTable
+var last_debug_overlay_refresh_ms := 0.0
 
 
 func setup(table_ref: BilliardsTable) -> void:
@@ -66,6 +67,8 @@ func setup(table_ref: BilliardsTable) -> void:
 	anchor_visuals_check_box.set_pressed_no_signal(table.anchor_ball_system.are_anchor_visuals_enabled())
 	anchor_debug_visual_check_box.set_pressed_no_signal(table.anchor_ball_system.is_debug_visual_enabled())
 	anchor_single_latch_check_box.set_pressed_no_signal(table.anchor_ball_system.is_single_latch_per_target_enabled())
+	anchor_debug_visual_check_box.visible = false
+	anchor_single_latch_check_box.visible = false
 	treasure_debug_visual_check_box.set_pressed_no_signal(table.treasure_ball_system.is_debug_visual_enabled())
 	_sync_powder_keg_debug_toggles()
 	debug_hotkey_label.text = _make_debug_hotkey_text()
@@ -115,21 +118,28 @@ func _process(_delta: float) -> void:
 	if table == null:
 		return
 
+	var refresh_start_usec: int = Time.get_ticks_usec()
+	var refreshed_debug_text := false
 	if physics_debug_panel.visible:
 		physics_debug_label.text = _make_physics_debug_text()
+		refreshed_debug_text = true
 
 	var full_performance_visible := performance_overlay_panel.visible
 	var modular_performance_visible := _has_visible_modular_debug_panels()
 	if full_performance_visible:
-		var snapshot: Dictionary = table.get_performance_debug_snapshot()
+		var snapshot: Dictionary = _get_performance_snapshot_with_debug_overlay_metrics()
 		performance_overlay_label.text = _make_performance_debug_text_from_snapshot(snapshot)
 		if modular_performance_visible:
 			_refresh_visible_modular_debug_panels(snapshot)
+		refreshed_debug_text = true
 	elif modular_performance_visible:
 		var requested_sections: Dictionary = _get_visible_modular_performance_sections()
 		if not requested_sections.is_empty():
-			var snapshot: Dictionary = table.get_performance_debug_snapshot(requested_sections)
+			var snapshot: Dictionary = _get_performance_snapshot_with_debug_overlay_metrics(requested_sections)
 			_refresh_visible_modular_debug_panels(snapshot)
+			refreshed_debug_text = true
+
+	last_debug_overlay_refresh_ms = _elapsed_ms_since(refresh_start_usec) if refreshed_debug_text else 0.0
 
 
 func set_modular_debug_panel_visible(panel_id: String, enabled: bool) -> void:
@@ -140,7 +150,7 @@ func set_modular_debug_panel_visible(panel_id: String, enabled: bool) -> void:
 	panel.visible = enabled
 	if enabled and table != null:
 		var requested_sections: Dictionary = _get_modular_panel_performance_sections(panel_id)
-		_refresh_modular_debug_panel(panel_id, table.get_performance_debug_snapshot(requested_sections))
+		_refresh_modular_debug_panel(panel_id, _get_performance_snapshot_with_debug_overlay_metrics(requested_sections))
 
 
 func get_modular_debug_panel_states() -> Dictionary:
@@ -181,6 +191,28 @@ func _has_visible_modular_debug_panels() -> bool:
 		or visual_effects_panel.visible
 		or physics_performance_panel.visible
 	)
+
+
+func _get_visible_debug_panel_count() -> int:
+	var count: int = _get_visible_modular_debug_panel_count()
+	count += 1 if physics_debug_panel.visible else 0
+	count += 1 if performance_overlay_panel.visible else 0
+	count += 1 if debug_menu_panel.visible else 0
+	return count
+
+
+func _get_visible_modular_debug_panel_count() -> int:
+	var count := 0
+	count += 1 if core_performance_panel.visible else 0
+	count += 1 if aim_preview_panel.visible else 0
+	count += 1 if treasure_panel.visible else 0
+	count += 1 if anchor_panel.visible else 0
+	count += 1 if ball_drops_score_panel.visible else 0
+	count += 1 if cannon_panel.visible else 0
+	count += 1 if powder_keg_wayfinder_panel.visible else 0
+	count += 1 if visual_effects_panel.visible else 0
+	count += 1 if physics_performance_panel.visible else 0
+	return count
 
 
 func _get_visible_modular_performance_sections() -> Dictionary:
@@ -388,7 +420,7 @@ func _on_powder_keg_suppress_trails_toggled(enabled: bool) -> void:
 
 func _make_debug_hotkey_text() -> String:
 	var hotkeys: Dictionary = table.get_debug_spawn_hotkey_data()
-	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Spawn Anchor Ball\n%s: Spawn Cannon Ball\n%s: Spawn Treasure Ball\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
+	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Create Anchor Curse Seed\n%s: Spawn Cannon Ball\n%s: Spawn Treasure Ball\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
 		OS.get_keycode_string(int(hotkeys["wayfinder_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["powder_keg_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["anchor_ball_spawn_key"])),
@@ -419,8 +451,25 @@ func _make_physics_debug_text() -> String:
 
 
 func _make_performance_debug_text() -> String:
-	var snapshot: Dictionary = table.get_performance_debug_snapshot()
+	var snapshot: Dictionary = _get_performance_snapshot_with_debug_overlay_metrics()
 	return _make_performance_debug_text_from_snapshot(snapshot)
+
+
+func _get_performance_snapshot_with_debug_overlay_metrics(requested_sections: Dictionary = {}) -> Dictionary:
+	var snapshot: Dictionary = table.get_performance_debug_snapshot(requested_sections)
+	_add_debug_overlay_metrics(snapshot)
+	return snapshot
+
+
+func _add_debug_overlay_metrics(snapshot: Dictionary) -> void:
+	var fps: int = Engine.get_frames_per_second()
+	var estimated_frame_ms: float = 1000.0 / float(fps) if fps > 0 else 0.0
+	var measured_physics_ms: float = float(snapshot.get("physics_process_ms", 0.0))
+	snapshot["debug_overlay_refresh_ms"] = last_debug_overlay_refresh_ms
+	snapshot["visible_debug_panel_count"] = _get_visible_debug_panel_count()
+	snapshot["visible_modular_debug_panel_count"] = _get_visible_modular_debug_panel_count()
+	snapshot["estimated_frame_ms"] = estimated_frame_ms
+	snapshot["estimated_frame_physics_gap_ms"] = estimated_frame_ms - measured_physics_ms
 
 
 func _make_performance_debug_text_from_snapshot(snapshot: Dictionary) -> String:
@@ -458,7 +507,11 @@ func _make_ball_drops_score_panel_text(snapshot: Dictionary) -> String:
 	if not ball_drop_lines.is_empty():
 		ball_drop_lines.remove_at(0)
 	lines.append_array(ball_drop_lines)
-	lines.append("Score popups: %s active labels" % snapshot["active_score_popup_labels"])
+	lines.append("Score popups: %s labels / %s glows / %s tweens" % [
+		snapshot["active_score_popup_labels"],
+		snapshot["active_score_glow_labels"],
+		snapshot["active_score_popup_tweens"],
+	])
 	return "\n".join(lines)
 
 
@@ -479,6 +532,11 @@ func _make_performance_summary_lines(snapshot: Dictionary) -> Array:
 	return [
 		"PERFORMANCE",
 		"FPS: %s" % Engine.get_frames_per_second(),
+		"Debug UI: last %.2f ms / %s panels / %s modular" % [
+			float(snapshot["debug_overlay_refresh_ms"]),
+			snapshot["visible_debug_panel_count"],
+			snapshot["visible_modular_debug_panel_count"],
+		],
 		"Balls: %s total / %s moving / %s stopped" % [
 			snapshot["total_balls"],
 			snapshot["moving_balls"],
@@ -531,37 +589,86 @@ func _make_wayfinder_performance_lines(snapshot: Dictionary) -> Array:
 
 func _make_anchor_performance_lines(snapshot: Dictionary) -> Array:
 	return [
-		"Anchor: %s active / %s affected / %s force apps" % [
-			snapshot["anchor_balls"],
-			snapshot["anchor_affected_balls"],
-			snapshot["anchor_force_applications"],
+		"Anchor curse seeds: %s active / %s created / %s candidates" % [
+			snapshot["anchor_curse_seeds_active"],
+			snapshot["anchor_curse_seeds_created"],
+			snapshot["anchor_curse_seed_eligible_candidates"],
 		],
-		"Anchor force: avg %.2f / max %.2f / nearest %s" % [
-			float(snapshot["anchor_avg_force"]),
-			float(snapshot["anchor_max_force"]),
-			_debug_distance_text(float(snapshot["anchor_nearest_distance"])),
+		"Anchor curse pick: #%s / %.1f / %s / replacements %s/%s" % [
+			snapshot["anchor_curse_seed_selected_ball_number"],
+			float(snapshot["anchor_curse_seed_selected_score"]),
+			snapshot["anchor_curse_seed_selected_reason"],
+			snapshot["anchor_curse_seed_penalty_replacements"],
+			snapshot["anchor_curse_seed_penalty_attempts"],
 		],
-		"Anchor overlap: one current %s / skipped %s / max considered %s / overlap targets %s" % [
-			_debug_bool_text(bool(snapshot["anchor_single_latch_enabled"])),
-			snapshot["anchor_single_latch_skipped"],
-			snapshot["anchor_max_anchors_affecting_same_ball"],
-			snapshot["anchor_targets_affected_by_multiple_anchors"],
+		"Anchor chains: %s links / per seed %s / last %s" % [
+			snapshot["anchor_curse_chain_links"],
+			snapshot["anchor_curse_chain_links_per_seed"],
+			snapshot["anchor_curse_chain_last_created"],
 		],
-		"Anchor tuning: %s / radius %.1f / strength %.1f" % [
-			_debug_bool_text(bool(snapshot["anchor_enabled"])),
-			float(snapshot["anchor_radius"]),
-			float(snapshot["anchor_strength"]),
+		"Anchor chain max: %s" % snapshot["anchor_curse_chain_max_lengths"],
+		"Anchor chain health: failed %s / invalidated %s" % [
+			snapshot["anchor_curse_chain_failed_acquisitions"],
+			snapshot["anchor_curse_chain_invalidated_links"],
 		],
-		"Anchor visuals: %s / nodes %s / fields %s/%s / markers %s" % [
+		"Anchor tighten: %s applied / %s skipped / touching %s" % [
+			snapshot["anchor_curse_chain_tighten_steps_applied"],
+			snapshot["anchor_curse_chain_tighten_steps_skipped"],
+			snapshot["anchor_curse_chain_touching_seed_links"],
+		],
+		"Anchor tighten distance: avg %.1f / last %.1f" % [
+			float(snapshot["anchor_curse_chain_tighten_avg_distance"]),
+			float(snapshot["anchor_curse_chain_tighten_last_distance"]),
+		],
+		"Anchor leash: %s clamps / slides %s>%s / blocked %s" % [
+			snapshot["anchor_curse_chain_constraint_clamps"],
+			snapshot["anchor_curse_chain_tighten_slides_started"],
+			snapshot["anchor_curse_chain_tighten_slides_completed"],
+			snapshot["anchor_curse_chain_tighten_slides_blocked"],
+		],
+		"Anchor lanes: %s attempts / %s success / %s blocked / %s skipped" % [
+			snapshot["anchor_curse_chain_deconfliction_attempts"],
+			snapshot["anchor_curse_chain_deconfliction_successes"],
+			snapshot["anchor_curse_chain_deconfliction_blocked"],
+			snapshot["anchor_curse_chain_deconfliction_skipped"],
+		],
+		"Anchor lane last: %s" % snapshot["anchor_curse_chain_deconfliction_last_reason"],
+		"Anchor tighten skips: %s / %s" % [
+			snapshot["anchor_curse_chain_tighten_last_skip_reason"],
+			snapshot["anchor_curse_chain_tighten_skip_reasons"],
+		],
+		"Anchor warning: %s warning / %s ready / %.1fs / %s" % [
+			snapshot["anchor_curse_warning_seeds"],
+			snapshot["anchor_curse_spread_ready"],
+			float(snapshot["anchor_curse_warning_timer_remaining"]),
+			snapshot["anchor_curse_warning_timer_state"],
+		],
+		"Anchor warning counts: %s started / %s reset" % [
+			snapshot["anchor_curse_warning_started"],
+			snapshot["anchor_curse_warning_resets"],
+		],
+		"Anchor collapses: %s total / cue %s / powder %s / cannon %s" % [
+			snapshot["anchor_curse_collapsed_total"],
+			snapshot["anchor_curse_collapsed_by_cue"],
+			snapshot["anchor_curse_collapsed_by_powder"],
+			snapshot["anchor_curse_collapsed_by_cannon"],
+		],
+		"Anchor collapse pocket: %s / last chained %s" % [
+			snapshot["anchor_curse_collapsed_by_chained_ball_pocket"],
+			_debug_id_text(int(snapshot["anchor_curse_last_collapsed_chained_ball"])),
+		],
+		"Anchor collapse chains released: %s" % snapshot["anchor_curse_chains_released_by_collapse"],
+		"Anchor spread: %s events / %s seeds / %s skipped" % [
+			snapshot["anchor_curse_spread_events_total"],
+			snapshot["anchor_curse_seeds_created_by_spread"],
+			snapshot["anchor_curse_spread_blocked_skipped"],
+		],
+		"Anchor spread state: %s grace / max active %s" % [
+			snapshot["anchor_curse_new_seed_grace_count"],
+			snapshot["anchor_curse_max_active_seeds"],
+		],
+		"Anchor visuals: %s" % [
 			_debug_bool_text(bool(snapshot["anchor_visuals_enabled"])),
-			snapshot["anchor_visual_nodes_active"],
-			snapshot["anchor_field_rings_drawn"],
-			snapshot["anchor_max_visible_field_auras"],
-			snapshot["anchor_affected_markers_active"],
-		],
-		"Anchor debug cap: %s / %s" % [
-			_debug_bool_text(bool(snapshot["anchor_spawn_cap_enabled"])),
-			snapshot["anchor_spawn_cap"],
 		],
 	]
 
@@ -638,9 +745,17 @@ func _make_visual_cost_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["balls_with_trails"],
 			snapshot["trail_redraws"],
 		],
-		"Particles/popups: %s Powder Keg bursts / %s score labels" % [
-			snapshot["active_powder_keg_particle_bursts"],
+		"Score UI: %s labels / %s glow clones / %s tweens" % [
 			snapshot["active_score_popup_labels"],
+			snapshot["active_score_glow_labels"],
+			snapshot["active_score_popup_tweens"],
+		],
+		"Debug UI: last %.2f ms / %s panels visible" % [
+			float(snapshot["debug_overlay_refresh_ms"]),
+			snapshot["visible_debug_panel_count"],
+		],
+		"Particles: %s Powder Keg bursts" % [
+			snapshot["active_powder_keg_particle_bursts"],
 		],
 	]
 
@@ -744,13 +859,21 @@ func _make_physics_performance_lines(snapshot: Dictionary) -> Array:
 func _make_timing_performance_lines(snapshot: Dictionary) -> Array:
 	return [
 		"TIMING",
-		"Frame: %.2f ms / ball %.2f / rail %.2f / pocket %.2f" % [
+		"Frame est: %.2f ms / physics gap %.2f ms" % [
+			float(snapshot["estimated_frame_ms"]),
+			float(snapshot["estimated_frame_physics_gap_ms"]),
+		],
+		"Physics: %.2f ms / ball %.2f / rail %.2f / pocket %.2f" % [
 			float(snapshot["physics_process_ms"]),
 			float(snapshot["ball_collision_ms"]),
 			float(snapshot["rail_collision_ms"]),
 			float(snapshot["pocket_check_ms"]),
 		],
 	]
+
+
+func _elapsed_ms_since(start_usec: int) -> float:
+	return float(Time.get_ticks_usec() - start_usec) / 1000.0
 
 
 func _sort_ball_debug_snapshots_by_speed(ball_a: Dictionary, ball_b: Dictionary) -> bool:
@@ -780,8 +903,10 @@ func _get_ball_debug_name(ball_data: Dictionary) -> String:
 		return "Wayfinder Ball"
 	if bool(ball_data["is_powder_keg"]):
 		return "Powder Keg"
+	if bool(ball_data.get("is_anchor_curse_seed", false)):
+		return "Anchor Curse Seed"
 	if bool(ball_data["is_anchor_ball"]):
-		return "Anchor Ball"
+		return "Retired Anchor Ball"
 	if bool(ball_data["is_cannon_ball"]):
 		return "Cannon Ball"
 	if bool(ball_data["is_treasure_ball"]):

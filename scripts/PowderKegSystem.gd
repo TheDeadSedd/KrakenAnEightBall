@@ -37,6 +37,8 @@ func setup(table_ref) -> void:
 func handle_collision(ball_a: Ball, ball_b: Ball) -> void:
 	_try_explode_from_trigger_contact(ball_a, ball_b)
 	_try_explode_from_trigger_contact(ball_b, ball_a)
+	_try_collapse_anchor_from_powder_contact(ball_a, ball_b)
+	_try_collapse_anchor_from_powder_contact(ball_b, ball_a)
 
 
 func get_active_particle_burst_count() -> int:
@@ -65,6 +67,17 @@ func _can_trigger_powder_keg(striker: Ball) -> bool:
 	return table.cannon_ball_system.can_trigger_powder_keg(striker)
 
 
+func _try_collapse_anchor_from_powder_contact(powder_keg: Ball, target: Ball) -> void:
+	if table == null or powder_keg == null or target == null:
+		return
+	if not powder_keg.is_powder_keg or not powder_keg.is_gameplay_active():
+		return
+	if not target.is_anchor_curse_seed or not target.is_gameplay_active():
+		return
+
+	table.anchor_ball_system.try_collapse_curse_seed_from_powder(target)
+
+
 func _explode_powder_keg(powder_keg: Ball) -> void:
 	var explosion_center: Vector2 = powder_keg.global_position
 	var impact_data: Dictionary = _push_nearby_balls(powder_keg, explosion_center)
@@ -87,6 +100,9 @@ func _push_nearby_balls(powder_keg: Ball, explosion_center: Vector2) -> Dictiona
 		var distance: float = offset.length()
 		if distance > explosion_radius:
 			continue
+
+		if other_ball.is_anchor_curse_seed:
+			table.anchor_ball_system.try_collapse_curse_seed_from_powder(other_ball)
 
 		var distance_ratio: float = 1.0 - clamp(distance / explosion_radius, 0.0, 1.0)
 		var applied_ratio: float = lerp(min_force_ratio, 1.0, distance_ratio)

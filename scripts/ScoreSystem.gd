@@ -113,6 +113,8 @@ var awarded_event_types_by_ball: Dictionary = {}
 var sink_contexts_by_ball: Dictionary = {}
 var score_popups_by_ball: Dictionary = {}
 var active_score_popups: Array[ScorePopup] = []
+var active_score_glow_label_count := 0
+var active_score_popup_tween_count := 0
 
 
 func setup(table_ref) -> void:
@@ -172,6 +174,14 @@ func get_active_popup_label_count() -> int:
 			if is_instance_valid(event_label):
 				label_count += 1
 	return label_count
+
+
+func get_active_score_glow_label_count() -> int:
+	return active_score_glow_label_count
+
+
+func get_active_score_popup_tween_count() -> int:
+	return active_score_popup_tween_count
 
 
 func score_sunk_ball_snapshot(snapshot: Dictionary, sink_context: Dictionary = {}) -> void:
@@ -807,8 +817,9 @@ func _spawn_reveal_glow_deferred(label: Label, target_position: Variant = null) 
 	_apply_glow_label_theme(label, glow_label)
 	table.add_child(glow_label)
 	table.move_child(glow_label, label.get_index())
+	_track_score_glow_label(glow_label)
 
-	var tween: Tween = table.create_tween()
+	var tween: Tween = _create_score_popup_tween()
 	tween.set_parallel(true)
 	if target_position is Vector2:
 		tween.tween_property(glow_label, "position", target_position, SCORE_LABEL_GLOW_POP_TIME + SCORE_LABEL_GLOW_FADE_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -830,7 +841,7 @@ func _apply_glow_label_theme(source: Label, target: Label) -> void:
 
 func _play_score_segment_pop_in(label: Label) -> void:
 	_spawn_reveal_glow(label)
-	var tween: Tween = table.create_tween()
+	var tween: Tween = _create_score_popup_tween()
 	tween.set_parallel(true)
 	tween.tween_property(label, "modulate", SCORE_LABEL_POP_FLASH_COLOR, SCORE_POPUP_POP_IN_TIME)
 	tween.tween_property(label, "scale", SCORE_POPUP_POP_SCALE, SCORE_POPUP_POP_IN_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -843,7 +854,7 @@ func _pulse_final_score_total(popup: ScorePopup) -> void:
 		return
 
 	var total_label: Label = popup.score_labels[popup.score_labels.size() - 1]
-	var tween: Tween = table.create_tween()
+	var tween: Tween = _create_score_popup_tween()
 	tween.tween_property(total_label, "scale", SCORE_POPUP_FINAL_PULSE_SCALE, SCORE_POPUP_POP_IN_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tween.tween_property(total_label, "scale", Vector2.ONE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
@@ -953,7 +964,7 @@ func _get_event_label_tilt(event_index: int) -> float:
 func _erupt_score_event_label(label: Label, popup: ScorePopup, target_offset: Vector2) -> void:
 	var target_position: Vector2 = popup.anchor_position + popup.lifetime_drift + target_offset
 	_spawn_reveal_glow(label, target_position)
-	var tween: Tween = table.create_tween()
+	var tween: Tween = _create_score_popup_tween()
 	tween.set_parallel(true)
 	tween.tween_property(label, "position", target_position, SCORE_EVENT_LABEL_ERUPT_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tween.tween_property(label, "modulate", SCORE_LABEL_POP_FLASH_COLOR, SCORE_EVENT_LABEL_ERUPT_TIME)
@@ -964,7 +975,7 @@ func _erupt_score_event_label(label: Label, popup: ScorePopup, target_offset: Ve
 
 func _play_grouped_event_label_pop(label: Label) -> void:
 	_spawn_reveal_glow(label)
-	var tween: Tween = table.create_tween()
+	var tween: Tween = _create_score_popup_tween()
 	tween.set_parallel(true)
 	tween.tween_property(label, "modulate", SCORE_LABEL_POP_FLASH_COLOR, SCORE_EVENT_LABEL_ERUPT_TIME * 0.45)
 	tween.tween_property(label, "scale", SCORE_EVENT_LABEL_POP_SCALE, SCORE_EVENT_LABEL_ERUPT_TIME * 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
@@ -987,7 +998,7 @@ func _place_score_label_below_gameplay(label: Label) -> void:
 
 func _fade_out_score_popup(popup: ScorePopup) -> void:
 	popup.removal_started = true
-	var tween: Tween = table.create_tween()
+	var tween: Tween = _create_score_popup_tween()
 	tween.set_parallel(true)
 	var drift: Vector2 = popup.outward_direction * SCORE_POPUP_OUTWARD_DRIFT_DISTANCE
 	for score_label in popup.score_labels:
@@ -1010,3 +1021,23 @@ func _remove_score_popup(popup: ScorePopup) -> void:
 	for event_label in popup.event_labels:
 		if is_instance_valid(event_label):
 			event_label.queue_free()
+
+
+func _track_score_glow_label(glow_label: Label) -> void:
+	active_score_glow_label_count += 1
+	glow_label.tree_exiting.connect(_on_score_glow_label_tree_exiting)
+
+
+func _on_score_glow_label_tree_exiting() -> void:
+	active_score_glow_label_count = maxi(active_score_glow_label_count - 1, 0)
+
+
+func _create_score_popup_tween() -> Tween:
+	var tween: Tween = table.create_tween()
+	active_score_popup_tween_count += 1
+	tween.finished.connect(_on_score_popup_tween_finished)
+	return tween
+
+
+func _on_score_popup_tween_finished() -> void:
+	active_score_popup_tween_count = maxi(active_score_popup_tween_count - 1, 0)

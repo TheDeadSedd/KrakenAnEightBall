@@ -100,6 +100,7 @@ var is_wayfinder := false
 var wayfinder_active := false
 var is_powder_keg := false
 var is_anchor_ball := false
+var is_anchor_curse_seed := false
 var is_cannon_ball := false
 var is_treasure_ball := false
 var anchor_visual_effect_strength := 0.7
@@ -324,6 +325,7 @@ func setup(
 	is_wayfinder = new_is_wayfinder
 	is_powder_keg = new_is_powder_keg
 	is_anchor_ball = new_is_anchor_ball
+	is_anchor_curse_seed = false
 	is_cannon_ball = new_is_cannon_ball
 	is_treasure_ball = new_is_treasure_ball
 	set_cannon_presence_visual(0.0, Vector2.RIGHT)
@@ -338,8 +340,49 @@ func setup(
 	queue_redraw()
 
 
+func become_anchor_curse_seed() -> void:
+	velocity = Vector2.ZERO
+	is_wayfinder = false
+	wayfinder_active = false
+	is_powder_keg = false
+	is_anchor_ball = true
+	is_anchor_curse_seed = true
+	is_cannon_ball = false
+	is_treasure_ball = false
+	_clear_treasure_leg_visual()
+	_clear_anchor_influence_visual()
+	set_cannon_presence_visual(0.0, Vector2.RIGHT)
+	_cannon_presence_visual_strength = 0.0
+	_cannon_presence_flash_strength = 0.0
+	_cannon_presence_flash_remaining = 0.0
+	set_anchor_field_visual_enabled(false)
+	_update_label()
+	_update_number_color()
+	_update_label_layout()
+	queue_redraw()
+
+
+func clear_anchor_curse_seed() -> void:
+	if not is_anchor_curse_seed:
+		return
+
+	velocity = Vector2.ZERO
+	is_anchor_ball = false
+	is_anchor_curse_seed = false
+	_clear_anchor_influence_visual()
+	set_anchor_field_visual_enabled(false)
+	_update_label()
+	_update_number_color()
+	_update_label_layout()
+	queue_redraw()
+
+
 func apply_friction(delta: float) -> void:
 	if not gameplay_enabled:
+		return
+
+	if is_anchor_curse_seed:
+		velocity = Vector2.ZERO
 		return
 
 	var speed: float = velocity.length()
@@ -412,12 +455,17 @@ func move_ball(delta: float) -> void:
 	if not gameplay_enabled:
 		return
 
+	if is_anchor_curse_seed:
+		velocity = Vector2.ZERO
+		return
+
 	position += velocity * delta
 
 
 func sink() -> void:
 	velocity = Vector2.ZERO
 	gameplay_enabled = false
+	is_anchor_curse_seed = false
 	_reset_wayfinder_state()
 	_spawn_drop_active = false
 	_spawn_drop_settle_velocity = Vector2.ZERO

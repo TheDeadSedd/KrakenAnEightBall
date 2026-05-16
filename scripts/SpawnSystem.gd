@@ -49,7 +49,9 @@ const TOTAL_ANOMALY_SPAWN_CHANCE := 0.12
 const WAYFINDER_SPAWN_CHANCE := 0.06
 const POWDER_KEG_SPAWN_CHANCE := 0.06
 
-# Anchor rolls before the regular anomaly pool and uses table population escalation.
+# Retired continuous-field Anchor reward rolls stay disabled. The debug Anchor
+# hotkey now transforms an eligible existing object ball into a curse seed.
+const ANCHOR_PRIORITY_REWARD_SPAWN_ENABLED := false
 const ANCHOR_HIGH_COUNT_THRESHOLD := 40
 const ANCHOR_LOW_COUNT_SPAWN_CHANCE := 0.03
 const ANCHOR_HIGH_COUNT_SPAWN_CHANCE := 0.30
@@ -160,9 +162,11 @@ func queue_debug_powder_keg_spawn() -> void:
 
 
 func queue_debug_anchor_ball_spawn() -> void:
-	var request: SpawnBallRequest = _make_specific_spawn_request(false, false, true, false)
-	pending_spawn_requests.append(request)
-	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, request.is_cannon_ball)
+	var result: Dictionary = table.anchor_ball_system.try_create_debug_curse_seed()
+	var message := "ANCHOR CURSE SEED ROOTED"
+	if not bool(result.get("created", false)):
+		message = "NO ANCHOR SEED TARGET"
+	table.queue_spawn_reward_message(false, false, false, false, message)
 
 
 func queue_debug_cannon_ball_spawn() -> void:
@@ -325,15 +329,9 @@ func _create_powder_keg_ball(number: int, color: Color, position: Vector2) -> Ba
 
 
 func _create_anchor_ball(number: int, color: Color, position: Vector2) -> Ball:
-	var ball := BALL_SCENE.instantiate() as Ball
-	table.balls.add_child(ball)
-	ball.global_position = position
-	ball.setup(Ball.BallType.OBJECT, number, color, false, false, true)
-	ball.set_anchor_visuals_enabled(table.anchor_ball_system.are_anchor_visuals_enabled())
-	ball.set_anchor_field_visual_enabled(
-		table.anchor_ball_system.get_current_anchor_ball_count() < table.anchor_ball_system.max_visible_field_auras
-	)
-	return ball
+	# Retired continuous-field Anchor fallback. No caller should create old
+	# field Anchors now; if this path is reached, spawn a normal ball instead.
+	return _create_ball(Ball.BallType.OBJECT, number, color, position)
 
 
 func _create_cannon_ball(number: int, color: Color, position: Vector2) -> Ball:
@@ -444,6 +442,8 @@ func _can_spawn_anchor_ball() -> bool:
 
 
 func _roll_anchor_priority_spawn() -> bool:
+	if not ANCHOR_PRIORITY_REWARD_SPAWN_ENABLED:
+		return false
 	if not _can_spawn_anchor_ball():
 		return false
 	return randf() <= _get_anchor_priority_spawn_chance()

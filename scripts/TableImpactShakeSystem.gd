@@ -15,6 +15,9 @@ class_name TableImpactShakeSystem
 @export var base_strength := 3.2
 @export var strength_per_affected_ball := 0.32
 @export var cannon_ball_bonus_strength := 2.2
+@export var anchor_spread_strength := 4.2
+@export var anchor_spread_strength_per_seed := 0.65
+@export var anchor_spread_duration := 0.18
 @export var max_table_art_offset := 11.0
 @export var floor_offset_ratio := 0.0
 @export var ball_shimmy_ratio := 0.30
@@ -61,6 +64,16 @@ func request_cannon_heavy_impact(impact_direction: Vector2, impact_strength: flo
 		return
 
 	_start_impact(_get_safe_direction(impact_direction), impact_strength, cannon_impact_duration)
+
+
+func request_anchor_spread_impact(spread_position: Vector2, created_seed_count: int) -> void:
+	if not enabled or table == null:
+		return
+
+	var table_center: Vector2 = table.playfield_rect.get_center()
+	var impact_direction: Vector2 = spread_position - table_center
+	var impact_strength: float = anchor_spread_strength + float(created_seed_count) * anchor_spread_strength_per_seed
+	_start_impact(_get_safe_direction(impact_direction), impact_strength, anchor_spread_duration)
 
 
 func _start_impact(impact_direction: Vector2, impact_strength: float, duration: float) -> void:

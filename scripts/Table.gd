@@ -264,12 +264,14 @@ func _physics_process(delta: float) -> void:
 	var step_delta: float = delta / float(PHYSICS_SUBSTEPS)
 	for step_index in range(PHYSICS_SUBSTEPS):
 		wayfinder_system.update_guidance(step_delta)
-		anchor_ball_system.update_pull(step_delta)
 		treasure_ball_system.update_hiding(step_delta)
+		anchor_ball_system.update_curse_chain_slides(step_delta)
 		_move_balls(step_delta)
+		anchor_ball_system.enforce_curse_chain_constraints()
 		var phase_start_usec: int = Time.get_ticks_usec()
 		_resolve_ball_collisions()
 		perf_ball_collision_ms += _elapsed_ms_since(phase_start_usec)
+		anchor_ball_system.enforce_curse_chain_constraints()
 		phase_start_usec = Time.get_ticks_usec()
 		if _handle_pocket_checks():
 			perf_pocket_check_ms += _elapsed_ms_since(phase_start_usec)
@@ -278,6 +280,7 @@ func _physics_process(delta: float) -> void:
 		phase_start_usec = Time.get_ticks_usec()
 		_resolve_rail_collisions()
 		perf_rail_collision_ms += _elapsed_ms_since(phase_start_usec)
+		anchor_ball_system.enforce_curse_chain_constraints()
 		aim_preview.record_actual_path_step()
 		_apply_ball_friction(step_delta, step_index == PHYSICS_SUBSTEPS - 1)
 
@@ -290,6 +293,8 @@ func _physics_process(delta: float) -> void:
 	_process_callout_queue(delta)
 	_try_finish_shot()
 	var can_use_cue: bool = _can_release_current_shot() if is_dragging else _can_start_aiming()
+	var can_run_anchor_warning_timer: bool = can_use_cue and not shot_active
+	anchor_ball_system.update_curse_warning_timers(delta, can_run_anchor_warning_timer)
 	cue_controller.update_cue(cue_ball, can_use_cue, is_dragging, _get_current_shot_drag_vector(), MAX_DRAG_DISTANCE, game_over, delta)
 	if is_dragging:
 		_mark_aim_preview_dirty()
@@ -342,6 +347,7 @@ func _draw() -> void:
 	_ensure_table_geometry_cached()
 	_draw_table_art()
 	_draw_collision_debug()
+	anchor_ball_system.draw_curse_chains(self)
 	anchor_ball_system.draw_debug(self)
 	treasure_ball_system.draw_debug(self)
 
@@ -571,6 +577,9 @@ func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
 
 
 func _separate_overlapping_balls(ball_a: Ball, ball_b: Ball, normal: Vector2, overlap: float) -> void:
+	if anchor_ball_system.try_separate_curse_seed_overlap(ball_a, ball_b, normal, overlap):
+		return
+
 	var correction: Vector2 = normal * (overlap * 0.5 + 0.01)
 	ball_a.global_position -= correction
 	ball_b.global_position += correction
@@ -588,6 +597,8 @@ func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2,
 	var impulse_strength: float = (1.0 + BALL_COLLISION_RESTITUTION) * speed_along_normal * 0.5
 	impulse_strength *= BALL_VELOCITY_TRANSFER
 	var impulse: Vector2 = normal * impulse_strength
+	if anchor_ball_system.try_apply_curse_seed_collision_response(ball_a, ball_b, normal, impulse):
+		return true
 	if cannon_ball_system.try_apply_collision_response(ball_a, ball_b, normal, impulse):
 		return true
 	if treasure_ball_system.try_apply_collision_response(ball_a, ball_b, normal, impulse):
@@ -879,6 +890,7 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 		return
 
 	var score_context: Dictionary = _make_sink_score_context(ball)
+	anchor_ball_system.handle_ball_pocketed(ball)
 	ball.sink()
 	ball.queue_free()
 	_note_object_ball_pocketed(ball, score_context)
@@ -895,13 +907,29 @@ func _handle_special_ball_pocketed(ball: Ball, reset_origin: Vector2, ball_label
 	if not penalty_message.is_empty():
 		_queue_result_message(penalty_message)
 
-	var removed_penalty_ball: bool = _remove_penalty_object_ball(sink_position)
-	_reset_ball(ball, reset_origin, _get_special_ball_penalty_status(ball_label, penalty_amount, removed_penalty_ball))
+	var curse_seed_created := false
+	var removed_penalty_ball := false
+	if ball == eight_ball:
+		var curse_seed_result: Dictionary = anchor_ball_system.try_create_curse_seed_from_eight_ball_penalty(sink_position)
+		curse_seed_created = bool(curse_seed_result.get("created", false))
+	else:
+		removed_penalty_ball = _remove_penalty_object_ball(sink_position)
+	_reset_ball(
+		ball,
+		reset_origin,
+		_get_special_ball_penalty_status(ball_label, penalty_amount, removed_penalty_ball, curse_seed_created)
+	)
 
 
-func _get_special_ball_penalty_status(ball_label: String, penalty_amount: int, removed_penalty_ball: bool) -> String:
+func _get_special_ball_penalty_status(
+	ball_label: String,
+	penalty_amount: int,
+	removed_penalty_ball: bool,
+	curse_seed_created: bool = false
+) -> String:
 	var removal_text: String = " A ball was taken." if removed_penalty_ball else ""
-	return "%s recovered. -%s Doubloons.%s" % [ball_label, penalty_amount, removal_text]
+	var curse_text: String = " An Anchor seed took root." if curse_seed_created else ""
+	return "%s recovered. -%s Doubloons.%s%s" % [ball_label, penalty_amount, removal_text, curse_text]
 
 
 func _remove_penalty_object_ball(origin: Vector2) -> bool:
@@ -1124,12 +1152,19 @@ func _try_finish_shot() -> void:
 	if not shot_active or not _all_balls_stopped():
 		return
 
+	var should_advance_anchor_chains: bool = not cue_control_reclaimed
 	shot_active = false
 	cue_control_reclaimed = false
 	cue_reclaim_eligible = false
 	cue_reclaim_blocker_reason = "No active shot"
 	aim_preview.stop_actual_path_recording()
 	shot_event_system.finish_shot()
+	if should_advance_anchor_chains:
+		_handle_cue_control_regained_after_shot()
+
+
+func _handle_cue_control_regained_after_shot() -> void:
+	anchor_ball_system.advance_curse_chains_on_cue_control_regained()
 #endregion
 
 
@@ -1251,6 +1286,54 @@ func _get_anchor_performance_snapshot(anchor_snapshot: Dictionary) -> Dictionary
 		"anchor_max_visible_field_auras": anchor_snapshot["max_visible_field_auras"],
 		"anchor_spawn_cap_enabled": anchor_snapshot["spawn_cap_enabled"],
 		"anchor_spawn_cap": anchor_snapshot["max_anchor_balls_on_table"],
+		"anchor_curse_seeds_active": anchor_snapshot["active_curse_seeds"],
+		"anchor_curse_seeds_created": anchor_snapshot["curse_seeds_created"],
+		"anchor_curse_seed_penalty_attempts": anchor_snapshot["curse_seed_penalty_attempts"],
+		"anchor_curse_seed_penalty_replacements": anchor_snapshot["curse_seed_penalty_replacements"],
+		"anchor_curse_seed_eligible_candidates": anchor_snapshot["curse_seed_eligible_candidates"],
+		"anchor_curse_seed_selected_score": anchor_snapshot["curse_seed_selected_score"],
+		"anchor_curse_seed_selected_reason": anchor_snapshot["curse_seed_selected_reason"],
+		"anchor_curse_seed_selected_ball_number": anchor_snapshot["curse_seed_selected_ball_number"],
+		"anchor_curse_chain_links": anchor_snapshot["curse_chain_links"],
+		"anchor_curse_chain_links_per_seed": anchor_snapshot["curse_chain_links_per_seed"],
+		"anchor_curse_chain_failed_acquisitions": anchor_snapshot["curse_chain_failed_acquisitions"],
+		"anchor_curse_chain_invalidated_links": anchor_snapshot["curse_chain_invalidated_links"],
+		"anchor_curse_chain_last_created": anchor_snapshot["curse_chain_last_created"],
+		"anchor_curse_chain_tighten_steps_applied": anchor_snapshot["curse_chain_tighten_steps_applied"],
+		"anchor_curse_chain_tighten_steps_skipped": anchor_snapshot["curse_chain_tighten_steps_skipped"],
+		"anchor_curse_chain_tighten_avg_distance": anchor_snapshot["curse_chain_tighten_avg_distance"],
+		"anchor_curse_chain_tighten_last_distance": anchor_snapshot["curse_chain_tighten_last_distance"],
+		"anchor_curse_chain_touching_seed_links": anchor_snapshot["curse_chain_touching_seed_links"],
+		"anchor_curse_chain_tighten_last_skip_reason": anchor_snapshot["curse_chain_tighten_last_skip_reason"],
+		"anchor_curse_chain_tighten_skip_reasons": anchor_snapshot["curse_chain_tighten_skip_reasons"],
+		"anchor_curse_chain_max_lengths": anchor_snapshot["curse_chain_max_lengths"],
+		"anchor_curse_chain_constraint_clamps": anchor_snapshot["curse_chain_constraint_clamps"],
+		"anchor_curse_chain_tighten_slides_started": anchor_snapshot["curse_chain_tighten_slides_started"],
+		"anchor_curse_chain_tighten_slides_completed": anchor_snapshot["curse_chain_tighten_slides_completed"],
+		"anchor_curse_chain_tighten_slides_blocked": anchor_snapshot["curse_chain_tighten_slides_blocked"],
+		"anchor_curse_chain_deconfliction_attempts": anchor_snapshot["curse_chain_deconfliction_attempts"],
+		"anchor_curse_chain_deconfliction_successes": anchor_snapshot["curse_chain_deconfliction_successes"],
+		"anchor_curse_chain_deconfliction_blocked": anchor_snapshot["curse_chain_deconfliction_blocked"],
+		"anchor_curse_chain_deconfliction_skipped": anchor_snapshot["curse_chain_deconfliction_skipped"],
+		"anchor_curse_chain_deconfliction_last_reason": anchor_snapshot["curse_chain_deconfliction_last_reason"],
+		"anchor_curse_warning_seeds": anchor_snapshot["curse_warning_seeds"],
+		"anchor_curse_warning_timer_remaining": anchor_snapshot["curse_warning_timer_remaining"],
+		"anchor_curse_warning_timer_state": anchor_snapshot["curse_warning_timer_state"],
+		"anchor_curse_spread_ready": anchor_snapshot["curse_warning_spread_ready"],
+		"anchor_curse_warning_started": anchor_snapshot["curse_warning_started"],
+		"anchor_curse_warning_resets": anchor_snapshot["curse_warning_resets"],
+		"anchor_curse_collapsed_total": anchor_snapshot["curse_collapsed_total"],
+		"anchor_curse_collapsed_by_cue": anchor_snapshot["curse_collapsed_by_cue"],
+		"anchor_curse_collapsed_by_powder": anchor_snapshot["curse_collapsed_by_powder"],
+		"anchor_curse_collapsed_by_cannon": anchor_snapshot["curse_collapsed_by_cannon"],
+		"anchor_curse_collapsed_by_chained_ball_pocket": anchor_snapshot["curse_collapsed_by_chained_ball_pocket"],
+		"anchor_curse_last_collapsed_chained_ball": anchor_snapshot["curse_last_collapsed_chained_ball"],
+		"anchor_curse_chains_released_by_collapse": anchor_snapshot["curse_chains_released_by_collapse"],
+		"anchor_curse_spread_events_total": anchor_snapshot["curse_spread_events_total"],
+		"anchor_curse_seeds_created_by_spread": anchor_snapshot["curse_seeds_created_by_spread"],
+		"anchor_curse_spread_blocked_skipped": anchor_snapshot["curse_spread_blocked_skipped"],
+		"anchor_curse_new_seed_grace_count": anchor_snapshot["curse_new_seed_grace_count"],
+		"anchor_curse_max_active_seeds": anchor_snapshot["curse_max_active_seeds"],
 	}
 
 
@@ -1314,6 +1397,8 @@ func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dict
 func _get_score_popup_performance_snapshot() -> Dictionary:
 	return {
 		"active_score_popup_labels": score_system.get_active_popup_label_count(),
+		"active_score_glow_labels": score_system.get_active_score_glow_label_count(),
+		"active_score_popup_tweens": score_system.get_active_score_popup_tween_count(),
 	}
 
 
@@ -1337,6 +1422,8 @@ func _get_visual_cost_performance_snapshot(counts: Dictionary) -> Dictionary:
 		"trail_redraws": counts["trail_redraws"],
 		"active_powder_keg_particle_bursts": powder_keg_system.get_active_particle_burst_count(),
 		"active_score_popup_labels": score_system.get_active_popup_label_count(),
+		"active_score_glow_labels": score_system.get_active_score_glow_label_count(),
+		"active_score_popup_tweens": score_system.get_active_score_popup_tween_count(),
 	}
 
 
@@ -1438,6 +1525,7 @@ func _get_ball_debug_snapshot(ball: Ball) -> Dictionary:
 		"is_wayfinder": ball.is_wayfinder,
 		"is_powder_keg": ball.is_powder_keg,
 		"is_anchor_ball": ball.is_anchor_ball,
+		"is_anchor_curse_seed": ball.is_anchor_curse_seed,
 		"is_cannon_ball": ball.is_cannon_ball,
 		"is_treasure_ball": ball.is_treasure_ball,
 		"wayfinder_active": ball.is_wayfinder and ball.wayfinder_active,
@@ -1483,7 +1571,7 @@ func queue_spawn_reward_message(
 	elif is_powder_keg:
 		_queue_result_message("POWDER KEG DROPPED")
 	elif is_anchor_ball:
-		_queue_result_message("ANCHOR BALL DROPPED")
+		_queue_result_message("ANCHOR CURSE SEED ROOTED")
 	elif is_cannon_ball:
 		_queue_result_message("CANNON BALL DROPPED")
 	elif is_treasure_ball:
@@ -1680,6 +1768,7 @@ func _update_cue_reclaim_state(delta: float) -> void:
 	if cue_reclaim_eligible:
 		cue_control_reclaimed = true
 		cue_reclaim_blocker_reason = "Granted"
+		_handle_cue_control_regained_after_shot()
 		status_text_changed.emit(READY_STATUS_TEXT)
 
 
