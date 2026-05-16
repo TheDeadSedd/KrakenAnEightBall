@@ -6,7 +6,7 @@ const PAUSE_TOGGLE_KEY := KEY_ESCAPE
 @onready var table: BilliardsTable = $Table
 @onready var debug_overlay: DebugOverlay = $CanvasLayer/HUD
 @onready var pause_menu: PauseMenu = $CanvasLayer/HUD/PauseMenu
-@onready var status_label: Label = $CanvasLayer/HUD/StatusLabel
+@onready var hud_feed: HudFeed = $CanvasLayer/HUD/HudFeed
 @onready var result_label: Label = $CanvasLayer/HUD/ResultLabel
 @onready var doubloons_label: Label = $CanvasLayer/HUD/DoubloonsLabel
 @onready var ball_drop_meter: BallDropMeter = $CanvasLayer/HUD/BallDropMeter
@@ -23,6 +23,7 @@ func _ready() -> void:
 	table.status_text_changed.connect(_on_status_text_changed)
 	table.game_finished.connect(_on_game_finished)
 	table.score_system.doubloons_changed.connect(_on_doubloons_changed)
+	table.score_system.score_feed_message.connect(_on_score_feed_message)
 	table.quartermaster_system.shop_state_changed.connect(_on_quartermaster_shop_state_changed)
 	table.quartermaster_system.status_changed.connect(_on_quartermaster_status_changed)
 	table.quartermaster_system.placement_started.connect(_on_quartermaster_placement_started)
@@ -45,7 +46,7 @@ func _ready() -> void:
 	ball_drop_meter.setup(table.ball_drop_system)
 	reserve_slots_ui.setup(table.reserve_system, table)
 	reserve_deployment_presenter.setup(table.reserve_system, reserve_slots_ui)
-	table.emit_ready_status_if_needed(status_label.text)
+	table.emit_ready_status_if_needed("")
 	debug_overlay.setup(table)
 	pause_menu.set_debug_panel_states(debug_overlay.get_modular_debug_panel_states())
 	pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
@@ -56,6 +57,7 @@ func _configure_pause_process_modes() -> void:
 	table.process_mode = Node.PROCESS_MODE_PAUSABLE
 	debug_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
 	pause_menu.process_mode = Node.PROCESS_MODE_ALWAYS
+	hud_feed.process_mode = Node.PROCESS_MODE_ALWAYS
 	reserve_slots_ui.process_mode = Node.PROCESS_MODE_ALWAYS
 	reserve_deployment_presenter.process_mode = Node.PROCESS_MODE_ALWAYS
 	ball_drop_meter.process_mode = Node.PROCESS_MODE_PAUSABLE
@@ -92,17 +94,22 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 func _on_status_text_changed(text: String) -> void:
-	status_label.text = text
+	hud_feed.add_message(text, "status")
 
 
 func _on_game_finished(text: String) -> void:
 	result_label.text = text
+	hud_feed.add_message(text, "status")
 
 
 func _on_doubloons_changed(total: int) -> void:
 	doubloons_label.text = "Doubloons: %s" % total
 	if pause_menu != null and table != null:
 		pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
+
+
+func _on_score_feed_message(text: String) -> void:
+	hud_feed.add_message(text, "score")
 
 
 func _on_pause_resume_requested() -> void:
@@ -145,7 +152,7 @@ func _on_reserve_deployment_finished(_confirmed: bool, _slot_index: int) -> void
 
 
 func _on_reserve_deployment_blocked(reason: String) -> void:
-	status_label.text = reason
+	hud_feed.add_message(reason, "shop")
 
 
 func _on_reserve_slots_changed(_slots: Array) -> void:
@@ -159,7 +166,7 @@ func _on_quartermaster_shop_state_changed(items: Array) -> void:
 
 func _on_quartermaster_status_changed(text: String) -> void:
 	pause_menu.set_quartermaster_status(text)
-	status_label.text = text
+	hud_feed.add_message(text, "shop")
 
 
 func _on_quartermaster_placement_started(item_name: String) -> void:

@@ -38,7 +38,7 @@ const PERFORMANCE_SECTION_QUARTERMASTER := "quartermaster"
 const SHIP_FLOOR_TEXTURE := preload("res://assets/table_art/ship_floor.png")
 const TABLE_FRAME_TEXTURE := preload("res://assets/table_art/pool_table_frame.png")
 const KRAKEN_SILHOUETTE_TEXTURE := preload("res://assets/table_art/kraken_silhouette.png")
-const UI_FONT := preload("res://assets/fonts/Gothic Pixels.ttf")
+const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 
 # Presentation layout. The underlying table dimensions stay the same; the whole play space is centered in a larger 1920x1080 canvas.
 const PRESENTATION_OFFSET_X := 360.0
@@ -1709,6 +1709,10 @@ func queue_spawn_reward_message(
 
 
 func _queue_result_message(message: String) -> void:
+	if message.strip_edges().is_empty():
+		return
+
+	status_text_changed.emit(message)
 	if not RESULT_MESSAGES_ENABLED:
 		return
 

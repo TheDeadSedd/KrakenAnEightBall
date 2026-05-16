@@ -9,7 +9,7 @@ class_name BallDropMeter
 
 # Player-facing progress display only. BallDropSystem owns the real state,
 # signals, thresholds, and earned-drop decisions.
-const UI_FONT := preload("res://assets/fonts/Gothic Pixels.ttf")
+const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const PANEL_COLOR := Color(0.035, 0.052, 0.052, 0.82)
 const PANEL_FLASH_COLOR := Color(0.32, 0.22, 0.07, 0.92)
 const BORDER_COLOR := Color(0.74, 0.55, 0.22, 0.72)

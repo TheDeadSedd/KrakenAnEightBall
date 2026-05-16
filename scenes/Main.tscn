@@ -2,13 +2,14 @@
 
 [ext_resource type="PackedScene" path="res://scenes/Table.tscn" id="1_table_scene"]
 [ext_resource type="Script" uid="uid://cpk1835bhdruv" path="res://scripts/Main.gd" id="2_main_script"]
-[ext_resource type="FontFile" uid="uid://beldvxxv2lses" path="res://assets/fonts/Gothic Pixels.ttf" id="3_ui_font"]
+[ext_resource type="FontFile" path="res://assets/fonts/NotJamOldStyle11.ttf" id="3_ui_font"]
 [ext_resource type="Script" uid="uid://cg0xx05qehx7o" path="res://scripts/DebugOverlay.gd" id="4_debug_overlay"]
 [ext_resource type="Script" uid="uid://bxpjxcy4cbps4" path="res://scripts/BallDropMeter.gd" id="5_ball_drop_meter"]
 [ext_resource type="Script" uid="uid://bg1rdbmkpcn84" path="res://scripts/PauseMenu.gd" id="6_pause_menu"]
 [ext_resource type="Script" uid="uid://dea5qsnybmcuc" path="res://scripts/DebugPanel.gd" id="7_debug_panel"]
 [ext_resource type="Script" uid="uid://c5h88rg15m2pu" path="res://scripts/ReserveSlotsUI.gd" id="8_reserve_slots_ui"]
 [ext_resource type="Script" uid="uid://clp8ek2x13i4q" path="res://scripts/ReserveDeploymentPresenter.gd" id="9_reserve_deploy_presenter"]
+[ext_resource type="Script" path="res://scripts/HudFeed.gd" id="10_hud_feed"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -241,23 +242,6 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 32
 text = "Kraken An Eight Ball"
 
-[node name="StatusLabel" type="Label" parent="CanvasLayer/HUD" unique_id=1124129470]
-layout_mode = 0
-offset_left = 294.0
-offset_top = 202.0
-offset_right = 1030.0
-offset_bottom = 258.0
-theme_override_colors/font_color = Color(0.88, 0.86, 0.76, 1)
-theme_override_colors/font_shadow_color = Color(0.08, 0.05, 0.03, 0.52)
-theme_override_colors/font_outline_color = Color(0.08, 0.04, 0.02, 0.88)
-theme_override_constants/shadow_offset_x = 2
-theme_override_constants/shadow_offset_y = 2
-theme_override_constants/outline_size = 2
-theme_override_fonts/font = ExtResource("3_ui_font")
-theme_override_font_sizes/font_size = 18
-text = "Loading table..."
-autowrap_mode = 3
-
 [node name="DoubloonsLabel" type="Label" parent="CanvasLayer/HUD" unique_id=1751527435]
 layout_mode = 0
 offset_left = 1268.0
@@ -274,6 +258,17 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 28
 text = "Doubloons: 0"
 horizontal_alignment = 2
+
+[node name="HudFeed" type="Control" parent="CanvasLayer/HUD"]
+process_mode = 3
+z_index = 18
+layout_mode = 0
+offset_left = 32.0
+offset_top = 772.0
+offset_right = 608.0
+offset_bottom = 1044.0
+mouse_filter = 1
+script = ExtResource("10_hud_feed")
 
 [node name="BallDropMeter" type="Control" parent="CanvasLayer/HUD" unique_id=910658070]
 anchors_preset = 0

@@ -8,7 +8,7 @@ class_name MainMenu
 # index:notes Lightweight title screen shell using layered main menu artwork as the primary visual foundation.
 
 const GAMEPLAY_SCENE_PATH := "res://scenes/Main.tscn"
-const UI_FONT := preload("res://assets/fonts/Gothic Pixels.ttf")
+const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const BACKGROUND_TEXTURE := preload("res://assets/ui/mainmenu_bg.png")
 const FOREGROUND_TEXTURE := preload("res://assets/ui/mainmenu_fg.png")
 const PRESENTATION_OVERLAY_SCRIPT := preload("res://scripts/MainMenuPresentationOverlay.gd")
@@ -211,8 +211,8 @@ func _make_button_style(background_color: Color, border_color: Color) -> StyleBo
 	style.corner_radius_bottom_right = 10
 	style.set_content_margin(SIDE_LEFT, 18.0)
 	style.set_content_margin(SIDE_RIGHT, 18.0)
-	style.set_content_margin(SIDE_TOP, 15.0)
-	style.set_content_margin(SIDE_BOTTOM, 1.0)
+	style.set_content_margin(SIDE_TOP, 10.0)
+	style.set_content_margin(SIDE_BOTTOM, 6.0)
 	return style
 
 

@@ -4,12 +4,13 @@ class_name ScoreSystem
 
 signal doubloons_changed(total: int)
 signal doubloons_awarded(amount: int, total: int)
+signal score_feed_message(text: String)
 
 # Converts ShotEventSystem histories into Doubloon rewards.
 # This owns lightweight score presentation, but not coin sprays or pocket VFX.
 const DEBUG_SCORE_BREAKDOWNS := false
 const DEBUG_SCORE_POPUP_ROUTING_LOGS := false
-const UI_FONT := preload("res://assets/fonts/Gothic Pixels.ttf")
+const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const BASE_SINK_REWARD := 10
 const BANK_REWARD := 5
 const CHAIN_REWARD := 5
@@ -316,14 +317,16 @@ func award_embezzler_recovery(amount: int, sink_context: Dictionary = {}) -> int
 	doubloons_changed.emit(doubloons_total)
 	doubloons_awarded.emit(recovery_amount, doubloons_total)
 	var ball_id: int = int(sink_context.get("ball_id", 0))
+	var recovery_items: Array[Dictionary] = [
+		{
+			"label": "Loot Recovered",
+			"amount": recovery_amount,
+			"event_type": "embezzler_recovery",
+		},
+	]
+	_emit_score_feed_message("Embezzler", recovery_items, recovery_amount)
 	if ball_id != 0:
-		_add_line_items_to_score_popup(ball_id, "Embezzler", [
-			{
-				"label": "Loot Recovered",
-				"amount": recovery_amount,
-				"event_type": "embezzler_recovery",
-			},
-		])
+		_add_line_items_to_score_popup(ball_id, "Embezzler", recovery_items)
 	return recovery_amount
 
 
@@ -506,6 +509,7 @@ func _score_sunk_ball_snapshot(snapshot: Dictionary) -> void:
 	doubloons_awarded.emit(gained_total, doubloons_total)
 	var ball_label: String = str(snapshot.get("label", "Ball"))
 	_add_line_items_to_score_popup(ball_id, ball_label, line_items)
+	_emit_score_feed_message(ball_label, line_items, gained_total)
 	_print_score_breakdown(ball_label, line_items, gained_total, includes_base_reward)
 
 
@@ -1603,6 +1607,17 @@ func _make_score_route_summary(line_items: Array[Dictionary]) -> String:
 	if labels.is_empty():
 		return "none"
 	return " / ".join(labels)
+
+
+func _emit_score_feed_message(ball_label: String, line_items: Array[Dictionary], amount: int) -> void:
+	if amount <= 0:
+		return
+
+	var summary: String = _make_score_route_summary(line_items)
+	if summary == "none":
+		score_feed_message.emit("%s: +%s Doubloons" % [ball_label, amount])
+	else:
+		score_feed_message.emit("%s: +%s Doubloons (%s)" % [ball_label, amount, summary])
 
 
 func _get_or_create_score_popup(ball_id: int) -> ScorePopup:
