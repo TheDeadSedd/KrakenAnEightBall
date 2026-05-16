@@ -63,6 +63,7 @@ KNOWN_CATEGORY_HINTS = {
     "scripts/CueController.gd": ["Mechanics", "UI"],
     "scripts/DebugPanel.gd": ["UI", "Debug Tools", "Performance Concerns", "In Progress"],
     "scripts/DebugOverlay.gd": ["UI", "Debug Tools"],
+    "scripts/EmbezzlerSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns", "In Progress"],
     "scripts/Main.gd": ["Systems", "UI"],
     "scripts/MainMenu.gd": ["Systems", "UI", "In Progress"],
     "scripts/MainMenuPresentationOverlay.gd": ["UI", "Performance Concerns", "In Progress"],
@@ -124,17 +125,18 @@ AGENT_DEFINITIONS = {
     },
     "anomaly_ball_agent": {
         "display": "Anomaly Ball Agent",
-        "responsibility": "Tracks Wayfinder, Powder Keg, Anchor Ball, Cannon Ball, Treasure Ball, and future anomaly behavior boundaries.",
-        "watch_keywords": ["wayfinder", "powder", "anchor", "cannon", "treasure", "anomaly", "ball"],
+        "responsibility": "Tracks Wayfinder, Powder Keg, Anchor curse seeds, Cannon Ball, Treasure Ball, Embezzler, and future anomaly behavior boundaries.",
+        "watch_keywords": ["wayfinder", "powder", "anchor", "cannon", "treasure", "embezzler", "anomaly", "ball"],
         "notes": [
-            "Wayfinder, Powder Keg, Anchor, Cannon, and Treasure all have focused system boundaries.",
+            "Wayfinder, Powder Keg, Anchor, Cannon, Treasure, and Embezzler all have focused system boundaries.",
+            "Anchor's old continuous field identity is retired; current Anchor behavior is curse-seed selection, chains, cue-control-gated tightening, warning, spread, and collapse.",
             "Cannon Ball has collision tuning, Powder Keg launch, heavy-impact shake, and high-speed heat presence.",
             "Treasure Ball is a debug-spawn perception-grace/hiding/scuttle experiment; it reacts to being watched, not just exact first-hit targeting.",
-            "Treasure should feel like a cautious sneaky thief, not a shortest-path optimizer.",
-            "Anchor has independent priority spawn odds, object-ball-only pull, and one strongest current per target rather than stacked pulls.",
+            "Treasure should feel like a cautious sneaky thief, not a shortest-path optimizer, and remains separate from the Embezzler.",
+            "Embezzler is capped and debug-spawnable; it copies Doubloon value, tracks a secret pocket, uses once-per-shot hide-or-run decisions, and resolves capture/escape.",
         ],
         "questions": [
-            "Should future anomalies interact with Anchor fields, or stay independent?",
+            "Which future anomalies should interact with Anchor curse chains or Embezzler escape pressure?",
             "Should anomaly-touch scoring expand beyond current event rewards?",
         ],
     },
@@ -147,7 +149,7 @@ AGENT_DEFINITIONS = {
             "PauseMenu.gd owns menu tabs, Quartermaster UI, and modular debug-panel toggles while gameplay is paused.",
             "DebugPanel.gd owns draggable pause-safe panel shells; DebugOverlay.gd formats visible panel content and the full F3 overlay.",
             "ReserveSlotsUI.gd owns icon-only table-frame slots; ReserveDeploymentPresenter.gd owns cursor icon/tether presentation.",
-            "Score popups are pocket-side arcade celebrations, not generic UI spam.",
+            "Score presentation now uses evolving pocket-side score stacks with Foundational/Skilled/Heroic/Legendary tier identity, count-up totals, and lane/yield behavior.",
             "Debug labels should stay clearly marked and not leak temporary test wording into player-facing strings.",
             "BallDropSystem.gd owns rotating score-earned drop-message selection; SpawnSystem/Table carry those messages to callouts.",
             "BallDropMeter.gd owns the vertical right-side player-facing progress meter.",
@@ -161,7 +163,7 @@ AGENT_DEFINITIONS = {
     "performance_agent": {
         "display": "Performance Agent",
         "responsibility": "Tracks visual cost, broad-phase health, trail redraws, particle load, and stress-test readiness.",
-        "watch_keywords": ["performance", "debug", "trail", "particle", "anchor", "powder", "treasure", "boundary", "pocket", "aim", "shake", "audio", "quartermaster", "reserve", "menu"],
+        "watch_keywords": ["performance", "debug", "trail", "particle", "anchor", "powder", "treasure", "embezzler", "boundary", "pocket", "aim", "shake", "audio", "quartermaster", "reserve", "menu"],
         "notes": [
             "Do not solve chaos by preventing chaos; degrade visuals first.",
             "High ball counts and large earned chain reactions are intended.",
@@ -169,6 +171,9 @@ AGENT_DEFINITIONS = {
             "Optimization should preserve readability as well as performance.",
             "Hidden debug panels/overlays should not keep formatting strings or requesting broad snapshots every frame.",
             "BallAudioSystem.gd uses pooled players, thresholds, and cooldowns so collision SFX scales with chaos.",
+            "Anchor is now state/event-driven curse-seed gameplay, not continuous force-field simulation.",
+            "Embezzler is capped and event-driven around score gain, aim pressure, once-per-shot decisions, capture, and escape.",
+            "Score stack coalescing reduces independent label/tween pressure during high-chaos scoring.",
             "Quartermaster stock refresh is event-driven; Reserve and placement presentation should avoid continuous scans.",
             "Main menu atmosphere is draw-only/lightweight and should stay presentation-only.",
             "BallDropSystem.gd exists as the score-tied drop spine and should be watched for high-count visual scaling pressure.",
@@ -201,7 +206,7 @@ AGENT_DEFINITIONS = {
         "notes": [
             "Cleanup should preserve gameplay behavior and avoid opportunistic physics retuning.",
             "AGENTS.md, NOTES.md, STACK.md, and project_brain should be refreshed after major playable milestones.",
-            "Generated docs should reflect Main Menu, BallAudioSystem, Quartermaster, Reserve, modular debug panels, and expanded shot events.",
+            "Generated docs should reflect Main Menu, BallAudioSystem, Quartermaster, Reserve, modular debug panels, Anchor curse seeds, Embezzler, score stacks, and expanded shot events.",
         ],
         "questions": [
             "Which debug toggles should remain long-term?",
@@ -343,7 +348,7 @@ def guess_categories(rel_path: str) -> list[str]:
 
     if "balldrop" in lowered or "ball_drop" in lowered:
         categories.extend(["Mechanics", "Systems", "UI", "Performance Concerns", "In Progress"])
-    if any(token in lowered for token in ["wayfinder", "powder", "anchor", "treasure", "anomaly"]):
+    if any(token in lowered for token in ["wayfinder", "powder", "anchor", "treasure", "embezzler", "anomaly"]):
         categories.extend(["Anomaly Balls", "Performance Concerns"])
     if "debug" in lowered:
         categories.extend(["UI", "Debug Tools"])
@@ -362,6 +367,7 @@ def guess_owner(rel_path: str) -> str:
     exact_owners = {
         "AnchorBallSystem.gd": "anomaly_ball_agent",
         "CannonBallSystem.gd": "anomaly_ball_agent",
+        "EmbezzlerSystem.gd": "anomaly_ball_agent",
         "PowderKegSystem.gd": "anomaly_ball_agent",
         "TreasureBallSystem.gd": "anomaly_ball_agent",
         "WayfinderSystem.gd": "anomaly_ball_agent",
@@ -415,7 +421,7 @@ def guess_summary(rel_path: str) -> str:
     if name == "Ball.gd":
         return "Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags."
     if name == "SpawnSystem.gd":
-        return "Creates balls, queues reward drops, performs safe spawn searches, and owns regular anomaly plus Anchor priority spawn odds."
+        return "Creates balls, queues reward drops, performs safe spawn searches, owns regular anomaly odds, and routes debug Anchor requests into curse-seed transformation."
     if name == "BallPlacementSystem.gd":
         return "Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects."
     if name == "QuartermasterSystem.gd":
@@ -435,7 +441,7 @@ def guess_summary(rel_path: str) -> str:
     if name == "TableImpactShakeSystem.gd":
         return "Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts."
     if name == "ScoreSystem.gd":
-        return "Converts shot-event history into Doubloons and pocket-side score popup presentation."
+        return "Converts shot-event history into Doubloons and evolving pocket-side score stack presentation."
     if name == "ShotEventSystem.gd":
         return "Tracks causal per-shot foundational, skilled, heroic, and legendary scoring events for sunk balls."
     if name == "WayfinderSystem.gd":
@@ -443,17 +449,19 @@ def guess_summary(rel_path: str) -> str:
     if name == "PowderKegSystem.gd":
         return "Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts."
     if name == "AnchorBallSystem.gd":
-        return "Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters."
+        return "Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters."
     if name == "CannonBallSystem.gd":
         return "Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence."
     if name == "TreasureBallSystem.gd":
         return "Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting."
+    if name == "EmbezzlerSystem.gd":
+        return "Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters."
     if name == "DebugOverlay.gd":
         return "Formats debug menu, modular visible debug panels, requested-section performance snapshots, full F3 overlay, toggles, and physics debug text."
     if name == "DebugPanel.gd":
         return "Reusable draggable debug panel shell with pause-safe input consumption and lightweight text display."
     if name == "AimPreview.gd":
-        return "Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure perception snapshots, and AimPreview broad-phase counters."
+        return "Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure/Embezzler perception snapshots, and AimPreview broad-phase counters."
     if name == "BoundarySystem.gd":
         return "Loads authored rail/boundary geometry and shared boundary helpers."
     if name == "PocketSystem.gd":
@@ -518,8 +526,8 @@ def build_readme() -> str:
             "",
             "- Kraken An Eight Ball is a systemic arcade-chaos billiards prototype.",
             "- The current loop is better play -> more score/Doubloons -> more balls and Reserve choices -> more chaos -> survive the escalating table.",
-            "- Main Menu, pooled collision audio, rotating Quartermaster offers, Reserve slots/deployment, modular debug panels, and expanded shot-event tiers are active modern systems.",
-            "- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, and Treasure perception grace/hiding remain important active systems.",
+            "- Main Menu, pooled collision audio, rotating Quartermaster offers, Reserve slots/deployment, modular debug panels, evolving score stacks, Anchor curse seeds, Embezzler, and expanded shot-event tiers are active modern systems.",
+            "- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, Treasure perception grace/hiding, and Embezzler hide-or-run pressure remain important active systems.",
             "- Generated reports are a project map only; `AGENTS.md` and the real scripts/scenes remain authoritative.",
             "",
             "Important rules:",
@@ -593,10 +601,13 @@ def build_project_index(files: list[FileInfo], changed_paths: list[str]) -> str:
         "- `BallAudioSystem.gd` owns pooled event-driven ball-to-ball collision sounds with spam filtering.",
         "- `DebugOverlay.gd` supports modular draggable panels, pause-safe interaction, and requested-section hidden-work gating.",
         "- `ShotEventSystem.gd` tracks foundational, skilled, heroic, and legendary scoring-event tiers for `ScoreSystem.gd` rewards.",
+        "- `ScoreSystem.gd` routes implemented reward tiers into evolving pocket-side score stacks with count-up totals, tier colors/glows, lane management, and yield/fade behavior.",
         "- Early cue reclaim lets players regain control after the cue ball stops under safe motion conditions.",
         "- `TableImpactShakeSystem.gd` owns fake-3D presentation-only impact shake for Powder Keg and Cannon events.",
+        "- Anchor's old continuous pull field is retired; current Anchor gameplay is state/event-driven curse seeds, chains, warning, spread, and collapse.",
         "- Cannon Ball is a debug-spawn delayed-chaos future-problem anomaly with heat presence and heavy-impact behavior.",
         "- Treasure Ball is a debug-spawn perception grace/hiding experiment that reacts to being watched by the aim guide.",
+        "- Embezzler is a separate capped/debug-spawn greed anomaly that copies Doubloon value, hides or runs once per shot, tries to escape through a secret pocket, and pays out if caught.",
         "- Optimization philosophy: support chaos gracefully, coalesce repeated work, and degrade visuals before limiting gameplay.",
         "",
         "## Next Major Goal",
@@ -604,7 +615,7 @@ def build_project_index(files: list[FileInfo], changed_paths: list[str]) -> str:
         "- Continue stabilizing the score-tied ball drop plus tactical Reserve loop: better play creates score events/Doubloons, more balls, more tactical purchases, and higher score before the table empties.",
         "- Tune new scoring-event thresholds only through focused passes; do not casually change score values during UI/docs/cleanup work.",
         "- Future Quartermaster work can add more stock rules, rerolls, or unlocks, but the current event-driven rotating-offer spine should stay small.",
-        "- Cue-ball and eight-ball sinks cost 25 Doubloons and remove one eligible object ball; current penalty removal still uses a simple scale/fade placeholder.",
+        "- Cue-ball and eight-ball sinks cost 25 Doubloons; cue-ball sinks remove one eligible object ball, while eight-ball sinks try to transform one eligible object ball into an Anchor curse seed.",
         "- System boundary: `BallDropSystem.gd` decides score-tied drop rewards, then `SpawnSystem.gd` performs drops while `Table.gd` coordinates only.",
         "",
         "## Metadata Comments",
@@ -616,7 +627,7 @@ def build_project_index(files: list[FileInfo], changed_paths: list[str]) -> str:
         "# index:category Mechanics / Anomaly Balls",
         "# index:status In Progress",
         "# index:owner anomaly_ball_agent",
-        "# index:notes Applies table manipulation aura to nearby balls.",
+        "# index:notes Owns curse-seed chains, warning, spread, collapse, and debug state.",
         "```",
         "",
     ]
@@ -834,12 +845,13 @@ def risks_for_agent(agent_id: str) -> list[str]:
             "BallAudioSystem should stay event-driven and not become a physics-side concern.",
         ],
         "anomaly_ball_agent": [
-            "Anchor behavior is tuned by feel and should be adjusted incrementally.",
+            "Anchor curse-seed behavior is tuned by feel and should be adjusted incrementally without restoring continuous field pull.",
             "Future anomalies should avoid hidden coupling through Table.gd.",
             "Treasure rewards and regular spawn odds are not implemented yet.",
+            "Embezzler spawn odds and anomaly special interactions are not implemented yet.",
         ],
         "ui_agent": [
-            "Score popup readability can regress when many events happen at once.",
+            "Score stack lane/readability can regress when many high-tier events happen near the same pocket.",
             "Modular debug panels can become noisy as more sections are added; keep hidden-panel gating intact.",
             "Main menu atmosphere should remain lightweight and layered correctly behind foreground silhouettes.",
             "Quartermaster and Reserve UI should not steal active cue drag/release input.",
@@ -850,6 +862,9 @@ def risks_for_agent(agent_id: str) -> list[str]:
             "AimPreview rebuild coalescing should preserve reliable graze behavior and avoid tolerance-based lies.",
             "Hidden debug UI should remain logically cheap, not merely invisible.",
             "Collision audio cooldowns should prevent spam without making meaningful impacts feel late.",
+            "Anchor should stay event/state-driven; avoid reintroducing continuous force scans.",
+            "Embezzler should stay capped and avoid same-shot escape-roll spam.",
+            "Score stacks should coalesce celebration before any visual suppression is considered.",
         ],
         "lore_agent": [
             "Score-earned drop callouts now rotate; future passes should tune message frequency and tone.",

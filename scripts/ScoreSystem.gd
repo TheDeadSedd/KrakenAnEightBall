@@ -306,6 +306,27 @@ func apply_doubloons_penalty(amount: int) -> int:
 	return penalty_amount
 
 
+func award_embezzler_recovery(amount: int, sink_context: Dictionary = {}) -> int:
+	var recovery_amount: int = max(amount, 0)
+	if recovery_amount <= 0:
+		return 0
+
+	_store_sink_context(sink_context)
+	doubloons_total += recovery_amount
+	doubloons_changed.emit(doubloons_total)
+	doubloons_awarded.emit(recovery_amount, doubloons_total)
+	var ball_id: int = int(sink_context.get("ball_id", 0))
+	if ball_id != 0:
+		_add_line_items_to_score_popup(ball_id, "Embezzler", [
+			{
+				"label": "Loot Recovered",
+				"amount": recovery_amount,
+				"event_type": "embezzler_recovery",
+			},
+		])
+	return recovery_amount
+
+
 func get_active_popup_label_count() -> int:
 	var label_count := 0
 	for popup_value in active_score_popups:

@@ -12,7 +12,7 @@ Relevant files:
 - `scenes/Ball.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scenes/CueBall.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scenes/Table.tscn` - Godot scene file used for authored node layout and scene wiring.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
+- `scripts/AnchorBallSystem.gd` - Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.
 - `scripts/Ball.gd` - Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.
 - `scripts/BallAudioSystem.gd` - Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering.
 - `scripts/BallDropMeter.gd` - Vertical right-side HUD meter for progress toward the next score-earned ball drop.
@@ -20,7 +20,7 @@ Relevant files:
 - `scripts/BallPlacementSystem.gd` - Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects.
 - `scripts/CannonBallSystem.gd` - Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.
 - `scripts/CueController.gd` - Owns cue visuals, grab-zone hit testing, pullback, and strike presentation.
-- `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons and pocket-side score popup presentation.
+- `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons and evolving pocket-side score stack presentation.
 
 What it appears to do:
 - Tracks core play loops, shot lifecycle, scoring hooks, shot-event history, ball identity, and moment-to-moment billiards feel.
@@ -48,14 +48,14 @@ Relevant files:
 - `scenes/Main.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scenes/MainMenu.tscn` - Layered title-screen scene with background art, animated overlay passes, foreground art, fog, and menu UI.
 - `scenes/Table.tscn` - Godot scene file used for authored node layout and scene wiring.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
+- `scripts/AnchorBallSystem.gd` - Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.
 - `scripts/BallAudioSystem.gd` - Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering.
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
 - `scripts/BallPlacementSystem.gd` - Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects.
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
 - `scripts/CannonBallSystem.gd` - Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.
+- `scripts/EmbezzlerSystem.gd` - Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters.
 - `scripts/Main.gd` - Small app shell and top-level scene wiring.
-- `scripts/MainMenu.gd` - Title-screen shell, layered menu presentation, button input, and transition into the gameplay scene.
 
 What it appears to do:
 - Tracks module boundaries, ownership rules, scene wiring, and coordinator responsibilities.
@@ -83,32 +83,34 @@ Questions for the developer:
 Relevant files:
 - `scenes/Ball.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scenes/CueBall.tscn` - Godot scene file used for authored node layout and scene wiring.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
+- `scripts/AnchorBallSystem.gd` - Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.
 - `scripts/Ball.gd` - Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.
 - `scripts/BallAudioSystem.gd` - Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering.
 - `scripts/BallDropMeter.gd` - Vertical right-side HUD meter for progress toward the next score-earned ball drop.
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
 - `scripts/BallPlacementSystem.gd` - Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects.
 - `scripts/CannonBallSystem.gd` - Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.
+- `scripts/EmbezzlerSystem.gd` - Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters.
 - `scripts/PowderKegSystem.gd` - Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.
 - `scripts/TreasureBallSystem.gd` - Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting.
-- `scripts/WayfinderSystem.gd` - Handles Wayfinder activation and temporary guided-ball redirects.
 
 What it appears to do:
-- Tracks Wayfinder, Powder Keg, Anchor Ball, Cannon Ball, Treasure Ball, and future anomaly behavior boundaries.
-- Wayfinder, Powder Keg, Anchor, Cannon, and Treasure all have focused system boundaries.
+- Tracks Wayfinder, Powder Keg, Anchor curse seeds, Cannon Ball, Treasure Ball, Embezzler, and future anomaly behavior boundaries.
+- Wayfinder, Powder Keg, Anchor, Cannon, Treasure, and Embezzler all have focused system boundaries.
+- Anchor's old continuous field identity is retired; current Anchor behavior is curse-seed selection, chains, cue-control-gated tightening, warning, spread, and collapse.
 - Cannon Ball has collision tuning, Powder Keg launch, heavy-impact shake, and high-speed heat presence.
 - Treasure Ball is a debug-spawn perception-grace/hiding/scuttle experiment; it reacts to being watched, not just exact first-hit targeting.
-- Treasure should feel like a cautious sneaky thief, not a shortest-path optimizer.
-- Anchor has independent priority spawn odds, object-ball-only pull, and one strongest current per target rather than stacked pulls.
+- Treasure should feel like a cautious sneaky thief, not a shortest-path optimizer, and remains separate from the Embezzler.
+- Embezzler is capped and debug-spawnable; it copies Doubloon value, tracks a secret pocket, uses once-per-shot hide-or-run decisions, and resolves capture/escape.
 
 Known risks or TODOs:
-- Anchor behavior is tuned by feel and should be adjusted incrementally.
+- Anchor curse-seed behavior is tuned by feel and should be adjusted incrementally without restoring continuous field pull.
 - Future anomalies should avoid hidden coupling through Table.gd.
 - Treasure rewards and regular spawn odds are not implemented yet.
+- Embezzler spawn odds and anomaly special interactions are not implemented yet.
 
 Questions for the developer:
-- Should future anomalies interact with Anchor fields, or stay independent?
+- Which future anomalies should interact with Anchor curse chains or Embezzler escape pressure?
 - Should anomaly-touch scoring expand beyond current event rewards?
 
 ## UI Agent
@@ -133,14 +135,14 @@ What it appears to do:
 - PauseMenu.gd owns menu tabs, Quartermaster UI, and modular debug-panel toggles while gameplay is paused.
 - DebugPanel.gd owns draggable pause-safe panel shells; DebugOverlay.gd formats visible panel content and the full F3 overlay.
 - ReserveSlotsUI.gd owns icon-only table-frame slots; ReserveDeploymentPresenter.gd owns cursor icon/tether presentation.
-- Score popups are pocket-side arcade celebrations, not generic UI spam.
+- Score presentation now uses evolving pocket-side score stacks with Foundational/Skilled/Heroic/Legendary tier identity, count-up totals, and lane/yield behavior.
 - Debug labels should stay clearly marked and not leak temporary test wording into player-facing strings.
 - BallDropSystem.gd owns rotating score-earned drop-message selection; SpawnSystem/Table carry those messages to callouts.
 - BallDropMeter.gd owns the vertical right-side player-facing progress meter.
 - TableImpactShakeSystem.gd owns fake-3D table impact shake and draw-only ball shimmy presentation.
 
 Known risks or TODOs:
-- Score popup readability can regress when many events happen at once.
+- Score stack lane/readability can regress when many high-tier events happen near the same pocket.
 - Modular debug panels can become noisy as more sections are added; keep hidden-panel gating intact.
 - Main menu atmosphere should remain lightweight and layered correctly behind foreground silhouettes.
 - Quartermaster and Reserve UI should not steal active cue drag/release input.
@@ -153,17 +155,17 @@ Questions for the developer:
 
 Relevant files:
 - `scenes/MainMenu.tscn` - Layered title-screen scene with background art, animated overlay passes, foreground art, fog, and menu UI.
-- `scripts/AimPreview.gd` - Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure perception snapshots, and AimPreview broad-phase counters.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
+- `scripts/AimPreview.gd` - Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure/Embezzler perception snapshots, and AimPreview broad-phase counters.
+- `scripts/AnchorBallSystem.gd` - Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.
 - `scripts/BallAudioSystem.gd` - Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering.
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
 - `scripts/DebugOverlay.gd` - Formats debug menu, modular visible debug panels, requested-section performance snapshots, full F3 overlay, toggles, and physics debug text.
 - `scripts/DebugPanel.gd` - Reusable draggable debug panel shell with pause-safe input consumption and lightweight text display.
+- `scripts/EmbezzlerSystem.gd` - Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters.
 - `scripts/MainMenu.gd` - Title-screen shell, layered menu presentation, button input, and transition into the gameplay scene.
 - `scripts/MainMenuPresentationOverlay.gd` - Draw-only layered title-screen atmosphere for moon glow, stars, ocean shimmer, and fog.
 - `scripts/PauseMenu.gd` - Pause menu tabs, resume/quit wiring, Quartermaster tab rendering, and debug panel toggles.
 - `scripts/PocketSystem.gd` - Loads authored pocket geometry and detects pocket captures.
-- `scripts/PowderKegSystem.gd` - Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.
 
 What it appears to do:
 - Tracks visual cost, broad-phase health, trail redraws, particle load, and stress-test readiness.
@@ -173,6 +175,9 @@ What it appears to do:
 - Optimization should preserve readability as well as performance.
 - Hidden debug panels/overlays should not keep formatting strings or requesting broad snapshots every frame.
 - BallAudioSystem.gd uses pooled players, thresholds, and cooldowns so collision SFX scales with chaos.
+- Anchor is now state/event-driven curse-seed gameplay, not continuous force-field simulation.
+- Embezzler is capped and event-driven around score gain, aim pressure, once-per-shot decisions, capture, and escape.
+- Score stack coalescing reduces independent label/tween pressure during high-chaos scoring.
 - Quartermaster stock refresh is event-driven; Reserve and placement presentation should avoid continuous scans.
 - Main menu atmosphere is draw-only/lightweight and should stay presentation-only.
 - BallDropSystem.gd exists as the score-tied drop spine and should be watched for high-count visual scaling pressure.
@@ -184,6 +189,9 @@ Known risks or TODOs:
 - AimPreview rebuild coalescing should preserve reliable graze behavior and avoid tolerance-based lies.
 - Hidden debug UI should remain logically cheap, not merely invisible.
 - Collision audio cooldowns should prevent spam without making meaningful impacts feel late.
+- Anchor should stay event/state-driven; avoid reintroducing continuous force scans.
+- Embezzler should stay capped and avoid same-shot escape-roll spam.
+- Score stacks should coalesce celebration before any visual suppression is considered.
 
 Questions for the developer:
 - What visual-quality tiers should exist for trails, particles, aura effects, and score labels?
@@ -229,7 +237,7 @@ Relevant files:
 - `CHECKPOINT_PrototypePhysicsPlayable.md` - Project documentation or checkpoint notes.
 - `scenes/MainMenu.tscn` - Layered title-screen scene with background art, animated overlay passes, foreground art, fog, and menu UI.
 - `scenes/Table.tscn` - Godot scene file used for authored node layout and scene wiring.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
+- `scripts/AnchorBallSystem.gd` - Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.
 - `scripts/BallAudioSystem.gd` - Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering.
 - `scripts/BallDropSystem.gd` - Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.
 - `scripts/BallPlacementSystem.gd` - Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects.
@@ -241,7 +249,7 @@ What it appears to do:
 - Tracks stale comments, unclear names, ownership drift, temporary debug leftovers, and documentation freshness.
 - Cleanup should preserve gameplay behavior and avoid opportunistic physics retuning.
 - AGENTS.md, NOTES.md, STACK.md, and project_brain should be refreshed after major playable milestones.
-- Generated docs should reflect Main Menu, BallAudioSystem, Quartermaster, Reserve, modular debug panels, and expanded shot events.
+- Generated docs should reflect Main Menu, BallAudioSystem, Quartermaster, Reserve, modular debug panels, Anchor curse seeds, Embezzler, score stacks, and expanded shot events.
 
 Known risks or TODOs:
 - Generated reports can drift if not regenerated after major changes.

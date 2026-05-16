@@ -47,6 +47,12 @@ const TREASURE_BALL_GLOW_COLOR := Color("ffe6a6")
 const TREASURE_LEG_COLOR := Color("cf7528")
 const TREASURE_LEG_FOOT_COLOR := Color("fff08a")
 const TREASURE_LEG_FADE_TIME := 0.28
+const EMBEZZLER_BALL_BASE_COLOR := Color("c97924")
+const EMBEZZLER_BALL_RIM_COLOR := Color("46210b")
+const EMBEZZLER_BALL_COIN_COLOR := Color("ffd56a")
+const EMBEZZLER_BALL_GLOW_COLOR := Color("fff0a8")
+const EMBEZZLER_BALL_MASK_COLOR := Color("1d1209")
+const EMBEZZLER_BALL_PANIC_COLOR := Color("ffb13d")
 const DEBUG_WAYFINDER := false
 
 @export var ball_type := BallType.OBJECT
@@ -103,6 +109,7 @@ var is_anchor_ball := false
 var is_anchor_curse_seed := false
 var is_cannon_ball := false
 var is_treasure_ball := false
+var is_embezzler_ball := false
 var anchor_visual_effect_strength := 0.7
 var anchor_field_visual_radius := 230.0
 var anchor_visuals_enabled := true
@@ -134,6 +141,9 @@ var _treasure_leg_visual_strength := 0.0
 var _treasure_leg_target_strength := 0.0
 var _treasure_leg_direction := Vector2.RIGHT
 var _treasure_leg_phase := 0.0
+var _embezzler_willingness_visual_strength := 0.0
+var _embezzler_stored_value_visual_strength := 0.0
+var _embezzler_escape_visual_strength := 0.0
 
 
 func _ready() -> void:
@@ -157,6 +167,8 @@ func _process(delta: float) -> void:
 	_update_treasure_leg_visual(delta)
 
 	if is_wayfinder and wayfinder_active and gameplay_enabled:
+		queue_redraw()
+	elif is_embezzler_ball and visible and gameplay_enabled and _is_embezzler_presentation_active():
 		queue_redraw()
 	elif (
 		is_anchor_ball
@@ -309,6 +321,30 @@ func note_treasure_fleeing(strength: float, direction: Vector2) -> void:
 	queue_redraw()
 
 
+func set_embezzler_willingness_visual(strength: float) -> void:
+	set_embezzler_visual_state(strength, _embezzler_stored_value_visual_strength, _embezzler_escape_visual_strength)
+
+
+func set_embezzler_visual_state(willingness_strength: float, stored_value_strength: float, escape_strength: float) -> void:
+	if not is_embezzler_ball or not visible:
+		return
+
+	var clamped_willingness: float = clampf(willingness_strength, 0.0, 1.0)
+	var clamped_stored_value: float = clampf(stored_value_strength, 0.0, 1.0)
+	var clamped_escape: float = clampf(escape_strength, 0.0, 1.0)
+	if (
+		absf(_embezzler_willingness_visual_strength - clamped_willingness) < 0.01
+		and absf(_embezzler_stored_value_visual_strength - clamped_stored_value) < 0.01
+		and absf(_embezzler_escape_visual_strength - clamped_escape) < 0.01
+	):
+		return
+
+	_embezzler_willingness_visual_strength = clamped_willingness
+	_embezzler_stored_value_visual_strength = clamped_stored_value
+	_embezzler_escape_visual_strength = clamped_escape
+	queue_redraw()
+
+
 func setup(
 	new_type: int,
 	new_number: int,
@@ -317,7 +353,8 @@ func setup(
 	new_is_powder_keg: bool = false,
 	new_is_anchor_ball: bool = false,
 	new_is_cannon_ball: bool = false,
-	new_is_treasure_ball: bool = false
+	new_is_treasure_ball: bool = false,
+	new_is_embezzler_ball: bool = false
 ) -> void:
 	ball_type = new_type
 	ball_number = new_number
@@ -328,11 +365,13 @@ func setup(
 	is_anchor_curse_seed = false
 	is_cannon_ball = new_is_cannon_ball
 	is_treasure_ball = new_is_treasure_ball
+	is_embezzler_ball = new_is_embezzler_ball
 	set_cannon_presence_visual(0.0, Vector2.RIGHT)
 	_cannon_presence_visual_strength = 0.0
 	_cannon_presence_flash_strength = 0.0
 	_cannon_presence_flash_remaining = 0.0
 	_clear_treasure_leg_visual()
+	_clear_embezzler_willingness_visual()
 	_reset_wayfinder_state()
 	_update_label()
 	_update_number_color()
@@ -349,7 +388,9 @@ func become_anchor_curse_seed() -> void:
 	is_anchor_curse_seed = true
 	is_cannon_ball = false
 	is_treasure_ball = false
+	is_embezzler_ball = false
 	_clear_treasure_leg_visual()
+	_clear_embezzler_willingness_visual()
 	_clear_anchor_influence_visual()
 	set_cannon_presence_visual(0.0, Vector2.RIGHT)
 	_cannon_presence_visual_strength = 0.0
@@ -478,6 +519,7 @@ func sink() -> void:
 	visible = false
 	_clear_anchor_influence_visual()
 	_clear_treasure_leg_visual()
+	_clear_embezzler_willingness_visual()
 	sunk.emit(self)
 
 
@@ -497,6 +539,7 @@ func respawn_at(new_position: Vector2) -> void:
 	_trail_suppression_remaining = 0.0
 	_clear_anchor_influence_visual()
 	_clear_treasure_leg_visual()
+	_clear_embezzler_willingness_visual()
 	_reset_trail()
 
 
@@ -518,6 +561,7 @@ func begin_spawn_drop(final_position: Vector2) -> void:
 	_reset_trail()
 	_clear_anchor_influence_visual()
 	_clear_treasure_leg_visual()
+	_clear_embezzler_willingness_visual()
 
 
 func _update_spawn_drop(delta: float) -> void:
@@ -797,6 +841,23 @@ func _clear_treasure_leg_visual() -> void:
 		queue_redraw()
 
 
+func _clear_embezzler_willingness_visual() -> void:
+	var had_visual: bool = _is_embezzler_presentation_active()
+	_embezzler_willingness_visual_strength = 0.0
+	_embezzler_stored_value_visual_strength = 0.0
+	_embezzler_escape_visual_strength = 0.0
+	if had_visual:
+		queue_redraw()
+
+
+func _is_embezzler_presentation_active() -> bool:
+	return (
+		_embezzler_willingness_visual_strength > 0.0
+		or _embezzler_stored_value_visual_strength > 0.0
+		or _embezzler_escape_visual_strength > 0.0
+	)
+
+
 func _queue_trail_redraw() -> void:
 	_trail_redraws_this_frame += 1
 	queue_redraw()
@@ -812,7 +873,7 @@ func _get_visual_draw_origin() -> Vector2:
 
 
 func _update_label() -> void:
-	if ball_type == BallType.CUE or is_wayfinder or is_powder_keg or is_anchor_ball or is_cannon_ball or is_treasure_ball:
+	if ball_type == BallType.CUE or is_wayfinder or is_powder_keg or is_anchor_ball or is_cannon_ball or is_treasure_ball or is_embezzler_ball:
 		number_label.text = ""
 	else:
 		number_label.text = str(ball_number)
@@ -829,6 +890,8 @@ func _update_number_color() -> void:
 		number_label.add_theme_color_override("font_color", Color("f1c28a"))
 	elif is_treasure_ball:
 		number_label.add_theme_color_override("font_color", Color("5d3511"))
+	elif is_embezzler_ball:
+		number_label.add_theme_color_override("font_color", EMBEZZLER_BALL_RIM_COLOR)
 	elif ball_type == BallType.EIGHT:
 		number_label.add_theme_color_override("font_color", Color.WHITE)
 	else:
@@ -896,6 +959,8 @@ func _draw() -> void:
 		_draw_anchor_current(origin)
 	elif is_treasure_ball and _treasure_leg_visual_strength > 0.0:
 		_draw_treasure_legs(origin)
+	elif is_embezzler_ball and _is_embezzler_presentation_active():
+		_draw_embezzler_presentation(origin)
 
 	draw_circle(origin + Vector2(1.5, 2.0), radius, shadow_color)
 	draw_circle(origin, radius + 1.2, Color(0, 0, 0, 0.12))
@@ -903,7 +968,7 @@ func _draw() -> void:
 	draw_circle(origin + Vector2(-radius * 0.18, -radius * 0.22), radius * 0.72, display_color.lightened(0.16))
 	draw_arc(origin, radius - rim_width * 0.5, 0.0, TAU, 40, rim_color, rim_width)
 
-	if not is_wayfinder and not is_anchor_ball and not is_cannon_ball and not is_treasure_ball and (ball_type == BallType.OBJECT or ball_type == BallType.EIGHT):
+	if not is_wayfinder and not is_anchor_ball and not is_cannon_ball and not is_treasure_ball and not is_embezzler_ball and (ball_type == BallType.OBJECT or ball_type == BallType.EIGHT):
 		var number_spot_color := Color.WHITE
 		draw_circle(origin, radius * number_spot_scale, number_spot_color)
 		draw_arc(
@@ -929,9 +994,13 @@ func _draw() -> void:
 		_draw_cannon_ball_mark(origin)
 	elif is_treasure_ball:
 		_draw_treasure_ball_mark(origin)
+	elif is_embezzler_ball:
+		_draw_embezzler_ball_mark(origin)
 
 	if is_treasure_ball and _treasure_leg_visual_strength > 0.0:
 		_draw_treasure_feet(origin)
+	elif is_embezzler_ball and _embezzler_escape_visual_strength > 0.01:
+		_draw_embezzler_escape_feet(origin)
 
 	draw_circle(origin + Vector2(-radius * 0.32, -radius * 0.36), radius * highlight_scale, shine_color)
 
@@ -939,6 +1008,9 @@ func _draw() -> void:
 func _get_display_color() -> Color:
 	if is_cannon_ball:
 		return CANNON_BALL_BASE_COLOR
+
+	if is_embezzler_ball:
+		return EMBEZZLER_BALL_BASE_COLOR
 
 	if is_treasure_ball:
 		return TREASURE_BALL_BASE_COLOR
@@ -1180,6 +1252,121 @@ func _draw_treasure_ball_mark(origin: Vector2) -> void:
 	)
 	draw_line(gem_left, gem_right, TREASURE_BALL_GLOW_COLOR, 1.1)
 	draw_line(gem_top, gem_bottom, Color(1.0, 0.94, 0.64, 0.72), 1.0)
+
+
+func _draw_embezzler_ball_mark(origin: Vector2) -> void:
+	var willingness_strength: float = clampf(_embezzler_willingness_visual_strength, 0.0, 1.0)
+	var stored_strength: float = clampf(_embezzler_stored_value_visual_strength, 0.0, 1.0)
+	var escape_strength: float = clampf(_embezzler_escape_visual_strength, 0.0, 1.0)
+	var panic_pulse: float = _get_embezzler_panic_pulse()
+	var glow_color := EMBEZZLER_BALL_GLOW_COLOR
+	glow_color.a = 0.16 + stored_strength * 0.24 + willingness_strength * 0.14 + panic_pulse * escape_strength * 0.16
+	draw_circle(origin, radius * (0.90 + stored_strength * 0.20 + willingness_strength * 0.12), glow_color)
+	draw_arc(origin, radius - 2.6, 0.0, TAU, 40, EMBEZZLER_BALL_RIM_COLOR, 1.8 + willingness_strength * 0.5 + escape_strength * 0.5)
+
+	var pouch_top: Vector2 = origin + Vector2(0.0, -radius * 0.44)
+	var pouch_left: Vector2 = origin + Vector2(-radius * 0.48, -radius * 0.04)
+	var pouch_right: Vector2 = origin + Vector2(radius * 0.48, -radius * 0.04)
+	var pouch_bottom: Vector2 = origin + Vector2(0.0, radius * 0.52)
+	var pouch_color: Color = EMBEZZLER_BALL_COIN_COLOR.lightened(stored_strength * 0.25)
+	draw_colored_polygon(
+		PackedVector2Array([pouch_top, pouch_right, pouch_bottom, pouch_left]),
+		pouch_color
+	)
+	draw_polyline(
+		PackedVector2Array([pouch_top, pouch_right, pouch_bottom, pouch_left, pouch_top]),
+		EMBEZZLER_BALL_RIM_COLOR,
+		1.2
+	)
+	draw_line(
+		origin + Vector2(-radius * 0.34, -radius * 0.28),
+		origin + Vector2(radius * 0.34, -radius * 0.28),
+		EMBEZZLER_BALL_MASK_COLOR,
+		2.0
+	)
+	var eye_color := EMBEZZLER_BALL_GLOW_COLOR
+	eye_color.a = clampf(0.68 + willingness_strength * 0.24 + panic_pulse * escape_strength * 0.22, 0.0, 1.0)
+	var eye_radius: float = radius * (0.07 + willingness_strength * 0.025 + panic_pulse * escape_strength * 0.025)
+	draw_circle(origin + Vector2(-radius * 0.18, -radius * 0.30), eye_radius, eye_color)
+	draw_circle(origin + Vector2(radius * 0.18, -radius * 0.30), eye_radius, eye_color)
+	_draw_embezzler_coin_sparkles(origin, stored_strength, escape_strength)
+
+
+func _draw_embezzler_presentation(origin: Vector2) -> void:
+	var stored_strength: float = clampf(_embezzler_stored_value_visual_strength, 0.0, 1.0)
+	var willingness_strength: float = clampf(_embezzler_willingness_visual_strength, 0.0, 1.0)
+	var escape_strength: float = clampf(_embezzler_escape_visual_strength, 0.0, 1.0)
+	var panic_pulse: float = _get_embezzler_panic_pulse()
+
+	var aura_color := EMBEZZLER_BALL_GLOW_COLOR
+	aura_color.a = 0.08 + stored_strength * 0.18 + willingness_strength * 0.08 + panic_pulse * escape_strength * 0.12
+	draw_circle(origin, radius * (1.15 + stored_strength * 0.35 + panic_pulse * escape_strength * 0.22), aura_color)
+
+	if willingness_strength > 0.55 or escape_strength > 0.01:
+		var panic_color := EMBEZZLER_BALL_PANIC_COLOR
+		panic_color.a = (willingness_strength - 0.45) * 0.18 + escape_strength * (0.12 + panic_pulse * 0.18)
+		draw_arc(origin, radius + 2.4 + panic_pulse * 2.2, 0.0, TAU, 36, panic_color, 1.2 + escape_strength)
+
+	if escape_strength > 0.01:
+		_draw_embezzler_escape_streaks(origin, escape_strength, panic_pulse)
+
+
+func _draw_embezzler_coin_sparkles(origin: Vector2, stored_strength: float, escape_strength: float) -> void:
+	if stored_strength <= 0.08 and escape_strength <= 0.01:
+		return
+
+	var time: float = Time.get_ticks_msec() / 1000.0
+	var sparkle_count: int = 2 + int(round(stored_strength * 2.0)) + (1 if escape_strength > 0.01 else 0)
+	for sparkle_index in range(sparkle_count):
+		var phase: float = time * (4.4 + escape_strength * 4.0) + float(sparkle_index) * 1.91
+		var sparkle_direction: Vector2 = Vector2.RIGHT.rotated(float(sparkle_index) * TAU / float(sparkle_count) + sin(phase) * 0.16)
+		var sparkle_position: Vector2 = origin + sparkle_direction * radius * (0.52 + 0.12 * sin(phase * 1.3))
+		var sparkle_color := EMBEZZLER_BALL_GLOW_COLOR
+		sparkle_color.a = (0.25 + 0.42 * maxf(sin(phase), 0.0)) * maxf(stored_strength, escape_strength)
+		var sparkle_size: float = radius * (0.035 + stored_strength * 0.025 + escape_strength * 0.015)
+		draw_line(sparkle_position + Vector2(-sparkle_size, 0.0), sparkle_position + Vector2(sparkle_size, 0.0), sparkle_color, 1.0)
+		draw_line(sparkle_position + Vector2(0.0, -sparkle_size), sparkle_position + Vector2(0.0, sparkle_size), sparkle_color, 1.0)
+
+
+func _draw_embezzler_escape_streaks(origin: Vector2, escape_strength: float, panic_pulse: float) -> void:
+	var run_direction: Vector2 = velocity.normalized()
+	if run_direction.length_squared() <= 0.001:
+		run_direction = Vector2.RIGHT
+	var trail_direction: Vector2 = -run_direction
+	var trail_color := EMBEZZLER_BALL_GLOW_COLOR
+	trail_color.a = 0.20 + escape_strength * 0.18 + panic_pulse * 0.10
+	for streak_index in range(3):
+		var offset: Vector2 = run_direction.orthogonal() * (float(streak_index) - 1.0) * radius * 0.24
+		var start: Vector2 = origin + trail_direction * radius * (0.48 + float(streak_index) * 0.16) + offset
+		var end: Vector2 = start + trail_direction * radius * (0.42 + panic_pulse * 0.24)
+		draw_line(start, end, trail_color, 1.2)
+
+
+func _draw_embezzler_escape_feet(origin: Vector2) -> void:
+	var escape_strength: float = clampf(_embezzler_escape_visual_strength, 0.0, 1.0)
+	if escape_strength <= 0.01:
+		return
+
+	var run_direction: Vector2 = velocity.normalized()
+	if run_direction.length_squared() <= 0.001:
+		run_direction = Vector2.RIGHT
+	var side_direction: Vector2 = run_direction.orthogonal()
+	var panic_phase: float = Time.get_ticks_msec() / 1000.0 * (18.0 + escape_strength * 10.0)
+	var foot_color := EMBEZZLER_BALL_PANIC_COLOR
+	foot_color.a = 0.72 * escape_strength
+	for side_index in range(2):
+		var side_sign: float = -1.0 if side_index == 0 else 1.0
+		var step: float = sin(panic_phase + float(side_index) * PI)
+		var foot_position: Vector2 = origin - run_direction * radius * (0.62 + step * 0.08) + side_direction * side_sign * radius * 0.46
+		draw_circle(foot_position, radius * (0.09 + maxf(step, 0.0) * 0.025), foot_color)
+
+
+func _get_embezzler_panic_pulse() -> float:
+	var time: float = Time.get_ticks_msec() / 1000.0
+	var willingness_strength: float = clampf(_embezzler_willingness_visual_strength, 0.0, 1.0)
+	var escape_strength: float = clampf(_embezzler_escape_visual_strength, 0.0, 1.0)
+	var pulse_speed: float = 7.0 + willingness_strength * 6.0 + escape_strength * 8.0
+	return 0.5 + 0.5 * sin(time * pulse_speed)
 
 
 func _draw_treasure_legs(origin: Vector2) -> void:

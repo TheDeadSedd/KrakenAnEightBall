@@ -15,6 +15,7 @@ const PANEL_CANNON := "cannon"
 const PANEL_POWDER_KEG_WAYFINDER := "powder_keg_wayfinder"
 const PANEL_VISUAL_EFFECTS := "visual_effects"
 const PANEL_PHYSICS := "physics"
+const PANEL_EMBEZZLER := "embezzler"
 const NORMAL_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.62)
 const PLACEMENT_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.18)
 const SHOP_BUTTON_AVAILABLE_MODULATE := Color(1.0, 1.0, 1.0, 1.0)
@@ -43,6 +44,7 @@ const SHOP_REFRESH_SETTLE_SECONDS := 0.16
 @onready var core_performance_check_box: CheckBox = $Shade/MenuPanel/Margin/VBox/DebugSection/CorePerformancePanelCheckBox
 @onready var aim_preview_check_box: CheckBox = $Shade/MenuPanel/Margin/VBox/DebugSection/AimPreviewPanelCheckBox
 @onready var treasure_check_box: CheckBox = $Shade/MenuPanel/Margin/VBox/DebugSection/TreasurePanelCheckBox
+@onready var embezzler_check_box: CheckBox = $Shade/MenuPanel/Margin/VBox/DebugSection/EmbezzlerPanelCheckBox
 @onready var anchor_check_box: CheckBox = $Shade/MenuPanel/Margin/VBox/DebugSection/AnchorPanelCheckBox
 @onready var ball_drops_score_check_box: CheckBox = $Shade/MenuPanel/Margin/VBox/DebugSection/BallDropsScorePanelCheckBox
 @onready var cannon_check_box: CheckBox = $Shade/MenuPanel/Margin/VBox/DebugSection/CannonPanelCheckBox
@@ -82,6 +84,8 @@ func _connect_debug_panel_toggles() -> void:
 		aim_preview_check_box.toggled.connect(_on_aim_preview_panel_toggled)
 	if not treasure_check_box.toggled.is_connected(_on_treasure_panel_toggled):
 		treasure_check_box.toggled.connect(_on_treasure_panel_toggled)
+	if not embezzler_check_box.toggled.is_connected(_on_embezzler_panel_toggled):
+		embezzler_check_box.toggled.connect(_on_embezzler_panel_toggled)
 	if not anchor_check_box.toggled.is_connected(_on_anchor_panel_toggled):
 		anchor_check_box.toggled.connect(_on_anchor_panel_toggled)
 	if not ball_drops_score_check_box.toggled.is_connected(_on_ball_drops_score_panel_toggled):
@@ -276,6 +280,7 @@ func set_debug_panel_states(panel_states: Dictionary) -> void:
 	core_performance_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_CORE_PERFORMANCE, false)))
 	aim_preview_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_AIM_PREVIEW, false)))
 	treasure_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_TREASURE, false)))
+	embezzler_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_EMBEZZLER, false)))
 	anchor_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_ANCHOR, false)))
 	ball_drops_score_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_BALL_DROPS_SCORE, false)))
 	cannon_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_CANNON, false)))
@@ -345,6 +350,10 @@ func _on_aim_preview_panel_toggled(enabled: bool) -> void:
 
 func _on_treasure_panel_toggled(enabled: bool) -> void:
 	debug_panel_toggled.emit(PANEL_TREASURE, enabled)
+
+
+func _on_embezzler_panel_toggled(enabled: bool) -> void:
+	debug_panel_toggled.emit(PANEL_EMBEZZLER, enabled)
 
 
 func _on_anchor_panel_toggled(enabled: bool) -> void:

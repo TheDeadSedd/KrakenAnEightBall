@@ -16,7 +16,7 @@ Core pillars:
 - Pocket-side score celebrations instead of generic center-screen scoring spam.
 - Score-tied ball drops that turn successful play into rising table pressure.
 - The Quartermaster tactical shop, rotating offers, reserve slots, and reusable ball placement flow.
-- Active anomaly balls: Wayfinder Ball, Powder Keg, Anchor Ball, Cannon Ball, and Treasure Ball experiments.
+- Active anomaly balls: Wayfinder Ball, Powder Keg, Anchor curse seeds, Cannon Ball, Treasure Ball, and Embezzler experiments.
 - Expanded foundational, skilled, heroic, and legendary trick-shot event rewards.
 - Atmospheric layered main menu presentation with lightweight draw-only motion.
 - Pooled event-driven billiards collision audio that scales with chaos.
@@ -43,7 +43,7 @@ Does not own large new feature systems unless there is no cleaner option. New ga
 
 ### `scripts/Ball.gd`
 
-Owns individual ball identity, velocity/friction state, generated ball visuals, spawn/drop presentation state, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and minimal anomaly identity/state flags such as `is_wayfinder`, `is_powder_keg`, `is_anchor_ball`, `is_cannon_ball`, `is_treasure_ball`, and `wayfinder_active`.
+Owns individual ball identity, velocity/friction state, generated ball visuals, spawn/drop presentation state, trails, draw-only anomaly presentation such as Cannon heat, Treasure legs, and Embezzler glow/legs, and minimal anomaly identity/state flags such as `is_wayfinder`, `is_powder_keg`, `is_anchor_ball`, `is_anchor_curse_seed`, `is_cannon_ball`, `is_treasure_ball`, `is_embezzler_ball`, and `wayfinder_active`.
 
 Does not own table-wide gameplay rules, scoring, spawning decisions, pocket logic, or anomaly systems beyond per-ball state that must live on the ball.
 
@@ -73,7 +73,7 @@ Does not own shot power, shot velocity, aim prediction, or real ball movement.
 
 ### `scripts/AimPreview.gd`
 
-Owns polished cue-ball aim line presentation, shot-power color, swept cue-ball preview collision checks, AimPreview-only broad-phase filtering, ghost cue-ball prediction, one-bank preview, hit-ball prediction line presentation, hit-ball first-collision stopping against rails/balls/pockets, visual-only endpoint markers, read-only Treasure Ball perception snapshots, and predicted-vs-actual shot path debug visualization.
+Owns polished cue-ball aim line presentation, shot-power color, swept cue-ball preview collision checks, AimPreview-only broad-phase filtering, ghost cue-ball prediction, one-bank preview, hit-ball prediction line presentation, hit-ball first-collision stopping against rails/balls/pockets, visual-only endpoint markers, read-only Treasure/Embezzler perception snapshots, and predicted-vs-actual shot path debug visualization.
 
 Does not mutate real gameplay state. Prediction must stay side-effect-free and should use shared boundary/pocket helpers so preview stays aligned with real movement.
 
@@ -83,7 +83,7 @@ AimPreview.gd must remain prediction/presentation only. It must not change real 
 
 ### `scripts/SpawnSystem.gd`
 
-Owns cue ball start/reset helpers, starting rack/object-ball creation, reward spawns, debug ball spawns, safe spawn search, drop animation coordination, spawn-related callouts, regular anomaly pool odds, and Anchor priority spawn odds.
+Owns cue ball start/reset helpers, starting rack/object-ball creation, reward spawns, debug ball spawns, safe spawn search, drop animation coordination, spawn-related callouts, regular anomaly pool odds, and debug creation requests such as Anchor curse-seed transformation.
 
 Does not own scoring, pocket consequences, shot lifecycle, physics tuning, score-tied reward decisions, or anomaly behavior after a ball exists.
 
@@ -139,15 +139,17 @@ Does not own ball-to-ball collision response, spawn chance, scoring values, pock
 
 ### `scripts/AnchorBallSystem.gd`
 
-Owns Anchor Ball cursed-tide pull behavior, Anchor source/target rules, single strongest-current-per-target selection, contact-loop cooldowns, affected-ball marker reporting, Anchor debug visuals, visual aura caps, and Anchor performance counters.
+Owns the current Anchor curse-seed identity: eight-ball sink penalty replacement, eligible seed selection/scoring, curse-seed transformation, stationary seed state, 1-3 chained-ball acquisition, draw-only chain/tether presentation, leash constraints, cue-control-gated chain tightening, deconfliction/lane-finding during tightening, warning countdowns, spread propagation, collapse/counterplay, and Anchor debug counters.
 
-Does not own ball-to-ball collision response, cue input, scoring values, prediction, pocket geometry, or SpawnSystem's reward-roll decisions.
+Anchor curse seeds are state/event-driven. The retired continuous pull/field identity is hard-disabled and should not run during normal play or debug testing. Debug Anchor creation should create the new curse-seed style Anchor by transforming an eligible existing object ball, not by spawning an old field source.
+
+Does not own broad ball-to-ball collision response, cue input, scoring values, prediction, pocket geometry, normal reward-spawn odds, or score rewards. Chain visuals are presentation-only; leash constraints/tightening operate only on stored chain links and should not become a table-wide continuous force.
 
 ### `scripts/CannonBallSystem.gd`
 
 Owns the Cannon Ball anomaly boundary, Cannon-specific collision tuning, Powder Keg launch tuning, Cannon heavy-impact shake eligibility/cooldown, and moving Cannon heat-presence thresholds. Cannon Ball is currently debug-spawnable, visually heavy, harder to accelerate from normal/cue impacts, more forceful/persistent when it hits non-anomaly balls, amplified when launched by Powder Keg explosions, able to request subtle table thumps on qualifying heavy impacts, and visually marked by a draw-only red/orange heat glow and ember trail at high speed.
 
-Future Cannon Ball passes may own Anchor pull tuning, Wayfinder guidance safeguards, regular spawn odds, and additional heat-presence polish, but those are not active yet.
+Future Cannon Ball passes may own Anchor curse-seed interaction polish, Wayfinder guidance safeguards, regular spawn odds, and additional heat-presence polish, but those are not active yet.
 
 Does not own global ball-to-ball collision constants, spawn odds, scoring values, cue input, prediction, pocket geometry, screen shake, or interactions with Anchor or Wayfinder.
 
@@ -156,6 +158,16 @@ Does not own global ball-to-ball collision constants, spawn odds, scoring values
 Owns Treasure Ball tracking, read-only AimPreview perception state, committed hide target selection, aim-corridor crossing avoidance, pocket-aware hide/flee target filtering, and threat-scaled self-steering while Treasure is actively perceived by the aim-line corridor. Treasure Ball is currently debug-spawnable, visually distinct, uses capped soft-body/scuttle steering toward cover or a fallback flee target without overriding normal collisions, and can request draw-only fleeing-leg presentation from `Ball.gd`.
 
 Does not own rewards, scoring values, spawn odds, pocket behavior, cue input, prediction math, broad physics, or procedural leg drawing. Future Treasure passes may add reward variants, but current Treasure behavior is identity/perception/committed hide-target/threat-scaled hiding movement, soft outgoing self-propelled collision nudges, quick self-braking when calm, and visual fleeing-state reporting only.
+
+Treasure remains its own cautious aim-line/hiding experiment. It is not the Embezzler: Treasure does not skim Doubloons, pick a secret escape pocket, roll hide-or-run decisions, or cash out stored value.
+
+### `scripts/EmbezzlerSystem.gd`
+
+Owns the Embezzler anomaly identity as a living greed mechanic separate from Treasure: capped active tracking, debug-spawn eligibility, copied Doubloon skim/storage, secret target pocket assignment, willingness/desperation from stored value plus aim pressure, once-per-shot hide-or-run decision, Treasure-like hiding/scuttle targets when it does not run, escape commitment toward the secret pocket, target-pocket escape roll, panic retreat on failed pocket roll, capture payout, escape cleanup, visual state reporting, and Embezzler debug counters.
+
+The Embezzler copies a percentage of positive Doubloons awarded while alive; it does not reduce the player's original score. Capturing/pocketing it pays out stored value through the normal award flow so the recovered loot feels like real scoring. Escaping removes/despawns it and clears state without subtracting player score in the current first pass.
+
+Does not own Treasure behavior, scoring values, BallDropSystem rules beyond using existing award flow on capture payout, pocket geometry, cue feel, physics, Quartermaster/Reserve behavior, spawn odds, or anomaly special interactions. Aim pressure may raise future willingness, but it must not spam escape rolls; the primary escape decision should happen once per cue-ball hit/shot cycle.
 
 ### `scripts/PocketSystem.gd`
 
@@ -192,16 +204,19 @@ Does not own shot event tracking, pocket capture, physics, anomaly behavior, rew
 
 Current score presentation notes:
 
-- Side-pocket score popup behavior is considered good and should be preserved unless specifically requested.
-- Corner-pocket score popup layout is still under active refinement.
-- Popups are pocket-centered and consume sink context from `PocketSystem`.
+- Score presentation now centers on evolving pocket-side score stacks instead of repeatedly spawning itemized labels.
+- Foundational, Skilled, Heroic, and Legendary reward tiers each route into tier-specific stack classes when possible.
+- Stack numbers count upward (`+5 -> +10 -> +15`) and compact subtitles summarize the latest/combined event names.
+- Tier presentation should preserve hierarchy: Foundational is lightweight, Skilled is blue/glowy, Heroic is purple/dramatic, and Legendary is gold/yellow centerpiece celebration.
+- Lane management keeps tiers separated near pockets, allows lower-priority/older stacks to yield or fade early, and preserves pocket-side identity.
+- The old special popup path should be reserved only for unknown/future rewards or cases still intentionally outside the stack system.
 - Score values should not change during presentation-only passes.
 
 ### `scripts/BallDropSystem.gd`
 
 Owns the score-tied ball drop architecture spine: enabled state, Doubloon progress toward earned drops, threshold tuning, deciding how many earned drops to queue after ScoreSystem reports awarded Doubloons, and cue/eight-ball sink penalty amount/message selection.
 
-Does not own object-ball scoring values, score popup presentation, actual ball creation, spawn placement, drop animation, physics, or penalty removal animation. `SpawnSystem.gd` still performs actual drops, and `Table.gd` only coordinates pocket consequences and the placeholder penalty removal.
+Does not own object-ball scoring values, score popup presentation, actual ball creation, spawn placement, drop animation, physics, cue-ball penalty removal animation, or Anchor curse-seed penalty selection. `SpawnSystem.gd` still performs actual drops, and `Table.gd` only coordinates pocket consequences, cue-ball penalty removal, and eight-ball Anchor curse-seed penalty routing.
 
 Current first-pass behavior:
 
@@ -213,7 +228,8 @@ Current first-pass behavior:
 - Legacy non-score gameplay reward drops are disabled by default so normal reward drops come from `BallDropSystem.gd`.
 - Score-earned drops choose rotating themed callout messages from `BallDropSystem.gd`; debug/manual spawns can keep direct spawn labels.
 - Cue-ball and eight-ball sinks apply a 25 Doubloon penalty through `BallDropSystem.gd` / `ScoreSystem.gd` without adding to drop progress.
-- Cue-ball and eight-ball sinks reset those special balls, then `Table.gd` removes one eligible object ball as the penalty.
+- Cue-ball sinks still remove one eligible object ball as the physical penalty.
+- Eight-ball sinks now try to transform one eligible existing object ball into an Anchor curse seed instead of using the old remove-ball-only penalty path.
 
 ### `scripts/Main.gd`
 
@@ -285,6 +301,7 @@ Anomaly balls should generally get their own system scripts. Current active anom
 - `AnchorBallSystem.gd`
 - `CannonBallSystem.gd` currently owns debug-spawnable Cannon identity, collision tuning, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat-presence thresholds.
 - `TreasureBallSystem.gd` currently owns debug-spawnable Treasure identity tracking, AimPreview perception reporting, committed hide target selection, gentle hiding movement while perceived, and visual fleeing-state reporting.
+- `EmbezzlerSystem.gd` currently owns debug-spawnable/capped Embezzler identity, copied Doubloon storage, willingness, once-per-shot hide-or-run decisions, escape/capture resolution, and visual state reporting.
 
 Pattern:
 
@@ -303,13 +320,17 @@ Current anomaly rules:
 - Powder Keg launches Cannon Balls with Cannon-owned impulse amplification and a conservative Cannon launch speed cap.
 - Powder Keg requests a short presentation-only table impact shake; table art shakes most, balls receive draw-only shimmy, and HUD/debug UI stays still.
 - Powder Keg particle bursts should look juicy and readable, but debug/quality controls should allow particles to degrade safely under load.
-- Anchor pulls object balls only. It does not affect the cue ball.
-- Anchor does not pull other Anchor balls, though Anchor balls still physically collide normally.
-- Overlapping Anchor fields do not stack on the same target. Each target ball follows one strongest effective Anchor current per update/substep, with nearest Anchor as the tie-breaker. Anchor overlap debug counters should report skipped overlaps, max Anchors considered per target, and targets with overlap candidates.
-- Moving Anchor balls use full pull strength.
-- Stationary Anchor balls remain active field sources but use half pull strength.
-- Anchor has an inner dead zone and a per Anchor/target post-collision pull cooldown to prevent gravity-loop chase bumps.
-- Anchor uses independent reward spawn logic before the regular anomaly pool: 3% when the table has 40 or fewer balls, and 30% when the table has more than 40 balls.
+- Anchor's old continuous cursed-tide pull/field gameplay is retired and disabled.
+- Anchor enters play when the eight ball is sunk: one eligible existing object ball is transformed into a stationary Anchor curse seed.
+- Cue ball and eight ball are not valid curse-seed transform targets.
+- Curse-seed candidate selection is event-time and prefers difficult/problematic positions such as near rails, clutter, shielded angles, opposite-side pressure, and non-central locations while avoiding easy direct lines and pocket-trivial placements.
+- Each curse seed claims 1-3 eligible nearby chained balls, excluding cue ball, eight ball, other curse seeds/Anchors, invalid balls, and sinking balls.
+- Chain links store max length. Chained balls can move within the leash but are clamped/projected back when they try to exceed the current max chain length.
+- Chain tightening is cue-control/turn gated: when the player regains a decision window, chain lengths shorten and balls slide/tug inward without adding real rolling velocity.
+- Deconfliction/lane-finding during tightening lets same-seed chained balls shimmy around one another toward separate contact positions.
+- When all valid chained balls touch the seed, a visible warning timer starts. The timer counts down only while the player can act and pauses during unresolved table motion.
+- If the warning completes, corruption spreads from the touching chained balls into new curse seeds; spread is event-driven and newly created seeds have a short grace window to avoid same-frame recursive spread.
+- Anchor curse seeds can collapse through direct cue-ball hit, Powder Keg, strong Cannon Ball hit, or pocketing a chained ball. Collapse releases chains, clears warning/spread state, and restores the seed to a normal object ball.
 - Cannon Ball is currently debug-spawn only and visually reads as dark heavy iron with ember detail.
 - Cannon Ball has collision modifiers against non-anomaly balls only: it gains reduced velocity when hit, retains more velocity when driving into a ball, and transfers stronger force above a minimum impact speed.
 - Cannon Ball can trigger Powder Keg explosions and receives amplified Powder Keg launch impulse.
@@ -328,6 +349,14 @@ Current anomaly rules:
 - Treasure Ball should avoid target-thrashing through short commitment windows and meaningful switch thresholds.
 - Treasure Ball procedural legs are draw-only in `Ball.gd`. They appear only while Treasure is actively fleeing/steering, then fade/retract without adding collision or gameplay effects.
 - Treasure Ball currently has no special scoring, reward payout, or regular spawn odds.
+- Embezzler is currently debug-spawnable and capped at one active Embezzler.
+- Embezzler copies/skims a percentage of positive Doubloons awarded while alive, storing value without reducing the player's awarded score.
+- Embezzler has a secret target pocket visible only through debug information.
+- Embezzler willingness/desperation combines stored-value baseline and short-term aim pressure; aim pressure should raise future risk without causing repeated same-shot escape-roll spam.
+- Once per cue-ball hit/shot cycle, Embezzler decides whether to hide or run. Failed/low-value decisions seek cover or flee away from center/target-pocket drift; successful decisions commit it toward its secret pocket.
+- When an escape-committed Embezzler reaches its target pocket area, it performs the existing second pocket roll: success escapes/despawns it, failure triggers panic retreat.
+- If the player pockets/captures the Embezzler before escape, the player receives its stored value through normal Doubloon award flow; capture payout should remain double-award safe.
+- Embezzler visual polish is lightweight/draw-driven: stored value and willingness increase gold glow/urgency, and committed escape reads as frantic/running.
 
 Possible future anomaly systems:
 
@@ -355,6 +384,10 @@ Do not bury score-tied reward decisions inside `ScoreSystem.gd`, and do not add 
 - `MULTI_SINK` applies to the second and later object balls sunk in the same shot, not retroactively to earlier popups.
 - `MULTI_CHAIN` is repeatable and represents additional causal chain depth beyond the first `CHAIN`.
 - Score popups should remain pocket-side, arcade-readable, and tied to the captured pocket.
+- Foundational, Skilled, Heroic, and Legendary rewards should route into evolving pocket-side score stacks instead of noisy repeated itemized labels.
+- Stack totals count upward rather than using multiplier text. Tier identity comes from stack styling, color, glow, subtitle text, lane placement, and yield rules.
+- Lower-priority stacks may fade/yield when stronger tier moments appear nearby; Legendary should remain the most prominent and least likely to yield.
+- The old popup path should not be used for implemented tier events unless a future/unknown reward intentionally stays outside the stack architecture.
 - Drop/spawn notifications may still use top/center callouts; scoring feedback should not return there unless explicitly requested.
 - Quartermaster spending is not score awarding. Shop purchases should not emit `doubloons_awarded`, feed `BallDropSystem` progress, or appear as sink-score rewards.
 - Do not add coin sprays, progression, or large score VFX without permission.
@@ -399,7 +432,10 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 - Stopped-ball filtering exists and should be preserved.
 - Ball-vs-ball broad-phase spatial grid exists and should be preserved.
 - Rail checks and pocket checks should run only for moving gameplay-active balls.
-- Performance overlay/debug tools exist in `DebugOverlay.gd` and use requested-section snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, `CannonBallSystem.gd`, `TreasureBallSystem.gd`, `BallDropSystem.gd`, `QuartermasterSystem.gd`, and `ReserveSystem.gd`.
+- Performance overlay/debug tools exist in `DebugOverlay.gd` and use requested-section snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, `CannonBallSystem.gd`, `TreasureBallSystem.gd`, `EmbezzlerSystem.gd`, `BallDropSystem.gd`, `QuartermasterSystem.gd`, and `ReserveSystem.gd`.
+- Anchor is now state/event-driven curse-seed gameplay, not a continuous force-field simulation. Do not reintroduce per-frame broad pull scans as Anchor's identity.
+- Embezzler is capped and decision/event-driven: it may track aim pressure and reposition while active, but escape decisions should remain once-per-shot and not become frame-loop random roll spam.
+- Score celebrations should coalesce through evolving stack presentation so high-chaos scoring creates fewer independent UI labels/tweens.
 - Hidden debug panels/overlays should not format text or refresh panel content every frame. If no modular panels and no full overlay are visible, debug formatting work should be minimal.
 - Do not remove counters or make them misleading during optimization.
 - Do not add spatial partition rewrites or alternate physics engines without a focused request.
@@ -489,8 +525,9 @@ The first player-facing Ball Drop progress meter exists in `BallDropMeter.gd` as
 Cue ball and eight ball sinking no longer end the game as this loop comes online:
 
 - Each costs 25 Doubloons.
-- Each removes one eligible object ball from the table as the penalty.
-- Current first pass uses a simple scale/fade removal animation; a true reversed ball-drop animation can replace it later.
+- Cue-ball sinks still remove one eligible object ball from the table as the physical penalty.
+- Eight-ball sinks now try to transform one eligible existing object ball into an Anchor curse seed instead of using the old remove-ball-only penalty path.
+- Cue-ball penalty removal still uses a simple scale/fade animation; a true reversed ball-drop animation can replace it later.
 
 ## Current Architecture Direction
 

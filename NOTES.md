@@ -15,15 +15,18 @@ Kraken An Eight Ball is currently a pirate/eldritch arcade-chaos billiards proto
 - Deploy reserved balls later through the reusable placement flow.
 - The player survives and exploits the escalating table state instead of simply clearing a rack.
 
-Cue ball and eight ball sinks no longer end the game. Each currently costs 25 Doubloons and removes one eligible object ball from the table as a penalty.
+Cue ball and eight ball sinks no longer end the game. Each currently costs 25 Doubloons; cue-ball sinks still remove one eligible object ball, while eight-ball sinks now try to transform an eligible object ball into an Anchor curse seed.
 
 ## Current Special Balls
 
 - Wayfinder Ball: cue-contact anomaly that can guide eligible balls toward pockets.
 - Powder Keg: explodes on cue-ball or Cannon Ball contact, pushes nearby balls, removes itself, and requests fake-3D table impact shake.
-- Anchor Ball: creates a cursed-tide pull on object balls, with one strongest Anchor current per target instead of stacked pulls.
+- Anchor Ball: now uses the curse-seed model. Eight-ball sink transforms an eligible existing object ball into a stationary curse seed, chains 1-3 nearby balls, tightens leashes only during cue-control/turn windows, warns before spread, and can collapse through cue hit, Powder Keg, Cannon Ball, or pocketing a chained ball. The old continuous pull field is retired/disabled.
 - Cannon Ball: heavy iron debug-spawn anomaly built around delayed-chaos "future problem" identity: hard to start, hard to stop, dangerous once moving, and visually marked by red/orange heat presence.
 - Treasure Ball: debug-spawn experiment that notices the aim-line corridor, chooses cover, avoids being watched too closely, scuttles away while perceived, and uses draw-only legs.
+- Embezzler: debug-spawn/capped living greed anomaly that copies a share of Doubloons while alive, hides or runs once per shot based on stored value/willingness, wants one secret pocket, can escape after a pocket roll, and pays out stored value if caught first.
+
+Treasure and Embezzler are separate identities. Treasure is the cautious aim-line/hiding experiment; Embezzler is the greed, panic, secret-pocket, and cashout/escape mechanic.
 
 ## Current Shop And Reserve Loop
 
@@ -49,6 +52,15 @@ This loop is now a major identity pillar: Doubloons are not just score, they are
 
 `ShotEventSystem.gd` records causal history; `ScoreSystem.gd` converts that history into Doubloons and pocket-side popups.
 
+## Current Score Presentation
+
+- Score celebration now uses evolving pocket-side score stacks rather than endless independent labels.
+- Foundational, Skilled, Heroic, and Legendary rewards each have tier-specific stack presentation.
+- Stack totals count upward (`+5 -> +10 -> +15`) while compact subtitles summarize the latest/combined event names.
+- Skilled stacks glow blue, Heroic stacks glow purple, and Legendary stacks glow gold/yellow.
+- Lane management separates tiers around pockets, lets older/lower-priority stacks yield or fade early, and keeps Legendary moments prominent.
+- The old popup path is reserved for future/unknown rewards or any intentionally non-stack event presentation still left outside the tier stack system.
+
 ## Shot Event Philosophy
 
 Shot events should reward recovery, geometry, improvisation, chaos control, anomaly-assisted creativity, and legendary moments. Kraken An Eight Ball is not chasing strict billiards simulation realism; it is building readable arcade billiards mythology where clever messes, desperate saves, and impossible-looking routes feel worth celebrating.
@@ -69,6 +81,13 @@ Shot events should reward recovery, geometry, improvisation, chaos control, anom
 - `DebugPanel.gd` owns panel shell behavior and consumes panel-local input so cue drag/release is protected.
 - Debug panels remain interactive while paused, and hidden panels should not refresh text or request unnecessary snapshot sections.
 - Snapshot/counter meanings should remain stable; debug gating should reduce hidden work without hiding behavior.
+
+## Optimization Notes
+
+- Anchor is now state/event-driven curse-seed gameplay rather than a continuous force-field simulation.
+- Embezzler is capped and event-driven around score gain, aim pressure, once-per-shot decisions, capture, and escape resolution.
+- Score popups coalesce into tiered score stacks to reduce label/tween pressure during high-chaos scoring.
+- Project Brain and debug media are reference-only. Always verify behavior against `AGENTS.md`, real scripts, and scenes before changing gameplay.
 
 ## Tone
 

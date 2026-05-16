@@ -28,7 +28,7 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 - `scripts/ReserveDeploymentPresenter.gd` - Draw-only cursor icon and dotted tether presentation while deploying a reserved item.
 - `scripts/ReserveSlotsUI.gd` - Icon-only upper table-frame Reserve slot UI with hover glow, click consumption, and deployment request wiring.
 - `scripts/ReserveSystem.gd` - Owns three Reserve slot contents, selected/deploying state, deployment confirm/cancel bookkeeping, snapshots, and simple debug counters.
-- `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons and pocket-side score popup presentation.
+- `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons and evolving pocket-side score stack presentation.
 - `scripts/TableImpactShakeSystem.gd` - Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.
 
 ## Current Notes
@@ -37,7 +37,7 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 - PauseMenu.gd owns menu tabs, Quartermaster UI, and modular debug-panel toggles while gameplay is paused.
 - DebugPanel.gd owns draggable pause-safe panel shells; DebugOverlay.gd formats visible panel content and the full F3 overlay.
 - ReserveSlotsUI.gd owns icon-only table-frame slots; ReserveDeploymentPresenter.gd owns cursor icon/tether presentation.
-- Score popups are pocket-side arcade celebrations, not generic UI spam.
+- Score presentation now uses evolving pocket-side score stacks with Foundational/Skilled/Heroic/Legendary tier identity, count-up totals, and lane/yield behavior.
 - Debug labels should stay clearly marked and not leak temporary test wording into player-facing strings.
 - BallDropSystem.gd owns rotating score-earned drop-message selection; SpawnSystem/Table carry those messages to callouts.
 - BallDropMeter.gd owns the vertical right-side player-facing progress meter.
@@ -45,7 +45,7 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 
 ## Risks Or TODOs
 
-- Score popup readability can regress when many events happen at once.
+- Score stack lane/readability can regress when many high-tier events happen near the same pocket.
 - Modular debug panels can become noisy as more sections are added; keep hidden-panel gating intact.
 - Main menu atmosphere should remain lightweight and layered correctly behind foreground silhouettes.
 - Quartermaster and Reserve UI should not steal active cue drag/release input.

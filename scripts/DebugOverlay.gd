@@ -14,6 +14,7 @@ const PANEL_CANNON := "cannon"
 const PANEL_POWDER_KEG_WAYFINDER := "powder_keg_wayfinder"
 const PANEL_VISUAL_EFFECTS := "visual_effects"
 const PANEL_PHYSICS := "physics"
+const PANEL_EMBEZZLER := "embezzler"
 
 @onready var physics_debug_panel: PanelContainer = $PhysicsDebugPanel
 @onready var physics_debug_label: Label = $PhysicsDebugPanel/Margin/PhysicsDebugLabel
@@ -25,6 +26,8 @@ const PANEL_PHYSICS := "physics"
 @onready var aim_preview_label: Label = $AimPreviewPanel/Margin/AimPreviewPanelLabel
 @onready var treasure_panel: DebugPanel = $TreasurePanel
 @onready var treasure_label: Label = $TreasurePanel/Margin/TreasurePanelLabel
+@onready var embezzler_panel: DebugPanel = $EmbezzlerPanel
+@onready var embezzler_label: Label = $EmbezzlerPanel/Margin/EmbezzlerPanelLabel
 @onready var anchor_panel: DebugPanel = $AnchorPanel
 @onready var anchor_label: Label = $AnchorPanel/Margin/AnchorPanelLabel
 @onready var ball_drops_score_panel: DebugPanel = $BallDropsScorePanel
@@ -158,6 +161,7 @@ func get_modular_debug_panel_states() -> Dictionary:
 		PANEL_CORE_PERFORMANCE: core_performance_panel.visible,
 		PANEL_AIM_PREVIEW: aim_preview_panel.visible,
 		PANEL_TREASURE: treasure_panel.visible,
+		PANEL_EMBEZZLER: embezzler_panel.visible,
 		PANEL_ANCHOR: anchor_panel.visible,
 		PANEL_BALL_DROPS_SCORE: ball_drops_score_panel.visible,
 		PANEL_CANNON: cannon_panel.visible,
@@ -171,6 +175,7 @@ func _set_all_modular_debug_panels_visible(visible_value: bool) -> void:
 	core_performance_panel.visible = visible_value
 	aim_preview_panel.visible = visible_value
 	treasure_panel.visible = visible_value
+	embezzler_panel.visible = visible_value
 	anchor_panel.visible = visible_value
 	ball_drops_score_panel.visible = visible_value
 	cannon_panel.visible = visible_value
@@ -184,6 +189,7 @@ func _has_visible_modular_debug_panels() -> bool:
 		core_performance_panel.visible
 		or aim_preview_panel.visible
 		or treasure_panel.visible
+		or embezzler_panel.visible
 		or anchor_panel.visible
 		or ball_drops_score_panel.visible
 		or cannon_panel.visible
@@ -206,6 +212,7 @@ func _get_visible_modular_debug_panel_count() -> int:
 	count += 1 if core_performance_panel.visible else 0
 	count += 1 if aim_preview_panel.visible else 0
 	count += 1 if treasure_panel.visible else 0
+	count += 1 if embezzler_panel.visible else 0
 	count += 1 if anchor_panel.visible else 0
 	count += 1 if ball_drops_score_panel.visible else 0
 	count += 1 if cannon_panel.visible else 0
@@ -223,6 +230,8 @@ func _get_visible_modular_performance_sections() -> Dictionary:
 		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_AIM_PREVIEW))
 	if treasure_panel.visible:
 		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_TREASURE))
+	if embezzler_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_EMBEZZLER))
 	if anchor_panel.visible:
 		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_ANCHOR))
 	if ball_drops_score_panel.visible:
@@ -248,6 +257,8 @@ func _get_modular_panel_performance_sections(panel_id: String) -> Dictionary:
 			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_AIM_PREVIEW)
 		PANEL_TREASURE:
 			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_TREASURE)
+		PANEL_EMBEZZLER:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_EMBEZZLER)
 		PANEL_ANCHOR:
 			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_ANCHOR)
 		PANEL_BALL_DROPS_SCORE:
@@ -274,6 +285,8 @@ func _refresh_visible_modular_debug_panels(snapshot: Dictionary) -> void:
 		_refresh_modular_debug_panel(PANEL_AIM_PREVIEW, snapshot)
 	if treasure_panel.visible:
 		_refresh_modular_debug_panel(PANEL_TREASURE, snapshot)
+	if embezzler_panel.visible:
+		_refresh_modular_debug_panel(PANEL_EMBEZZLER, snapshot)
 	if anchor_panel.visible:
 		_refresh_modular_debug_panel(PANEL_ANCHOR, snapshot)
 	if ball_drops_score_panel.visible:
@@ -300,6 +313,8 @@ func _refresh_modular_debug_panel(panel_id: String, snapshot: Dictionary) -> voi
 			label.text = "\n".join(_make_aim_preview_performance_lines(snapshot))
 		PANEL_TREASURE:
 			label.text = _make_titled_panel_text("TREASURE", _make_treasure_performance_lines(snapshot))
+		PANEL_EMBEZZLER:
+			label.text = _make_titled_panel_text("EMBEZZLER", _make_embezzler_performance_lines(snapshot))
 		PANEL_ANCHOR:
 			label.text = _make_titled_panel_text("ANCHOR", _make_anchor_performance_lines(snapshot))
 		PANEL_BALL_DROPS_SCORE:
@@ -322,6 +337,8 @@ func _get_modular_debug_panel(panel_id: String) -> Control:
 			return aim_preview_panel
 		PANEL_TREASURE:
 			return treasure_panel
+		PANEL_EMBEZZLER:
+			return embezzler_panel
 		PANEL_ANCHOR:
 			return anchor_panel
 		PANEL_BALL_DROPS_SCORE:
@@ -345,6 +362,8 @@ func _get_modular_debug_label(panel_id: String) -> Label:
 			return aim_preview_label
 		PANEL_TREASURE:
 			return treasure_label
+		PANEL_EMBEZZLER:
+			return embezzler_label
 		PANEL_ANCHOR:
 			return anchor_label
 		PANEL_BALL_DROPS_SCORE:
@@ -420,12 +439,13 @@ func _on_powder_keg_suppress_trails_toggled(enabled: bool) -> void:
 
 func _make_debug_hotkey_text() -> String:
 	var hotkeys: Dictionary = table.get_debug_spawn_hotkey_data()
-	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Create Anchor Curse Seed\n%s: Spawn Cannon Ball\n%s: Spawn Treasure Ball\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
+	return "%s: Spawn Wayfinder Ball\n%s: Spawn Powder Keg\n%s: Create Anchor Curse Seed\n%s: Spawn Cannon Ball\n%s: Spawn Treasure Ball\n%s: Spawn Embezzler Ball\n%s: Spawn Normal Ball\n%s: Performance Overlay" % [
 		OS.get_keycode_string(int(hotkeys["wayfinder_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["powder_keg_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["anchor_ball_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["cannon_ball_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["treasure_ball_spawn_key"])),
+		OS.get_keycode_string(int(hotkeys["embezzler_ball_spawn_key"])),
 		OS.get_keycode_string(int(hotkeys["normal_spawn_key"])),
 		OS.get_keycode_string(PERFORMANCE_OVERLAY_TOGGLE_KEY),
 	]
@@ -613,6 +633,7 @@ func _make_anomaly_performance_lines(snapshot: Dictionary) -> Array:
 	lines.append_array(_make_anchor_performance_lines(snapshot))
 	lines.append_array(_make_cannon_performance_lines(snapshot))
 	lines.append_array(_make_treasure_performance_lines(snapshot))
+	lines.append_array(_make_embezzler_performance_lines(snapshot))
 	return lines
 
 
@@ -771,6 +792,87 @@ func _make_treasure_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["treasure_perception_grace_active"],
 			float(snapshot["treasure_perception_grace_max_remaining"]),
 			snapshot["treasure_perception_lingered"],
+		],
+	]
+
+
+func _make_embezzler_performance_lines(snapshot: Dictionary) -> Array:
+	return [
+		"Embezzler: %s active / %s state" % [
+			snapshot["embezzler_balls"],
+			snapshot["embezzler_state"],
+		],
+		"Embezzler value: %s stored / %s skimmed total" % [
+			snapshot["embezzler_stored_value"],
+			snapshot["embezzler_skimmed_total"],
+		],
+		"Embezzler will: %.1f%% total / %.1f base / %.1f aim" % [
+			float(snapshot["embezzler_willingness"]),
+			float(snapshot["embezzler_baseline_willingness"]),
+			float(snapshot["embezzler_aim_pressure_willingness"]),
+		],
+		"Embezzler pressure: %s / %s events / %.1f calm/s" % [
+			snapshot["embezzler_last_pressure_reason"],
+			snapshot["embezzler_pressure_events"],
+			float(snapshot["embezzler_calm_decay_rate"]),
+		],
+		"Embezzler target: %s @ %s / bias %.2f" % [
+			snapshot["embezzler_move_target_mode"],
+			_debug_vector_text(snapshot["embezzler_move_target"]),
+			float(snapshot["embezzler_target_pocket_bias_amount"]),
+		],
+		"Embezzler movement: %s scuttles / %s switches / %s blocked" % [
+			snapshot["embezzler_scuttle_applications"],
+			snapshot["embezzler_target_switches"],
+			snapshot["embezzler_blocked_target_attempts"],
+		],
+		"Embezzler routing: %s / block %s" % [
+			snapshot["embezzler_target_switch_reason"],
+			snapshot["embezzler_last_blocked_target_reason"],
+		],
+		"Embezzler escape: %s committed / %s pending / %s pending count / %s total" % [
+			snapshot["embezzler_escape_committed_active"],
+			snapshot["embezzler_pocket_test_pending_active"],
+			snapshot["embezzler_pocket_test_pending_count"],
+			snapshot["embezzler_pocket_test_pending_total"],
+		],
+		"Embezzler rolls: %s attempts / %s success / %s fail" % [
+			snapshot["embezzler_escape_roll_attempts"],
+			snapshot["embezzler_escape_roll_successes"],
+			snapshot["embezzler_escape_roll_failures"],
+		],
+		"Embezzler last roll: %.1f%% / %s" % [
+			float(snapshot["embezzler_last_escape_roll_chance"]) * 100.0,
+			snapshot["embezzler_last_escape_roll_reason"],
+		],
+		"Embezzler pocket rolls: %s attempts / %s escaped / %s retreat" % [
+			snapshot["embezzler_pocket_roll_attempts"],
+			snapshot["embezzler_pocket_roll_successes"],
+			snapshot["embezzler_pocket_roll_failures"],
+		],
+		"Embezzler pocket result: %.1f%% / %s / %s escapes / %s panics" % [
+			float(snapshot["embezzler_last_pocket_roll_chance"]) * 100.0,
+			snapshot["embezzler_last_pocket_roll_result"],
+			snapshot["embezzler_escaped_count"],
+			snapshot["embezzler_panic_retreats"],
+		],
+		"Embezzler escaped value: %s last / %s total" % [
+			snapshot["embezzler_last_escaped_stored_value"],
+			snapshot["embezzler_escaped_stored_value_total"],
+		],
+		"Embezzler captures: %s caught / %s recovered / %s last" % [
+			snapshot["embezzler_captures_total"],
+			snapshot["embezzler_recovered_value_total"],
+			snapshot["embezzler_last_recovered_value"],
+		],
+		"Embezzler capture pocket: %s (%s) / %s double blocks" % [
+			snapshot["embezzler_last_capture_pocket_name"],
+			_debug_id_text(int(snapshot["embezzler_last_capture_pocket_index"])),
+			snapshot["embezzler_double_award_preventions"],
+		],
+		"Embezzler pocket: %s (%s)" % [
+			snapshot["embezzler_target_pocket_name"],
+			_debug_id_text(int(snapshot["embezzler_target_pocket_index"])),
 		],
 	]
 
@@ -986,6 +1088,8 @@ func _get_ball_debug_name(ball_data: Dictionary) -> String:
 		return "Cannon Ball"
 	if bool(ball_data["is_treasure_ball"]):
 		return "Treasure Ball"
+	if bool(ball_data.get("is_embezzler_ball", false)):
+		return "Embezzler Ball"
 	return "Ball %s" % ball_data["ball_number"]
 
 

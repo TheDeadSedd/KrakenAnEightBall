@@ -30,6 +30,7 @@
 - `Table.gd` coalesces aim-preview rebuilds so input spam becomes one accurate rebuild per frame while dragging.
 - `TableImpactShakeSystem.gd` owns presentation-only fake-3D table impact shake; gameplay positions and HUD/debug UI do not move.
 - Draw-only anomaly visuals in `Ball.gd` include Cannon heat/ember presence and Treasure scuttle legs.
+- Embezzler visual state is also draw/presentation driven from `Ball.gd`: stored-value glow, willingness urgency, and escape-committed tells.
 - `MainMenuPresentationOverlay.gd` owns draw-only title-screen atmosphere: moon glow, star twinkles, ocean shimmer, and fog.
 - `ReserveDeploymentPresenter.gd` owns draw-only Reserve cursor icon/tether presentation.
 - `QuartermasterOfferRefreshEffect.gd` owns the presentation-only fresh-stock glow/shimmer.
@@ -54,9 +55,20 @@
 ## Scoring And Shot Events
 
 - `ShotEventSystem.gd` owns causal shot history and never awards Doubloons directly.
-- `ScoreSystem.gd` owns Doubloon values, total updates, scoring breakdowns, and pocket-side popups.
+- `ScoreSystem.gd` owns Doubloon values, total updates, scoring breakdowns, and evolving pocket-side score stacks.
 - Current event tiers are foundational, skilled, heroic, and legendary.
 - Implemented events include `BANK`, `CHAIN`, `MULTI_CHAIN`, `ANOMALY_TOUCH`, `MULTI_SINK`, `KRAKEN_KICK`, `DOUBLE_BANK`, `THIN_CUT`, `CLUSTER_BREAK`, `CROSS_CORNER_BANK`, `FULL_TABLE_KICK`, `POWDER_ROUTE`, `KRAKEN_CURRENT`, `TRIPLE_BANK`, `CANNON_CHAIN`, and `TREASURE_SNARE`.
+- Foundational/Skilled/Heroic/Legendary rewards now coalesce into tier-specific pocket-side stacks with count-up totals, subtitles, colored glow identity, lane management, and low-priority yield/fade behavior.
+- The old score popup path is retained only for future/unknown rewards or explicitly non-stack presentation cases.
+
+## Anomaly Systems
+
+- `WayfinderSystem.gd` owns Wayfinder activation and guided redirect behavior.
+- `PowderKegSystem.gd` owns cue/Cannon-triggered Powder Keg explosions and particle bursts.
+- `AnchorBallSystem.gd` now owns the curse-seed Anchor rewrite: eight-ball sink seed creation, 1-3 chain links, leash constraints, cue-control-gated tightening, warning timer, spread, and collapse/counterplay. The retired continuous pull field is disabled.
+- `CannonBallSystem.gd` owns Cannon Ball collision tuning, Powder Keg launch amplification, heavy-impact shake requests, and heat presence.
+- `TreasureBallSystem.gd` owns Treasure's cautious aim-line perception, committed hide targets, soft scuttle behavior, and draw-only legs.
+- `EmbezzlerSystem.gd` is separate from Treasure and owns one capped greed/thief anomaly: copied Doubloon storage, secret pocket, willingness from stored value plus aim pressure, once-per-shot hide-or-run decision, escape commitment, pocket roll, capture payout, and escape cleanup.
 
 ## Audio
 
@@ -72,6 +84,9 @@
 - Coalesce repeated work, avoid unnecessary redraws, and use broad-phase/spatial filtering before reducing gameplay ambition.
 - Gate hidden debug work; invisible panels should be logically cheap, not merely transparent.
 - Prefer event-driven stock refresh, collision audio, shot-event recording, and placement state changes over passive per-frame scans.
+- Anchor should remain state/event-driven curse-seed gameplay rather than returning to continuous pull scans.
+- Embezzler should stay capped and decision/event-driven; aim pressure and score gain should influence future willingness without triggering repeated same-shot roll spam.
+- Score presentation should coalesce label/tween work through stack updates before considering visual suppression.
 - Degrade visuals first under load: particles, trails, aura effects, popup labels, fake-3D shake, and other presentation layers.
 - Preserve readability as well as FPS; faster effects that hide cause/effect relationships are usually the wrong trade.
 - Keep gameplay/physics authoritative and correct.

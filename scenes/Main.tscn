@@ -3,12 +3,12 @@
 [ext_resource type="PackedScene" path="res://scenes/Table.tscn" id="1_table_scene"]
 [ext_resource type="Script" uid="uid://cpk1835bhdruv" path="res://scripts/Main.gd" id="2_main_script"]
 [ext_resource type="FontFile" uid="uid://beldvxxv2lses" path="res://assets/fonts/Gothic Pixels.ttf" id="3_ui_font"]
-[ext_resource type="Script" path="res://scripts/DebugOverlay.gd" id="4_debug_overlay"]
-[ext_resource type="Script" path="res://scripts/BallDropMeter.gd" id="5_ball_drop_meter"]
-[ext_resource type="Script" path="res://scripts/PauseMenu.gd" id="6_pause_menu"]
-[ext_resource type="Script" path="res://scripts/DebugPanel.gd" id="7_debug_panel"]
+[ext_resource type="Script" uid="uid://cg0xx05qehx7o" path="res://scripts/DebugOverlay.gd" id="4_debug_overlay"]
+[ext_resource type="Script" uid="uid://bxpjxcy4cbps4" path="res://scripts/BallDropMeter.gd" id="5_ball_drop_meter"]
+[ext_resource type="Script" uid="uid://bg1rdbmkpcn84" path="res://scripts/PauseMenu.gd" id="6_pause_menu"]
+[ext_resource type="Script" uid="uid://dea5qsnybmcuc" path="res://scripts/DebugPanel.gd" id="7_debug_panel"]
 [ext_resource type="Script" uid="uid://c5h88rg15m2pu" path="res://scripts/ReserveSlotsUI.gd" id="8_reserve_slots_ui"]
-[ext_resource type="Script" path="res://scripts/ReserveDeploymentPresenter.gd" id="9_reserve_deploy_presenter"]
+[ext_resource type="Script" uid="uid://clp8ek2x13i4q" path="res://scripts/ReserveDeploymentPresenter.gd" id="9_reserve_deploy_presenter"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -216,7 +216,6 @@ shape = SubResource("CircleShape2D_rvslj")
 [node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=980633167]
 
 [node name="HUD" type="Control" parent="CanvasLayer" unique_id=841761493]
-visible = false
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -259,7 +258,7 @@ theme_override_font_sizes/font_size = 18
 text = "Loading table..."
 autowrap_mode = 3
 
-[node name="DoubloonsLabel" type="Label" parent="CanvasLayer/HUD"]
+[node name="DoubloonsLabel" type="Label" parent="CanvasLayer/HUD" unique_id=1751527435]
 layout_mode = 0
 offset_left = 1268.0
 offset_top = 162.0
@@ -273,11 +272,11 @@ theme_override_constants/shadow_offset_y = 2
 theme_override_constants/outline_size = 4
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 28
-horizontal_alignment = 2
 text = "Doubloons: 0"
+horizontal_alignment = 2
 
-[node name="BallDropMeter" type="Control" parent="CanvasLayer/HUD"]
-layout_mode = 0
+[node name="BallDropMeter" type="Control" parent="CanvasLayer/HUD" unique_id=910658070]
+anchors_preset = 0
 offset_left = 1648.0
 offset_top = 226.0
 offset_right = 1798.0
@@ -285,20 +284,19 @@ offset_bottom = 806.0
 mouse_filter = 2
 script = ExtResource("5_ball_drop_meter")
 
-[node name="ReserveSlotsUI" type="Control" parent="CanvasLayer/HUD"]
+[node name="ReserveSlotsUI" type="Control" parent="CanvasLayer/HUD" unique_id=1606398998]
 process_mode = 3
 z_index = 24
-layout_mode = 0
+anchors_preset = 0
 offset_left = 876.0
 offset_top = 228.0
 offset_right = 1044.0
 offset_bottom = 288.0
-mouse_filter = 0
 script = ExtResource("8_reserve_slots_ui")
 
-[node name="ReserveDeploymentPresenter" type="Control" parent="CanvasLayer/HUD"]
-visible = false
+[node name="ReserveDeploymentPresenter" type="Control" parent="CanvasLayer/HUD" unique_id=1696787697]
 process_mode = 3
+visible = false
 z_index = 26
 layout_mode = 1
 anchors_preset = 15
@@ -373,7 +371,6 @@ theme_override_constants/margin_bottom = 14
 
 [node name="PerformanceOverlayLabel" type="Label" parent="CanvasLayer/HUD/PerformanceOverlayPanel/Margin" unique_id=708950832]
 layout_mode = 2
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
@@ -384,7 +381,7 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 16
 text = "PERFORMANCE"
 
-[node name="CorePerformancePanel" type="PanelContainer" parent="CanvasLayer/HUD"]
+[node name="CorePerformancePanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1953380619]
 visible = false
 z_index = 120
 layout_mode = 0
@@ -396,7 +393,7 @@ mouse_filter = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
 script = ExtResource("7_debug_panel")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/CorePerformancePanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/CorePerformancePanel" unique_id=869406488]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 14
@@ -404,9 +401,8 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="CorePerformanceLabel" type="Label" parent="CanvasLayer/HUD/CorePerformancePanel/Margin"]
+[node name="CorePerformanceLabel" type="Label" parent="CanvasLayer/HUD/CorePerformancePanel/Margin" unique_id=1516525685]
 layout_mode = 2
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
@@ -417,7 +413,7 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 15
 text = "CORE PERFORMANCE"
 
-[node name="AimPreviewPanel" type="PanelContainer" parent="CanvasLayer/HUD"]
+[node name="AimPreviewPanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1252147403]
 visible = false
 z_index = 120
 layout_mode = 0
@@ -429,7 +425,7 @@ mouse_filter = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
 script = ExtResource("7_debug_panel")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/AimPreviewPanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/AimPreviewPanel" unique_id=2023617330]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 14
@@ -437,9 +433,8 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="AimPreviewPanelLabel" type="Label" parent="CanvasLayer/HUD/AimPreviewPanel/Margin"]
+[node name="AimPreviewPanelLabel" type="Label" parent="CanvasLayer/HUD/AimPreviewPanel/Margin" unique_id=540718439]
 layout_mode = 2
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
@@ -450,7 +445,7 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 15
 text = "AIM PREVIEW"
 
-[node name="AnchorPanel" type="PanelContainer" parent="CanvasLayer/HUD"]
+[node name="AnchorPanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1406862669]
 visible = false
 z_index = 120
 layout_mode = 0
@@ -462,7 +457,7 @@ mouse_filter = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
 script = ExtResource("7_debug_panel")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/AnchorPanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/AnchorPanel" unique_id=882315920]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 14
@@ -470,9 +465,8 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="AnchorPanelLabel" type="Label" parent="CanvasLayer/HUD/AnchorPanel/Margin"]
+[node name="AnchorPanelLabel" type="Label" parent="CanvasLayer/HUD/AnchorPanel/Margin" unique_id=1583059325]
 layout_mode = 2
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
@@ -483,7 +477,7 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 15
 text = "ANCHOR"
 
-[node name="TreasurePanel" type="PanelContainer" parent="CanvasLayer/HUD"]
+[node name="TreasurePanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=763130121]
 visible = false
 z_index = 120
 layout_mode = 0
@@ -495,7 +489,7 @@ mouse_filter = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
 script = ExtResource("7_debug_panel")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/TreasurePanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/TreasurePanel" unique_id=1736240083]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 14
@@ -503,9 +497,8 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="TreasurePanelLabel" type="Label" parent="CanvasLayer/HUD/TreasurePanel/Margin"]
+[node name="TreasurePanelLabel" type="Label" parent="CanvasLayer/HUD/TreasurePanel/Margin" unique_id=929253198]
 layout_mode = 2
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
@@ -516,7 +509,39 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 15
 text = "TREASURE"
 
-[node name="BallDropsScorePanel" type="PanelContainer" parent="CanvasLayer/HUD"]
+[node name="EmbezzlerPanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1274989759]
+visible = false
+z_index = 120
+layout_mode = 0
+offset_left = 1378.0
+offset_top = 874.0
+offset_right = 1904.0
+offset_bottom = 1006.0
+mouse_filter = 1
+theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
+script = ExtResource("7_debug_panel")
+
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/EmbezzlerPanel" unique_id=1072507599]
+layout_mode = 2
+mouse_filter = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 12
+
+[node name="EmbezzlerPanelLabel" type="Label" parent="CanvasLayer/HUD/EmbezzlerPanel/Margin" unique_id=917738567]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
+theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
+theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
+theme_override_constants/shadow_offset_x = 1
+theme_override_constants/shadow_offset_y = 1
+theme_override_constants/outline_size = 1
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 15
+text = "EMBEZZLER"
+
+[node name="BallDropsScorePanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=303191417]
 visible = false
 z_index = 120
 layout_mode = 0
@@ -528,7 +553,7 @@ mouse_filter = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
 script = ExtResource("7_debug_panel")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/BallDropsScorePanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/BallDropsScorePanel" unique_id=367646627]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 14
@@ -536,9 +561,8 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="BallDropsScorePanelLabel" type="Label" parent="CanvasLayer/HUD/BallDropsScorePanel/Margin"]
+[node name="BallDropsScorePanelLabel" type="Label" parent="CanvasLayer/HUD/BallDropsScorePanel/Margin" unique_id=1387512948]
 layout_mode = 2
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
@@ -549,7 +573,7 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 15
 text = "BALL DROPS / SCORE"
 
-[node name="PhysicsPerformancePanel" type="PanelContainer" parent="CanvasLayer/HUD"]
+[node name="PhysicsPerformancePanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1741162534]
 visible = false
 z_index = 120
 layout_mode = 0
@@ -561,7 +585,7 @@ mouse_filter = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
 script = ExtResource("7_debug_panel")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PhysicsPerformancePanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PhysicsPerformancePanel" unique_id=644795680]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 14
@@ -569,9 +593,8 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="PhysicsPerformancePanelLabel" type="Label" parent="CanvasLayer/HUD/PhysicsPerformancePanel/Margin"]
+[node name="PhysicsPerformancePanelLabel" type="Label" parent="CanvasLayer/HUD/PhysicsPerformancePanel/Margin" unique_id=1201707500]
 layout_mode = 2
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
@@ -582,7 +605,7 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 15
 text = "PHYSICS"
 
-[node name="CannonPanel" type="PanelContainer" parent="CanvasLayer/HUD"]
+[node name="CannonPanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1850244553]
 visible = false
 z_index = 120
 layout_mode = 0
@@ -594,7 +617,7 @@ mouse_filter = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
 script = ExtResource("7_debug_panel")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/CannonPanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/CannonPanel" unique_id=585796343]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 14
@@ -602,9 +625,8 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="CannonPanelLabel" type="Label" parent="CanvasLayer/HUD/CannonPanel/Margin"]
+[node name="CannonPanelLabel" type="Label" parent="CanvasLayer/HUD/CannonPanel/Margin" unique_id=1348463430]
 layout_mode = 2
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
@@ -615,7 +637,7 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 15
 text = "CANNON"
 
-[node name="PowderKegWayfinderPanel" type="PanelContainer" parent="CanvasLayer/HUD"]
+[node name="PowderKegWayfinderPanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=701885703]
 visible = false
 z_index = 120
 layout_mode = 0
@@ -627,7 +649,7 @@ mouse_filter = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
 script = ExtResource("7_debug_panel")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PowderKegWayfinderPanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PowderKegWayfinderPanel" unique_id=1029686420]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 14
@@ -635,9 +657,8 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="PowderKegWayfinderPanelLabel" type="Label" parent="CanvasLayer/HUD/PowderKegWayfinderPanel/Margin"]
+[node name="PowderKegWayfinderPanelLabel" type="Label" parent="CanvasLayer/HUD/PowderKegWayfinderPanel/Margin" unique_id=1879602225]
 layout_mode = 2
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
@@ -648,7 +669,7 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 15
 text = "POWDER KEG / WAYFINDER"
 
-[node name="VisualEffectsPanel" type="PanelContainer" parent="CanvasLayer/HUD"]
+[node name="VisualEffectsPanel" type="PanelContainer" parent="CanvasLayer/HUD" unique_id=1686017570]
 visible = false
 z_index = 120
 layout_mode = 0
@@ -660,7 +681,7 @@ mouse_filter = 1
 theme_override_styles/panel = SubResource("StyleBoxFlat_performance_overlay")
 script = ExtResource("7_debug_panel")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/VisualEffectsPanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/VisualEffectsPanel" unique_id=470717666]
 layout_mode = 2
 mouse_filter = 2
 theme_override_constants/margin_left = 14
@@ -668,9 +689,8 @@ theme_override_constants/margin_top = 12
 theme_override_constants/margin_right = 14
 theme_override_constants/margin_bottom = 12
 
-[node name="VisualEffectsPanelLabel" type="Label" parent="CanvasLayer/HUD/VisualEffectsPanel/Margin"]
+[node name="VisualEffectsPanelLabel" type="Label" parent="CanvasLayer/HUD/VisualEffectsPanel/Margin" unique_id=496488813]
 layout_mode = 2
-mouse_filter = 2
 theme_override_colors/font_color = Color(0.88, 0.98, 0.94, 1)
 theme_override_colors/font_shadow_color = Color(0, 0, 0, 0.65)
 theme_override_colors/font_outline_color = Color(0, 0, 0, 0.82)
@@ -687,7 +707,7 @@ layout_mode = 0
 offset_left = 34.0
 offset_top = 34.0
 offset_right = 384.0
-offset_bottom = 454.0
+offset_bottom = 482.0
 
 [node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/DebugMenuPanel" unique_id=2087057257]
 layout_mode = 2
@@ -730,14 +750,14 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Show Performance Overlay"
 
-[node name="AnchorVisualsCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+[node name="AnchorVisualsCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=1917940613]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Anchor Visuals"
 
-[node name="AnchorDebugVisualCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+[node name="AnchorDebugVisualCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=507372219]
 visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
@@ -745,7 +765,7 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Retired Anchor Pull Debug"
 
-[node name="AnchorSingleLatchCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+[node name="AnchorSingleLatchCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=1838921342]
 visible = false
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
@@ -753,28 +773,28 @@ theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Retired Anchor Pull Latch"
 
-[node name="TreasureDebugVisualCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+[node name="TreasureDebugVisualCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=1491390061]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Show Treasure Hide Debug"
 
-[node name="PowderKegParticlesCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+[node name="PowderKegParticlesCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=1719397048]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Powder Keg Particles"
 
-[node name="PowderKegReducedParticlesCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+[node name="PowderKegReducedParticlesCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=1712586900]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Powder Keg Low Particles Debug"
 
-[node name="PowderKegSuppressTrailsCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox"]
+[node name="PowderKegSuppressTrailsCheckBox" type="CheckBox" parent="CanvasLayer/HUD/DebugMenuPanel/Margin/VBox" unique_id=1883964486]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
@@ -788,31 +808,36 @@ theme_override_colors/font_outline_color = Color(0.02, 0.03, 0.03, 0.82)
 theme_override_constants/outline_size = 1
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 13
-text = "F: Spawn Wayfinder Ball\nH: Spawn Powder Keg\nJ: Create Anchor Curse Seed\nK: Spawn Cannon Ball\nL: Spawn Treasure Ball\nG: Spawn Normal Ball\nF3: Performance Overlay"
+text = "F: Spawn Wayfinder Ball
+H: Spawn Powder Keg
+J: Create Anchor Curse Seed
+K: Spawn Cannon Ball
+L: Spawn Treasure Ball
+M: Spawn Embezzler Ball
+G: Spawn Normal Ball
+F3: Performance Overlay"
 
-[node name="PauseMenu" type="Control" parent="CanvasLayer/HUD"]
-visible = false
+[node name="PauseMenu" type="Control" parent="CanvasLayer/HUD" unique_id=551126700]
 process_mode = 3
+visible = false
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 0
 script = ExtResource("6_pause_menu")
 
-[node name="Shade" type="ColorRect" parent="CanvasLayer/HUD/PauseMenu"]
+[node name="Shade" type="ColorRect" parent="CanvasLayer/HUD/PauseMenu" unique_id=644449610]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-mouse_filter = 0
 color = Color(0.01, 0.012, 0.016, 0.62)
 
-[node name="PlacementHintPanel" type="PanelContainer" parent="CanvasLayer/HUD/PauseMenu/Shade"]
+[node name="PlacementHintPanel" type="PanelContainer" parent="CanvasLayer/HUD/PauseMenu/Shade" unique_id=1559610359]
 visible = false
 layout_mode = 0
 offset_left = 600.0
@@ -821,34 +846,34 @@ offset_right = 1320.0
 offset_bottom = 190.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_pause_menu")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel" unique_id=1019449831]
 layout_mode = 2
 theme_override_constants/margin_left = 22
 theme_override_constants/margin_top = 16
 theme_override_constants/margin_right = 22
 theme_override_constants/margin_bottom = 16
 
-[node name="VBox" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel/Margin"]
+[node name="VBox" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel/Margin" unique_id=392609032]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="PlacementHintLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel/Margin/VBox"]
+[node name="PlacementHintLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel/Margin/VBox" unique_id=496487767]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.86, 1, 0.8, 1)
 theme_override_colors/font_outline_color = Color(0.04, 0.08, 0.03, 0.9)
 theme_override_constants/outline_size = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 20
-horizontal_alignment = 1
 text = "Place ball"
+horizontal_alignment = 1
 
-[node name="CancelPlacementButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel/Margin/VBox"]
+[node name="CancelPlacementButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/PlacementHintPanel/Margin/VBox" unique_id=2106449911]
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 16
 text = "Cancel Placement"
 
-[node name="MenuPanel" type="PanelContainer" parent="CanvasLayer/HUD/PauseMenu/Shade"]
+[node name="MenuPanel" type="PanelContainer" parent="CanvasLayer/HUD/PauseMenu/Shade" unique_id=274578525]
 layout_mode = 0
 offset_left = 704.0
 offset_top = 166.0
@@ -856,192 +881,199 @@ offset_right = 1216.0
 offset_bottom = 930.0
 theme_override_styles/panel = SubResource("StyleBoxFlat_pause_menu")
 
-[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel"]
+[node name="Margin" type="MarginContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel" unique_id=1775710240]
 layout_mode = 2
 theme_override_constants/margin_left = 34
 theme_override_constants/margin_top = 30
 theme_override_constants/margin_right = 34
 theme_override_constants/margin_bottom = 30
 
-[node name="VBox" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin"]
+[node name="VBox" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin" unique_id=1438098333]
 layout_mode = 2
 theme_override_constants/separation = 12
 alignment = 1
 
-[node name="TitleLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="TitleLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox" unique_id=1083165740]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.88, 0.54, 1)
 theme_override_colors/font_outline_color = Color(0.08, 0.04, 0.02, 0.95)
 theme_override_constants/outline_size = 3
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 36
-horizontal_alignment = 1
 text = "Paused"
+horizontal_alignment = 1
 
-[node name="SubtitleLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="SubtitleLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox" unique_id=691635336]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.88, 0.86, 0.76, 1)
 theme_override_colors/font_outline_color = Color(0.06, 0.04, 0.03, 0.8)
 theme_override_constants/outline_size = 1
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 18
-horizontal_alignment = 1
 text = "The table holds its breath."
+horizontal_alignment = 1
 
-[node name="ResumeButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="ResumeButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox" unique_id=1853675672]
 custom_minimum_size = Vector2(0, 54)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 24
 text = "Resume"
 
-[node name="TabBar" type="HBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="TabBar" type="HBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox" unique_id=495398352]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="QuartermasterTabButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/TabBar"]
+[node name="QuartermasterTabButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/TabBar" unique_id=1328707487]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 17
 text = "Quartermaster"
 
-[node name="DebugTabButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/TabBar"]
+[node name="DebugTabButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/TabBar" unique_id=1795779873]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 17
 text = "Debug"
 
-[node name="QuartermasterSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="QuartermasterSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox" unique_id=1807518371]
 layout_mode = 2
 theme_override_constants/separation = 12
 
-[node name="QuartermasterSectionLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+[node name="QuartermasterSectionLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection" unique_id=1516434176]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.88, 0.54, 1)
 theme_override_colors/font_outline_color = Color(0.08, 0.04, 0.02, 0.95)
 theme_override_constants/outline_size = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 24
-horizontal_alignment = 1
 text = "The Quartermaster"
+horizontal_alignment = 1
 
-[node name="QuartermasterStatusLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+[node name="QuartermasterStatusLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection" unique_id=732441113]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.88, 0.86, 0.76, 1)
 theme_override_colors/font_outline_color = Color(0.06, 0.04, 0.03, 0.8)
 theme_override_constants/outline_size = 1
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 16
+text = "Spend Doubloons to place cargo on the felt."
 horizontal_alignment = 1
 autowrap_mode = 3
-text = "Spend Doubloons to place cargo on the felt."
 
-[node name="QuartermasterDoubloonsLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+[node name="QuartermasterDoubloonsLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection" unique_id=108595414]
 layout_mode = 2
 theme_override_colors/font_color = Color(1, 0.82, 0.34, 1)
 theme_override_colors/font_outline_color = Color(0.08, 0.04, 0.02, 0.9)
 theme_override_constants/outline_size = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 18
-horizontal_alignment = 1
 text = "Doubloons Available: 0"
+horizontal_alignment = 1
 
-[node name="QuartermasterOfferButton0" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+[node name="QuartermasterOfferButton0" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection" unique_id=1194270053]
 custom_minimum_size = Vector2(0, 86)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 16
 text = "Offer 1"
 
-[node name="QuartermasterOfferButton1" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+[node name="QuartermasterOfferButton1" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection" unique_id=1180046937]
 custom_minimum_size = Vector2(0, 86)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 16
 text = "Offer 2"
 
-[node name="QuartermasterOfferButton2" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection"]
+[node name="QuartermasterOfferButton2" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/QuartermasterSection" unique_id=1101934995]
 custom_minimum_size = Vector2(0, 86)
 layout_mode = 2
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 16
 text = "Offer 3"
 
-[node name="DebugSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox"]
+[node name="DebugSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox" unique_id=1057549661]
 visible = false
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="DebugSectionLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
+[node name="DebugSectionLabel" type="Label" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=608405861]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.76, 0.86, 0.82, 1)
 theme_override_colors/font_outline_color = Color(0.02, 0.03, 0.03, 0.82)
 theme_override_constants/outline_size = 1
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 15
+text = "Debug Panels"
 horizontal_alignment = 1
 autowrap_mode = 3
-text = "Debug Panels"
 
-[node name="CorePerformancePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
+[node name="CorePerformancePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=1782877045]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Core Performance"
 
-[node name="AimPreviewPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
+[node name="AimPreviewPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=885088242]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Aim Preview"
 
-[node name="TreasurePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
+[node name="TreasurePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=581619787]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Treasure"
 
-[node name="AnchorPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
+[node name="EmbezzlerPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=1090796649]
+layout_mode = 2
+theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
+theme_override_fonts/font = ExtResource("3_ui_font")
+theme_override_font_sizes/font_size = 14
+text = "Embezzler"
+
+[node name="AnchorPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=1762714651]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Anchor"
 
-[node name="BallDropsScorePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
+[node name="BallDropsScorePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=1123814856]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Ball Drops / Score"
 
-[node name="CannonPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
+[node name="CannonPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=293483221]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Cannon"
 
-[node name="PowderKegWayfinderPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
+[node name="PowderKegWayfinderPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=1961531356]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Powder Keg / Wayfinder"
 
-[node name="VisualEffectsPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
+[node name="VisualEffectsPanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=799081804]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 14
 text = "Visual Cost / Effects"
 
-[node name="PhysicsPerformancePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection"]
+[node name="PhysicsPerformancePanelCheckBox" type="CheckBox" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/DebugSection" unique_id=162011742]
 layout_mode = 2
 theme_override_colors/font_color = Color(0.9, 0.95, 0.97, 1)
 theme_override_fonts/font = ExtResource("3_ui_font")

@@ -29,6 +29,7 @@ const PERFORMANCE_SECTION_WAYFINDER := "wayfinder"
 const PERFORMANCE_SECTION_ANCHOR := "anchor"
 const PERFORMANCE_SECTION_CANNON := "cannon"
 const PERFORMANCE_SECTION_TREASURE := "treasure"
+const PERFORMANCE_SECTION_EMBEZZLER := "embezzler"
 const PERFORMANCE_SECTION_POWDER_KEG_WAYFINDER := "powder_keg_wayfinder"
 const PERFORMANCE_SECTION_VISUAL_COST := "visual_cost"
 const PERFORMANCE_SECTION_AIM_PREVIEW := "aim_preview"
@@ -125,6 +126,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var anchor_ball_system: AnchorBallSystem = $AnchorBallSystem
 @onready var cannon_ball_system: CannonBallSystem = $CannonBallSystem
 @onready var treasure_ball_system: TreasureBallSystem = $TreasureBallSystem
+@onready var embezzler_system: EmbezzlerSystem = $EmbezzlerSystem
 @onready var table_impact_shake_system: TableImpactShakeSystem = $TableImpactShakeSystem
 @onready var cue_controller: CueController = $CuePivot
 #endregion
@@ -198,6 +200,7 @@ func _ready() -> void:
 	anchor_ball_system.setup(self)
 	cannon_ball_system.setup(self)
 	treasure_ball_system.setup(self)
+	embezzler_system.setup(self)
 	table_impact_shake_system.setup(self)
 	quartermaster_system.setup(self)
 	reserve_system.setup(self)
@@ -219,6 +222,8 @@ func _ready() -> void:
 func _connect_score_drop_events() -> void:
 	if not score_system.doubloons_awarded.is_connected(ball_drop_system.handle_doubloons_awarded):
 		score_system.doubloons_awarded.connect(ball_drop_system.handle_doubloons_awarded)
+	if not score_system.doubloons_awarded.is_connected(embezzler_system.handle_doubloons_awarded):
+		score_system.doubloons_awarded.connect(embezzler_system.handle_doubloons_awarded)
 
 
 func emit_ready_status_if_needed(current_status_text: String) -> void:
@@ -265,6 +270,7 @@ func _physics_process(delta: float) -> void:
 	for step_index in range(PHYSICS_SUBSTEPS):
 		wayfinder_system.update_guidance(step_delta)
 		treasure_ball_system.update_hiding(step_delta)
+		embezzler_system.update_repositioning(step_delta)
 		anchor_ball_system.update_curse_chain_slides(step_delta)
 		_move_balls(step_delta)
 		anchor_ball_system.enforce_curse_chain_constraints()
@@ -289,6 +295,7 @@ func _physics_process(delta: float) -> void:
 	_update_cue_reclaim_state(delta)
 	anchor_ball_system.finish_frame()
 	cannon_ball_system.update_presence_visuals()
+	embezzler_system.update_willingness(delta)
 	spawn_system.process_spawn_queue(delta)
 	_process_callout_queue(delta)
 	_try_finish_shot()
@@ -603,6 +610,8 @@ func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2,
 		return true
 	if treasure_ball_system.try_apply_collision_response(ball_a, ball_b, normal, impulse):
 		return true
+	if embezzler_system.try_apply_collision_response(ball_a, ball_b, normal, impulse):
+		return true
 
 	ball_a.velocity -= impulse
 	ball_b.velocity += impulse
@@ -682,6 +691,7 @@ func _reset_performance_frame_stats() -> void:
 	anchor_ball_system.reset_frame_stats()
 	cannon_ball_system.reset_frame_stats()
 	treasure_ball_system.reset_frame_stats()
+	embezzler_system.reset_frame_stats()
 
 
 func _reset_ball_debug_frame_stats() -> void:
@@ -820,12 +830,14 @@ func _refresh_aim_preview() -> void:
 	if not is_dragging or not _can_release_current_shot():
 		aim_preview.update_preview(false, Vector2.ZERO, Vector2.ZERO, SHOT_POWER, 0.0)
 		treasure_ball_system.handle_aim_perception_snapshot(aim_preview.get_treasure_perception_snapshot())
+		embezzler_system.handle_aim_perception_snapshot(aim_preview.get_embezzler_perception_snapshot())
 		return
 
 	var drag_vector: Vector2 = _get_drag_vector(drag_mouse_position)
 	var power_ratio: float = clamp(drag_vector.length() / MAX_DRAG_DISTANCE, 0.0, 1.0)
 	aim_preview.update_preview(true, cue_ball.global_position, drag_vector, SHOT_POWER, power_ratio)
 	treasure_ball_system.handle_aim_perception_snapshot(aim_preview.get_treasure_perception_snapshot())
+	embezzler_system.handle_aim_perception_snapshot(aim_preview.get_embezzler_perception_snapshot())
 
 
 func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) -> void:
@@ -891,6 +903,10 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 
 	var score_context: Dictionary = _make_sink_score_context(ball)
 	anchor_ball_system.handle_ball_pocketed(ball)
+	if embezzler_system.handle_ball_captured(ball, score_context):
+		status_text_changed.emit("Embezzler caught.")
+		return
+
 	ball.sink()
 	ball.queue_free()
 	_note_object_ball_pocketed(ball, score_context)
@@ -1017,6 +1033,7 @@ func _start_shot_tracking() -> void:
 	shot_bank_bonus_awarded = false
 	shot_bank_eligible_ball_ids.clear()
 	shot_event_system.start_shot(cue_ball.global_position)
+	embezzler_system.handle_shot_started()
 
 
 func _note_cue_rail_touch(ball: Ball) -> void:
@@ -1165,6 +1182,7 @@ func _try_finish_shot() -> void:
 
 func _handle_cue_control_regained_after_shot() -> void:
 	anchor_ball_system.advance_curse_chains_on_cue_control_regained()
+	embezzler_system.handle_cue_control_regained()
 #endregion
 
 
@@ -1196,6 +1214,7 @@ func get_performance_debug_snapshot(requested_sections: Dictionary = {}) -> Dict
 	var needs_anchor: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_ANCHOR)
 	var needs_cannon: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_CANNON)
 	var needs_treasure: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_TREASURE)
+	var needs_embezzler: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_EMBEZZLER)
 	var needs_powder_keg_wayfinder: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_POWDER_KEG_WAYFINDER)
 	var needs_visual_cost: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_VISUAL_COST)
 	var needs_aim_preview: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_AIM_PREVIEW)
@@ -1221,6 +1240,8 @@ func get_performance_debug_snapshot(requested_sections: Dictionary = {}) -> Dict
 		snapshot.merge(_get_cannon_performance_snapshot(cannon_ball_system.get_debug_snapshot()))
 	if needs_treasure:
 		snapshot.merge(_get_treasure_performance_snapshot(treasure_ball_system.get_debug_snapshot()))
+	if needs_embezzler:
+		snapshot.merge(_get_embezzler_performance_snapshot(embezzler_system.get_debug_snapshot()))
 	if needs_powder_keg_wayfinder:
 		snapshot.merge(_get_powder_keg_performance_snapshot())
 	if needs_quartermaster:
@@ -1380,6 +1401,55 @@ func _get_treasure_performance_snapshot(treasure_snapshot: Dictionary) -> Dictio
 		"treasure_perception_lingered": treasure_snapshot["perception_lingered"],
 		"treasure_perception_grace_active": treasure_snapshot["perception_grace_active"],
 		"treasure_perception_grace_max_remaining": treasure_snapshot["perception_grace_max_remaining"],
+	}
+
+
+func _get_embezzler_performance_snapshot(embezzler_snapshot: Dictionary) -> Dictionary:
+	return {
+		"embezzler_balls": embezzler_snapshot["active_embezzlers"],
+		"embezzler_stored_value": embezzler_snapshot["stored_value"],
+		"embezzler_skimmed_total": embezzler_snapshot["skimmed_total"],
+		"embezzler_target_pocket_index": embezzler_snapshot["target_pocket_index"],
+		"embezzler_target_pocket_name": embezzler_snapshot["target_pocket_name"],
+		"embezzler_state": embezzler_snapshot["current_state"],
+		"embezzler_willingness": embezzler_snapshot["willingness"],
+		"embezzler_baseline_willingness": embezzler_snapshot["baseline_willingness"],
+		"embezzler_aim_pressure_willingness": embezzler_snapshot["aim_pressure_willingness"],
+		"embezzler_last_pressure_reason": embezzler_snapshot["last_pressure_reason"],
+		"embezzler_pressure_events": embezzler_snapshot["pressure_events"],
+		"embezzler_calm_decay_rate": embezzler_snapshot["calm_decay_rate"],
+		"embezzler_move_target": embezzler_snapshot["move_target"],
+		"embezzler_move_target_mode": embezzler_snapshot["move_target_mode"],
+		"embezzler_target_pocket_bias_amount": embezzler_snapshot["target_pocket_bias_amount"],
+		"embezzler_target_switches": embezzler_snapshot["target_switches"],
+		"embezzler_blocked_target_attempts": embezzler_snapshot["blocked_target_attempts"],
+		"embezzler_scuttle_applications": embezzler_snapshot["scuttle_applications"],
+		"embezzler_target_switch_reason": embezzler_snapshot["target_switch_reason"],
+		"embezzler_last_blocked_target_reason": embezzler_snapshot["last_blocked_target_reason"],
+		"embezzler_escape_roll_attempts": embezzler_snapshot["escape_roll_attempts"],
+		"embezzler_escape_roll_successes": embezzler_snapshot["escape_roll_successes"],
+		"embezzler_escape_roll_failures": embezzler_snapshot["escape_roll_failures"],
+		"embezzler_last_escape_roll_chance": embezzler_snapshot["last_escape_roll_chance"],
+		"embezzler_last_escape_roll_reason": embezzler_snapshot["last_escape_roll_reason"],
+		"embezzler_escape_committed_active": embezzler_snapshot["escape_committed_active"],
+		"embezzler_pocket_test_pending_active": embezzler_snapshot["pocket_test_pending_active"],
+		"embezzler_pocket_test_pending_count": embezzler_snapshot["pocket_test_pending_count"],
+		"embezzler_pocket_test_pending_total": embezzler_snapshot["pocket_test_pending_total"],
+		"embezzler_pocket_roll_attempts": embezzler_snapshot["pocket_roll_attempts"],
+		"embezzler_pocket_roll_successes": embezzler_snapshot["pocket_roll_successes"],
+		"embezzler_pocket_roll_failures": embezzler_snapshot["pocket_roll_failures"],
+		"embezzler_last_pocket_roll_chance": embezzler_snapshot["last_pocket_roll_chance"],
+		"embezzler_last_pocket_roll_result": embezzler_snapshot["last_pocket_roll_result"],
+		"embezzler_escaped_count": embezzler_snapshot["escaped_count"],
+		"embezzler_panic_retreats": embezzler_snapshot["panic_retreats"],
+		"embezzler_last_escaped_stored_value": embezzler_snapshot["last_escaped_stored_value"],
+		"embezzler_escaped_stored_value_total": embezzler_snapshot["escaped_stored_value_total"],
+		"embezzler_captures_total": embezzler_snapshot["captures_total"],
+		"embezzler_recovered_value_total": embezzler_snapshot["recovered_value_total"],
+		"embezzler_last_recovered_value": embezzler_snapshot["last_recovered_value"],
+		"embezzler_last_capture_pocket_index": embezzler_snapshot["last_capture_pocket_index"],
+		"embezzler_last_capture_pocket_name": embezzler_snapshot["last_capture_pocket_name"],
+		"embezzler_double_award_preventions": embezzler_snapshot["double_award_preventions"],
 	}
 
 
@@ -1582,6 +1652,7 @@ func _get_ball_debug_snapshot(ball: Ball) -> Dictionary:
 		"is_anchor_curse_seed": ball.is_anchor_curse_seed,
 		"is_cannon_ball": ball.is_cannon_ball,
 		"is_treasure_ball": ball.is_treasure_ball,
+		"is_embezzler_ball": ball.is_embezzler_ball,
 		"wayfinder_active": ball.is_wayfinder and ball.wayfinder_active,
 		"guided": wayfinder_system.is_ball_guided(ball),
 		"gameplay_enabled": ball.gameplay_enabled,
@@ -1614,7 +1685,8 @@ func queue_spawn_reward_message(
 	is_anchor_ball: bool = false,
 	is_cannon_ball: bool = false,
 	override_message: String = "",
-	is_treasure_ball: bool = false
+	is_treasure_ball: bool = false,
+	is_embezzler_ball: bool = false
 ) -> void:
 	if not override_message.is_empty():
 		_queue_result_message(override_message)
@@ -1630,6 +1702,8 @@ func queue_spawn_reward_message(
 		_queue_result_message("CANNON BALL DROPPED")
 	elif is_treasure_ball:
 		_queue_result_message("TREASURE BALL DROPPED")
+	elif is_embezzler_ball:
+		_queue_result_message("EMBEZZLER BALL DROPPED")
 	else:
 		_queue_result_message("+1 BALL DROPPED")
 

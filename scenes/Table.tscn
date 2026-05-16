@@ -1,4 +1,4 @@
-[gd_scene load_steps=20 format=3]
+[gd_scene load_steps=21 format=3]
 
 [ext_resource type="Script" path="res://scripts/Table.gd" id="1_table_script"]
 [ext_resource type="Script" path="res://scripts/CueController.gd" id="2_cue_controller"]
@@ -19,6 +19,7 @@
 [ext_resource type="Script" path="res://scripts/QuartermasterSystem.gd" id="17_quartermaster_system"]
 [ext_resource type="Script" uid="uid://b4y173rxu8pmo" path="res://scripts/ReserveSystem.gd" id="18_reserve_system"]
 [ext_resource type="Script" path="res://scripts/BallAudioSystem.gd" id="19_ball_audio_system"]
+[ext_resource type="Script" path="res://scripts/EmbezzlerSystem.gd" id="20_embezzler_system"]
 
 [node name="Table" type="Node2D"]
 script = ExtResource("1_table_script")
@@ -71,6 +72,9 @@ script = ExtResource("13_cannon_ball_system")
 
 [node name="TreasureBallSystem" type="Node" parent="."]
 script = ExtResource("15_treasure_ball_system")
+
+[node name="EmbezzlerSystem" type="Node" parent="."]
+script = ExtResource("20_embezzler_system")
 
 [node name="TableImpactShakeSystem" type="Node" parent="."]
 script = ExtResource("14_table_impact_shake_system")

@@ -11,12 +11,13 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 ## Files Watched
 
 - `scenes/MainMenu.tscn` - Layered title-screen scene with background art, animated overlay passes, foreground art, fog, and menu UI.
-- `scripts/AimPreview.gd` - Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure perception snapshots, and AimPreview broad-phase counters.
-- `scripts/AnchorBallSystem.gd` - Handles Anchor Ball cursed-tide pull, one-current-per-target selection, cooldowns, visuals, and debug counters.
+- `scripts/AimPreview.gd` - Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure/Embezzler perception snapshots, and AimPreview broad-phase counters.
+- `scripts/AnchorBallSystem.gd` - Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.
 - `scripts/BallAudioSystem.gd` - Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering.
 - `scripts/BoundarySystem.gd` - Loads authored rail/boundary geometry and shared boundary helpers.
 - `scripts/DebugOverlay.gd` - Formats debug menu, modular visible debug panels, requested-section performance snapshots, full F3 overlay, toggles, and physics debug text.
 - `scripts/DebugPanel.gd` - Reusable draggable debug panel shell with pause-safe input consumption and lightweight text display.
+- `scripts/EmbezzlerSystem.gd` - Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters.
 - `scripts/MainMenu.gd` - Title-screen shell, layered menu presentation, button input, and transition into the gameplay scene.
 - `scripts/MainMenuPresentationOverlay.gd` - Draw-only layered title-screen atmosphere for moon glow, stars, ocean shimmer, and fog.
 - `scripts/PauseMenu.gd` - Pause menu tabs, resume/quit wiring, Quartermaster tab rendering, and debug panel toggles.
@@ -38,6 +39,9 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 - Optimization should preserve readability as well as performance.
 - Hidden debug panels/overlays should not keep formatting strings or requesting broad snapshots every frame.
 - BallAudioSystem.gd uses pooled players, thresholds, and cooldowns so collision SFX scales with chaos.
+- Anchor is now state/event-driven curse-seed gameplay, not continuous force-field simulation.
+- Embezzler is capped and event-driven around score gain, aim pressure, once-per-shot decisions, capture, and escape.
+- Score stack coalescing reduces independent label/tween pressure during high-chaos scoring.
 - Quartermaster stock refresh is event-driven; Reserve and placement presentation should avoid continuous scans.
 - Main menu atmosphere is draw-only/lightweight and should stay presentation-only.
 - BallDropSystem.gd exists as the score-tied drop spine and should be watched for high-count visual scaling pressure.
@@ -50,6 +54,9 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 - AimPreview rebuild coalescing should preserve reliable graze behavior and avoid tolerance-based lies.
 - Hidden debug UI should remain logically cheap, not merely invisible.
 - Collision audio cooldowns should prevent spam without making meaningful impacts feel late.
+- Anchor should stay event/state-driven; avoid reintroducing continuous force scans.
+- Embezzler should stay capped and avoid same-shot escape-roll spam.
+- Score stacks should coalesce celebration before any visual suppression is considered.
 
 ## Questions
 

@@ -11,6 +11,7 @@ class SpawnBallRequest:
 	var is_anchor_ball := false
 	var is_cannon_ball := false
 	var is_treasure_ball := false
+	var is_embezzler_ball := false
 
 class StartingBallData:
 	var cue_ball: Ball
@@ -28,6 +29,8 @@ const DEBUG_SPAWN_CANNON_BALL_ENABLED := true
 const DEBUG_SPAWN_CANNON_BALL_KEY := KEY_K
 const DEBUG_SPAWN_TREASURE_BALL_ENABLED := true
 const DEBUG_SPAWN_TREASURE_BALL_KEY := KEY_L
+const DEBUG_SPAWN_EMBEZZLER_BALL_ENABLED := true
+const DEBUG_SPAWN_EMBEZZLER_BALL_KEY := KEY_M
 const DEBUG_SPAWN_NORMAL_BALL_ENABLED := true
 const DEBUG_SPAWN_NORMAL_BALL_KEY := KEY_G
 
@@ -117,6 +120,10 @@ func try_handle_debug_spawn_input(event: InputEvent) -> bool:
 		queue_debug_treasure_ball_spawn()
 		return true
 
+	if DEBUG_SPAWN_EMBEZZLER_BALL_ENABLED and key_event.keycode == DEBUG_SPAWN_EMBEZZLER_BALL_KEY:
+		queue_debug_embezzler_ball_spawn()
+		return true
+
 	if DEBUG_SPAWN_NORMAL_BALL_ENABLED and key_event.keycode == DEBUG_SPAWN_NORMAL_BALL_KEY:
 		queue_debug_normal_ball_spawn()
 		return true
@@ -145,7 +152,8 @@ func queue_spawn_reward(spawn_count: int, callout_message: String = "") -> void:
 			request.is_anchor_ball,
 			request.is_cannon_ball,
 			callout_message,
-			request.is_treasure_ball
+			request.is_treasure_ball,
+			request.is_embezzler_ball
 		)
 
 
@@ -178,7 +186,19 @@ func queue_debug_cannon_ball_spawn() -> void:
 func queue_debug_treasure_ball_spawn() -> void:
 	var request: SpawnBallRequest = _make_specific_spawn_request(false, false, false, false, true)
 	pending_spawn_requests.append(request)
-	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, request.is_cannon_ball, "", request.is_treasure_ball)
+	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, request.is_cannon_ball, "", request.is_treasure_ball, request.is_embezzler_ball)
+
+
+func queue_debug_embezzler_ball_spawn() -> void:
+	if table == null:
+		return
+	if _has_pending_embezzler_spawn() or table.embezzler_system == null or not table.embezzler_system.can_spawn_embezzler():
+		table.queue_spawn_reward_message(false, false, false, false, "EMBEZZLER ALREADY AT LARGE")
+		return
+
+	var request: SpawnBallRequest = _make_specific_spawn_request(false, false, false, false, false, true)
+	pending_spawn_requests.append(request)
+	table.queue_spawn_reward_message(request.is_wayfinder, request.is_powder_keg, request.is_anchor_ball, request.is_cannon_ball, "", request.is_treasure_ball, request.is_embezzler_ball)
 
 
 func queue_debug_normal_ball_spawn() -> void:
@@ -253,6 +273,14 @@ func has_pending_spawns() -> bool:
 	return not pending_spawn_requests.is_empty()
 
 
+func _has_pending_embezzler_spawn() -> bool:
+	for request_value in pending_spawn_requests:
+		var request: SpawnBallRequest = request_value as SpawnBallRequest
+		if request != null and request.is_embezzler_ball:
+			return true
+	return false
+
+
 func get_pending_spawn_count() -> int:
 	return pending_spawn_requests.size()
 
@@ -268,6 +296,7 @@ func get_debug_spawn_hotkey_data() -> Dictionary:
 		"anchor_ball_spawn_key": DEBUG_SPAWN_ANCHOR_BALL_KEY,
 		"cannon_ball_spawn_key": DEBUG_SPAWN_CANNON_BALL_KEY,
 		"treasure_ball_spawn_key": DEBUG_SPAWN_TREASURE_BALL_KEY,
+		"embezzler_ball_spawn_key": DEBUG_SPAWN_EMBEZZLER_BALL_KEY,
 		"normal_spawn_key": DEBUG_SPAWN_NORMAL_BALL_KEY,
 	}
 
@@ -351,6 +380,15 @@ func _create_treasure_ball(number: int, color: Color, position: Vector2) -> Ball
 	return ball
 
 
+func _create_embezzler_ball(number: int, color: Color, position: Vector2) -> Ball:
+	var ball := BALL_SCENE.instantiate() as Ball
+	table.balls.add_child(ball)
+	ball.global_position = position
+	ball.setup(Ball.BallType.OBJECT, number, color, false, false, false, false, false, true)
+	table.embezzler_system.register_embezzler_ball(ball)
+	return ball
+
+
 func _ball_type_from_number(number: int) -> int:
 	if number == 8:
 		return Ball.BallType.EIGHT
@@ -404,7 +442,8 @@ func _make_specific_spawn_request(
 	is_powder_keg: bool,
 	is_anchor_ball: bool,
 	is_cannon_ball: bool,
-	is_treasure_ball: bool = false
+	is_treasure_ball: bool = false,
+	is_embezzler_ball: bool = false
 ) -> SpawnBallRequest:
 	var request: SpawnBallRequest = SpawnBallRequest.new()
 	request.ball_number = _get_next_spawn_ball_number()
@@ -413,8 +452,11 @@ func _make_specific_spawn_request(
 	request.is_anchor_ball = is_anchor_ball
 	request.is_cannon_ball = is_cannon_ball
 	request.is_treasure_ball = is_treasure_ball
+	request.is_embezzler_ball = is_embezzler_ball
 	if request.is_anchor_ball and not _can_spawn_anchor_ball():
 		request.is_anchor_ball = false
+	if request.is_embezzler_ball and (table == null or table.embezzler_system == null or not table.embezzler_system.can_spawn_embezzler()):
+		request.is_embezzler_ball = false
 	return request
 
 
@@ -431,6 +473,8 @@ func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
 		ball = _create_cannon_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
 	elif request.is_treasure_ball:
 		ball = _create_treasure_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
+	elif request.is_embezzler_ball:
+		ball = _create_embezzler_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
 	else:
 		ball = _create_ball(Ball.BallType.OBJECT, request.ball_number, _ball_color(request.ball_number), spawn_position)
 	ball.begin_spawn_drop(spawn_position)

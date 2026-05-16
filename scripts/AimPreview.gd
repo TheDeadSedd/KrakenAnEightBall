@@ -45,6 +45,7 @@ const AIM_TARGET_PREDICTION_STEP_SUBSTEPS := 2
 const AIM_TREASURE_PERCEPTION_RADIUS := 54.0
 const AIM_TREASURE_COVER_CANDIDATE_QUERY_RADIUS := 120.0
 const AIM_TREASURE_OCCLUSION_DISTANCE_PADDING := 4.0
+const AIM_EMBEZZLER_PERCEPTION_RADIUS := 54.0
 
 # Bank/path comparison debug visuals.
 const BANK_DEBUG_MARKER_LIFETIME := 1.0
@@ -128,11 +129,15 @@ var rail_checks_this_frame := 0
 var aim_spatial_cells := 0
 var aim_spatial_balls := 0
 var aim_spatial_treasure_balls := 0
+var aim_spatial_embezzler_balls := 0
 var aim_spatial_query_cells_this_frame := 0
 var aim_spatial_candidates_this_frame := 0
 var treasure_perception_epoch := 0
 var treasure_perception_rebuilds_this_frame := 0
 var treasure_perception_checks_this_frame := 0
+var embezzler_perception_epoch := 0
+var embezzler_perception_rebuilds_this_frame := 0
+var embezzler_perception_checks_this_frame := 0
 var _treasure_last_rebuild_checks := 0
 var _treasure_perceived_ball_ids: Array[int] = []
 var _treasure_seen_entries: Array[Dictionary] = []
@@ -141,6 +146,14 @@ var _treasure_visibility_debug_entries: Array[Dictionary] = []
 var _treasure_aim_path_points: Array[Vector2] = []
 var _treasure_aim_origin := Vector2.ZERO
 var _treasure_aim_direction := Vector2.ZERO
+var _embezzler_last_rebuild_checks := 0
+var _embezzler_perceived_ball_ids: Array[int] = []
+var _embezzler_seen_entries: Array[Dictionary] = []
+var _embezzler_cover_candidate_entries: Array[Dictionary] = []
+var _embezzler_visibility_debug_entries: Array[Dictionary] = []
+var _embezzler_aim_path_points: Array[Vector2] = []
+var _embezzler_aim_origin := Vector2.ZERO
+var _embezzler_aim_direction := Vector2.ZERO
 var draw_ms_last_draw := 0.0
 var draw_segments_last_draw := 0
 var draw_calls_last_draw := 0
@@ -163,6 +176,7 @@ func update_preview(active: bool, origin: Vector2, drag_vector: Vector2, shot_po
 		aim_spatial_cells = 0
 		aim_spatial_balls = 0
 		aim_spatial_treasure_balls = 0
+		aim_spatial_embezzler_balls = 0
 		draw_ms_last_draw = 0.0
 		draw_segments_last_draw = 0
 		draw_calls_last_draw = 0
@@ -170,6 +184,7 @@ func update_preview(active: bool, origin: Vector2, drag_vector: Vector2, shot_po
 			preview_active = false
 			current_prediction = null
 			_rebuild_treasure_perception_snapshot(null)
+			_rebuild_embezzler_perception_snapshot(null)
 			queue_redraw()
 		return
 
@@ -182,6 +197,7 @@ func update_preview(active: bool, origin: Vector2, drag_vector: Vector2, shot_po
 	_rebuild_aim_ball_spatial_grid()
 	current_prediction = _get_first_aim_collision(origin, drag_vector * shot_power)
 	_rebuild_treasure_perception_snapshot(current_prediction)
+	_rebuild_embezzler_perception_snapshot(current_prediction)
 	prediction_ms = _elapsed_ms_since(aim_start_usec)
 	prediction_frame_ms += prediction_ms
 	prediction_recalculations_this_frame += 1
@@ -307,6 +323,8 @@ func reset_frame_stats() -> void:
 	aim_spatial_candidates_this_frame = 0
 	treasure_perception_rebuilds_this_frame = 0
 	treasure_perception_checks_this_frame = 0
+	embezzler_perception_rebuilds_this_frame = 0
+	embezzler_perception_checks_this_frame = 0
 
 
 func get_debug_snapshot() -> Dictionary:
@@ -322,6 +340,7 @@ func get_debug_snapshot() -> Dictionary:
 		"spatial_cells": aim_spatial_cells,
 		"spatial_balls": aim_spatial_balls,
 		"spatial_treasure_balls": aim_spatial_treasure_balls,
+		"spatial_embezzler_balls": aim_spatial_embezzler_balls,
 		"spatial_query_cells": aim_spatial_query_cells_this_frame,
 		"spatial_candidates": aim_spatial_candidates_this_frame,
 		"treasure_perception_epoch": treasure_perception_epoch,
@@ -348,6 +367,22 @@ func get_treasure_perception_snapshot() -> Dictionary:
 		"seen_treasure_balls": _treasure_seen_entries.duplicate(),
 		"cover_candidates": _treasure_cover_candidate_entries.duplicate(),
 		"visibility_debug_entries": _treasure_visibility_debug_entries.duplicate(),
+	}
+
+
+func get_embezzler_perception_snapshot() -> Dictionary:
+	return {
+		"epoch": embezzler_perception_epoch,
+		"rebuilds_this_frame": embezzler_perception_rebuilds_this_frame,
+		"checks_this_frame": embezzler_perception_checks_this_frame,
+		"last_rebuild_checks": _embezzler_last_rebuild_checks,
+		"aim_origin": _embezzler_aim_origin,
+		"aim_direction": _embezzler_aim_direction,
+		"aim_path_points": _embezzler_aim_path_points.duplicate(),
+		"seen_embezzler_ball_ids": _embezzler_perceived_ball_ids.duplicate(),
+		"seen_embezzler_balls": _embezzler_seen_entries.duplicate(),
+		"cover_candidates": _embezzler_cover_candidate_entries.duplicate(),
+		"visibility_debug_entries": _embezzler_visibility_debug_entries.duplicate(),
 	}
 
 
@@ -755,6 +790,26 @@ func _rebuild_treasure_perception_snapshot(prediction: AimPrediction) -> void:
 	treasure_perception_epoch += 1
 
 
+func _rebuild_embezzler_perception_snapshot(prediction: AimPrediction) -> void:
+	_embezzler_perceived_ball_ids.clear()
+	_embezzler_seen_entries.clear()
+	_embezzler_cover_candidate_entries.clear()
+	_embezzler_visibility_debug_entries.clear()
+	_embezzler_aim_path_points.clear()
+	_embezzler_aim_origin = Vector2.ZERO
+	_embezzler_aim_direction = Vector2.ZERO
+	_embezzler_last_rebuild_checks = 0
+	if prediction != null and prediction.path_points.size() >= 2:
+		_embezzler_aim_origin = preview_origin
+		_embezzler_aim_direction = preview_drag_vector.normalized()
+		_embezzler_aim_path_points = prediction.path_points.duplicate()
+		_rebuild_embezzler_corridor_perception(prediction.path_points)
+
+	embezzler_perception_checks_this_frame += _embezzler_last_rebuild_checks
+	embezzler_perception_rebuilds_this_frame += 1
+	embezzler_perception_epoch += 1
+
+
 func _get_prediction_step_delta(step_substeps: int) -> float:
 	# AimPreview uses coarser visual-prediction steps than real physics, while
 	# swept ball/pocket checks keep fast paths from skipping collision targets.
@@ -863,6 +918,7 @@ func _rebuild_aim_ball_spatial_grid() -> void:
 	_aim_spatial_max_ball_radius = 0.0
 	aim_spatial_balls = 0
 	aim_spatial_treasure_balls = 0
+	aim_spatial_embezzler_balls = 0
 
 	for child in table.balls.get_children():
 		var ball := child as Ball
@@ -877,6 +933,8 @@ func _rebuild_aim_ball_spatial_grid() -> void:
 		aim_spatial_balls += 1
 		if ball.is_treasure_ball:
 			aim_spatial_treasure_balls += 1
+		if ball.is_embezzler_ball:
+			aim_spatial_embezzler_balls += 1
 
 	aim_spatial_cells = _aim_ball_spatial_grid.size()
 
@@ -955,6 +1013,36 @@ func _rebuild_treasure_corridor_perception(path_points: Array[Vector2]) -> void:
 		})
 
 
+func _rebuild_embezzler_corridor_perception(path_points: Array[Vector2]) -> void:
+	if aim_spatial_embezzler_balls <= 0:
+		return
+
+	var path_candidate_entries: Array[Dictionary] = _get_embezzler_path_candidate_entries(path_points, AIM_EMBEZZLER_PERCEPTION_RADIUS)
+	_embezzler_last_rebuild_checks = path_candidate_entries.size()
+	_embezzler_cover_candidate_entries = _get_embezzler_cover_candidates_from_entries(path_candidate_entries)
+
+	for candidate_entry_value in path_candidate_entries:
+		var candidate_entry: Dictionary = candidate_entry_value
+		if not bool(candidate_entry["is_embezzler_ball"]):
+			continue
+		var visibility_result: Dictionary = _get_treasure_visibility_result(candidate_entry, path_candidate_entries)
+		_embezzler_visibility_debug_entries.append(visibility_result)
+		if str(visibility_result["reason"]) != "seen":
+			continue
+
+		var ball_id: int = int(candidate_entry["ball_id"])
+		_embezzler_perceived_ball_ids.append(ball_id)
+		_embezzler_seen_entries.append({
+			"ball_id": ball_id,
+			"position": candidate_entry["position"],
+			"radius": candidate_entry["radius"],
+			"impact_position": candidate_entry["closest_point"],
+			"distance_along_path": candidate_entry["distance_along_path"],
+			"lateral_distance": candidate_entry["lateral_distance"],
+			"visibility_reason": visibility_result["reason"],
+		})
+
+
 func _get_treasure_path_candidate_entries(path_points: Array[Vector2], query_radius: float) -> Array[Dictionary]:
 	var candidate_entries: Array[Dictionary] = []
 	if path_points.size() < 2:
@@ -993,6 +1081,66 @@ func _get_treasure_path_candidate_entries(path_points: Array[Vector2], query_rad
 			})
 
 	return candidate_entries
+
+
+func _get_embezzler_path_candidate_entries(path_points: Array[Vector2], query_radius: float) -> Array[Dictionary]:
+	var candidate_entries: Array[Dictionary] = []
+	if path_points.size() < 2:
+		return candidate_entries
+
+	var seen_ball_ids: Dictionary = {}
+	for point_index in range(path_points.size() - 1):
+		var segment_start: Vector2 = path_points[point_index]
+		var segment_end: Vector2 = path_points[point_index + 1]
+		for candidate_ball in _get_treasure_spatial_candidates_for_segment(segment_start, segment_end, query_radius):
+			if candidate_ball == null or candidate_ball == table.cue_ball or not candidate_ball.is_gameplay_active():
+				continue
+
+			var ball_id: int = candidate_ball.get_instance_id()
+			if seen_ball_ids.has(ball_id):
+				continue
+
+			var projection: Dictionary = _project_point_onto_path(candidate_ball.global_position, path_points)
+			if projection.is_empty():
+				continue
+
+			var lateral_distance: float = float(projection["lateral_distance"])
+			if lateral_distance > query_radius + candidate_ball.radius:
+				continue
+
+			seen_ball_ids[ball_id] = true
+			candidate_entries.append({
+				"ball_id": ball_id,
+				"position": candidate_ball.global_position,
+				"radius": candidate_ball.radius,
+				"is_embezzler_ball": candidate_ball.is_embezzler_ball,
+				"closest_point": projection["closest_point"],
+				"distance_along_path": projection["distance_along_path"],
+				"lateral_distance": lateral_distance,
+				"segment_direction": projection["segment_direction"],
+			})
+
+	return candidate_entries
+
+
+func _get_embezzler_cover_candidates_from_entries(path_candidate_entries: Array[Dictionary]) -> Array[Dictionary]:
+	var cover_candidates: Array[Dictionary] = []
+	for candidate_entry_value in path_candidate_entries:
+		var candidate_entry: Dictionary = candidate_entry_value
+		if bool(candidate_entry["is_embezzler_ball"]):
+			continue
+
+		cover_candidates.append({
+			"ball_id": candidate_entry["ball_id"],
+			"position": candidate_entry["position"],
+			"radius": candidate_entry["radius"],
+			"closest_point": candidate_entry["closest_point"],
+			"distance_along_path": candidate_entry["distance_along_path"],
+			"lateral_distance": candidate_entry["lateral_distance"],
+			"segment_direction": candidate_entry["segment_direction"],
+		})
+
+	return cover_candidates
 
 
 func _get_treasure_cover_candidates_from_entries(path_candidate_entries: Array[Dictionary]) -> Array[Dictionary]:

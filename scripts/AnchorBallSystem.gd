@@ -744,7 +744,7 @@ func _is_curse_seed_candidate(ball: Ball) -> bool:
 		return false
 	if ball.ball_type != Ball.BallType.OBJECT:
 		return false
-	if ball.is_wayfinder or ball.is_powder_keg or ball.is_anchor_ball or ball.is_cannon_ball or ball.is_treasure_ball:
+	if ball.is_wayfinder or ball.is_powder_keg or ball.is_anchor_ball or ball.is_cannon_ball or ball.is_treasure_ball or ball.is_embezzler_ball:
 		return false
 	if table.pocket_system.is_position_too_close_to_pocket(
 		ball.global_position,
