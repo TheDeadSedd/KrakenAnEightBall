@@ -10,6 +10,7 @@
 [ext_resource type="Script" uid="uid://c5h88rg15m2pu" path="res://scripts/ReserveSlotsUI.gd" id="8_reserve_slots_ui"]
 [ext_resource type="Script" uid="uid://clp8ek2x13i4q" path="res://scripts/ReserveDeploymentPresenter.gd" id="9_reserve_deploy_presenter"]
 [ext_resource type="Script" path="res://scripts/HudFeed.gd" id="10_hud_feed"]
+[ext_resource type="Script" path="res://scripts/QuartermasterHUD.gd" id="11_quartermaster_hud"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -288,6 +289,17 @@ offset_top = 228.0
 offset_right = 1044.0
 offset_bottom = 288.0
 script = ExtResource("8_reserve_slots_ui")
+
+[node name="QuartermasterHUD" type="Control" parent="CanvasLayer/HUD"]
+process_mode = 3
+z_index = 22
+layout_mode = 0
+offset_left = 1512.0
+offset_top = 326.0
+offset_right = 1640.0
+offset_bottom = 516.0
+mouse_filter = 1
+script = ExtResource("11_quartermaster_hud")
 
 [node name="ReserveDeploymentPresenter" type="Control" parent="CanvasLayer/HUD" unique_id=1696787697]
 process_mode = 3
@@ -920,8 +932,10 @@ layout_mode = 2
 theme_override_constants/separation = 10
 
 [node name="QuartermasterTabButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/TabBar" unique_id=1328707487]
+visible = false
 layout_mode = 2
 size_flags_horizontal = 3
+disabled = true
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 17
 text = "Quartermaster"
@@ -929,11 +943,13 @@ text = "Quartermaster"
 [node name="DebugTabButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/TabBar" unique_id=1795779873]
 layout_mode = 2
 size_flags_horizontal = 3
+disabled = true
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 17
 text = "Debug"
 
 [node name="QuartermasterSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox" unique_id=1807518371]
+visible = false
 layout_mode = 2
 theme_override_constants/separation = 12
 
@@ -990,7 +1006,6 @@ theme_override_font_sizes/font_size = 16
 text = "Offer 3"
 
 [node name="DebugSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox" unique_id=1057549661]
-visible = false
 layout_mode = 2
 theme_override_constants/separation = 8
 

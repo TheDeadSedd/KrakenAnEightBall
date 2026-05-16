@@ -11,6 +11,7 @@ const PAUSE_TOGGLE_KEY := KEY_ESCAPE
 @onready var doubloons_label: Label = $CanvasLayer/HUD/DoubloonsLabel
 @onready var ball_drop_meter: BallDropMeter = $CanvasLayer/HUD/BallDropMeter
 @onready var reserve_slots_ui: ReserveSlotsUI = $CanvasLayer/HUD/ReserveSlotsUI
+@onready var quartermaster_hud: QuartermasterHUD = $CanvasLayer/HUD/QuartermasterHUD
 @onready var reserve_deployment_presenter: ReserveDeploymentPresenter = $CanvasLayer/HUD/ReserveDeploymentPresenter
 
 var reserve_deployment_active := false
@@ -37,19 +38,20 @@ func _ready() -> void:
 		pause_menu.resume_requested.connect(_on_pause_resume_requested)
 	if not pause_menu.debug_panel_toggled.is_connected(_on_pause_debug_panel_toggled):
 		pause_menu.debug_panel_toggled.connect(_on_pause_debug_panel_toggled)
-	if not pause_menu.quartermaster_offer_requested.is_connected(_on_pause_quartermaster_offer_requested):
-		pause_menu.quartermaster_offer_requested.connect(_on_pause_quartermaster_offer_requested)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
+	if not quartermaster_hud.quartermaster_offer_requested.is_connected(_on_quartermaster_hud_offer_requested):
+		quartermaster_hud.quartermaster_offer_requested.connect(_on_quartermaster_hud_offer_requested)
 	result_label.text = ""
 	_on_doubloons_changed(table.score_system.get_doubloons_total())
 	ball_drop_meter.setup(table.ball_drop_system)
 	reserve_slots_ui.setup(table.reserve_system, table)
+	quartermaster_hud.setup(table.quartermaster_system, table)
 	reserve_deployment_presenter.setup(table.reserve_system, reserve_slots_ui)
 	table.emit_ready_status_if_needed("")
 	debug_overlay.setup(table)
 	pause_menu.set_debug_panel_states(debug_overlay.get_modular_debug_panel_states())
-	pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
+	quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 
 
 func _configure_pause_process_modes() -> void:
@@ -59,6 +61,7 @@ func _configure_pause_process_modes() -> void:
 	pause_menu.process_mode = Node.PROCESS_MODE_ALWAYS
 	hud_feed.process_mode = Node.PROCESS_MODE_ALWAYS
 	reserve_slots_ui.process_mode = Node.PROCESS_MODE_ALWAYS
+	quartermaster_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	reserve_deployment_presenter.process_mode = Node.PROCESS_MODE_ALWAYS
 	ball_drop_meter.process_mode = Node.PROCESS_MODE_PAUSABLE
 
@@ -104,8 +107,8 @@ func _on_game_finished(text: String) -> void:
 
 func _on_doubloons_changed(total: int) -> void:
 	doubloons_label.text = "Doubloons: %s" % total
-	if pause_menu != null and table != null:
-		pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
+	if quartermaster_hud != null and table != null:
+		quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 
 
 func _on_score_feed_message(text: String) -> void:
@@ -120,7 +123,7 @@ func _on_pause_debug_panel_toggled(panel_id: String, enabled: bool) -> void:
 	debug_overlay.set_modular_debug_panel_visible(panel_id, enabled)
 
 
-func _on_pause_quartermaster_offer_requested(offer_index: int) -> void:
+func _on_quartermaster_hud_offer_requested(offer_index: int) -> void:
 	table.quartermaster_system.request_purchase_offer(offer_index)
 
 
@@ -156,16 +159,15 @@ func _on_reserve_deployment_blocked(reason: String) -> void:
 
 
 func _on_reserve_slots_changed(_slots: Array) -> void:
-	if pause_menu != null and table != null:
-		pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
+	if quartermaster_hud != null and table != null:
+		quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 
 
 func _on_quartermaster_shop_state_changed(items: Array) -> void:
-	pause_menu.set_quartermaster_items(items)
+	quartermaster_hud.set_quartermaster_items(items)
 
 
 func _on_quartermaster_status_changed(text: String) -> void:
-	pause_menu.set_quartermaster_status(text)
 	hud_feed.add_message(text, "shop")
 
 
@@ -175,7 +177,7 @@ func _on_quartermaster_placement_started(item_name: String) -> void:
 
 func _on_quartermaster_placement_finished() -> void:
 	pause_menu.set_quartermaster_placement_mode(false)
-	pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
+	quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 
 
 func _set_game_paused(paused: bool) -> void:
@@ -186,7 +188,7 @@ func _set_game_paused(paused: bool) -> void:
 		table.cancel_active_cue_drag_for_pause()
 		get_tree().paused = true
 		pause_menu.set_pause_visible(true)
-		pause_menu.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
+		quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 	else:
 		if table.is_ball_placement_active():
 			table.cancel_active_ball_placement()

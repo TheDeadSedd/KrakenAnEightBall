@@ -397,23 +397,23 @@ func _ball_type_from_number(number: int) -> int:
 
 func _ball_color(number: int) -> Color:
 	var colors := {
-		1: Color("f0c84b"),
-		2: Color("2e62c9"),
-		3: Color("d6453d"),
-		4: Color("7a48ad"),
-		5: Color("ef8b2c"),
-		6: Color("2c9b5d"),
-		7: Color("8b2f2c"),
-		8: Color("151515"),
-		9: Color("f5df68"),
-		10: Color("4f8cff"),
-		11: Color("f06458"),
-		12: Color("9a6bd1"),
-		13: Color("f2a14a"),
-		14: Color("46bd78"),
-		15: Color("b84842"),
+		1: Color("d7a829"),
+		2: Color("2f69c4"),
+		3: Color("c43b36"),
+		4: Color("7a44ae"),
+		5: Color("2a2523"),
+		6: Color("8a5428"),
+		7: Color("2d9a5b"),
+		8: Color("070707"),
+		9: Color("a87918"),
+		10: Color("17488f"),
+		11: Color("8f252b"),
+		12: Color("4f2d78"),
+		13: Color("5f656b"),
+		14: Color("1f6f42"),
+		15: Color("b85b24"),
 	}
-	return colors.get(number, Color("d7b347"))
+	return colors.get(number, Color("a56f28"))
 
 
 func _make_reward_spawn_request() -> SpawnBallRequest:

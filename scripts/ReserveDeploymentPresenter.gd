@@ -10,7 +10,7 @@ class_name ReserveDeploymentPresenter
 # Presentation-only layer for reserve deployment. BallPlacementSystem owns
 # validity/confirm/cancel; this script only draws the "pulled from slot" feel.
 const CURSOR_ICON_SIZE := Vector2(34, 34)
-const CURSOR_ICON_RADIUS := 10.5
+const ITEM_ICON_DRAW := preload("res://scripts/ItemIconDraw.gd")
 const CURSOR_ICON_RING_RADIUS := 15.0
 const TETHER_DOT_COUNT := 34
 const TETHER_DOT_RADIUS := 2.4
@@ -138,34 +138,4 @@ func _draw_cursor_icon(center: Vector2, icon_key: String) -> void:
 	draw_circle(center, CURSOR_ICON_RING_RADIUS, CURSOR_RING_COLOR)
 	draw_arc(center, CURSOR_ICON_RING_RADIUS, 0.0, TAU, 32, Color(1.0, 0.92, 0.54, 0.72), 1.8, true)
 	var icon_rect := Rect2(center - CURSOR_ICON_SIZE * 0.5, CURSOR_ICON_SIZE)
-	match icon_key:
-		"wayfinder_ball":
-			_draw_wayfinder_icon(icon_rect)
-		"powder_keg_ball":
-			_draw_powder_keg_icon(icon_rect)
-		_:
-			_draw_plain_ball_icon(icon_rect)
-
-
-func _draw_plain_ball_icon(icon_rect: Rect2) -> void:
-	var center := icon_rect.get_center()
-	draw_circle(center, CURSOR_ICON_RADIUS, Color(0.9, 0.86, 0.66, 0.94))
-	draw_circle(center + Vector2(-3.8, -3.8), 3.0, Color(1.0, 0.98, 0.82, 0.82))
-	draw_arc(center, CURSOR_ICON_RADIUS, 0.0, TAU, 32, Color(0.12, 0.09, 0.04, 0.86), 2.0, true)
-
-
-func _draw_wayfinder_icon(icon_rect: Rect2) -> void:
-	var center := icon_rect.get_center()
-	draw_circle(center, 11.5, Color(0.34, 0.96, 0.84, 0.9))
-	draw_arc(center, 11.5, 0.0, TAU, 32, Color(0.04, 0.16, 0.15, 0.9), 2.0, true)
-	draw_line(center + Vector2(-6.5, 4.8), center + Vector2(6.5, -4.8), Color(1.0, 0.92, 0.58, 0.96), 3.0)
-	draw_circle(center, 2.1, Color(0.04, 0.16, 0.15, 0.96))
-
-
-func _draw_powder_keg_icon(icon_rect: Rect2) -> void:
-	var center := icon_rect.get_center()
-	var keg_rect := Rect2(center + Vector2(-10.5, -8.5), Vector2(21, 18))
-	draw_rect(keg_rect, Color(0.55, 0.16, 0.09, 0.95), true)
-	draw_rect(keg_rect, Color(1.0, 0.6, 0.24, 0.9), false, 2.0)
-	draw_line(center + Vector2(0, -8.5), center + Vector2(6.7, -14.5), Color(0.95, 0.78, 0.46, 0.95), 2.0)
-	draw_circle(center + Vector2(8.5, -16.0), 2.2, Color(1.0, 0.42, 0.1, 0.92))
+	ITEM_ICON_DRAW.draw_icon(self, icon_rect, icon_key)

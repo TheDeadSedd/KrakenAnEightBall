@@ -11,6 +11,7 @@ signal reserve_slot_clicked(slot_index: int)
 
 # Draw-only reserve slot UI. ReserveSystem owns slot data and deployment state.
 const SLOT_COUNT := 3
+const ITEM_ICON_DRAW := preload("res://scripts/ItemIconDraw.gd")
 const SLOT_SIZE := Vector2(44, 44)
 const SLOT_GAP := 12.0
 const SLOT_PADDING := 8.0
@@ -231,34 +232,4 @@ func _draw_deploying_slot_source(slot_rect: Rect2) -> void:
 
 
 func _draw_slot_icon(slot_rect: Rect2, icon_key: String) -> void:
-	match icon_key:
-		"wayfinder_ball":
-			_draw_wayfinder_icon(slot_rect)
-		"powder_keg_ball":
-			_draw_powder_keg_icon(slot_rect)
-		_:
-			_draw_plain_ball_icon(slot_rect)
-
-
-func _draw_plain_ball_icon(slot_rect: Rect2) -> void:
-	var center := slot_rect.get_center()
-	draw_circle(center, 11.0, Color(0.9, 0.86, 0.66, 0.92))
-	draw_circle(center + Vector2(-4, -4), 3.0, Color(1.0, 0.98, 0.82, 0.8))
-	draw_arc(center, 11.0, 0.0, TAU, 32, Color(0.12, 0.09, 0.04, 0.82), 2.0)
-
-
-func _draw_wayfinder_icon(slot_rect: Rect2) -> void:
-	var center := slot_rect.get_center()
-	draw_circle(center, 12.0, Color(0.34, 0.96, 0.84, 0.88))
-	draw_arc(center, 12.0, 0.0, TAU, 32, Color(0.04, 0.16, 0.15, 0.86), 2.0)
-	draw_line(center + Vector2(-7, 5), center + Vector2(7, -5), Color(1.0, 0.92, 0.58, 0.95), 3.0)
-	draw_circle(center, 2.2, Color(0.04, 0.16, 0.15, 0.95))
-
-
-func _draw_powder_keg_icon(slot_rect: Rect2) -> void:
-	var center := slot_rect.get_center()
-	var keg_rect := Rect2(center + Vector2(-11, -9), Vector2(22, 19))
-	draw_rect(keg_rect, Color(0.55, 0.16, 0.09, 0.94), true)
-	draw_rect(keg_rect, Color(1.0, 0.6, 0.24, 0.9), false, 2.0)
-	draw_line(center + Vector2(0, -9), center + Vector2(7, -15), Color(0.95, 0.78, 0.46, 0.95), 2.0)
-	draw_circle(center + Vector2(9, -17), 2.3, Color(1.0, 0.42, 0.1, 0.92))
+	ITEM_ICON_DRAW.draw_icon(self, slot_rect, icon_key)

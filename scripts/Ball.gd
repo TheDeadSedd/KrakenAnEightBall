@@ -53,7 +53,16 @@ const EMBEZZLER_BALL_COIN_COLOR := Color("ffd56a")
 const EMBEZZLER_BALL_GLOW_COLOR := Color("fff0a8")
 const EMBEZZLER_BALL_MASK_COLOR := Color("1d1209")
 const EMBEZZLER_BALL_PANIC_COLOR := Color("ffb13d")
+const EIGHT_BALL_OBSIDIAN_BASE_COLOR := Color("05050b")
+const EIGHT_BALL_OBSIDIAN_RIM_COLOR := Color("1a1d34")
+const EIGHT_BALL_OBSIDIAN_MARK_COLOR := Color("6f62a8")
+const EIGHT_BALL_OBSIDIAN_GLEAM_COLOR := Color("c7dcff")
+const EIGHT_BALL_ETHEREAL_MARK_COLOR := Color("e4e7ef")
+const EIGHT_BALL_ETHEREAL_UNDERTONE_COLOR := Color("b8bdd2")
+const EIGHT_BALL_ETHEREAL_GLOW_COLOR := Color("d7dcf4")
+const EIGHT_BALL_ETHEREAL_PATH_POINTS := 52
 const DEBUG_WAYFINDER := false
+const VISUAL_SPIN_REDRAW_MIN_DELTA := 0.018
 
 @export var ball_type := BallType.OBJECT
 @export_range(0, 15, 1) var ball_number := 1
@@ -70,6 +79,7 @@ const DEBUG_WAYFINDER := false
 @export var crawl_speed_drag_multiplier := 3.0
 @export var rim_width := 2.0
 @export var number_spot_scale := 0.48
+@export var show_ball_numbers := false
 @export var highlight_scale := 0.22
 @export var trail_enabled := true
 @export var trail_speed_threshold := 18.0
@@ -96,10 +106,15 @@ const DEBUG_WAYFINDER := false
 @export var spawn_drop_visual_lean := 12.0
 @export var spawn_drop_horizontal_offset_min := 140.0
 @export var spawn_drop_horizontal_offset_max := 280.0
+# Presentation-only rolling detail. This never feeds collision or movement math.
+@export var visual_spin_enabled := true
+@export var visual_spin_speed_scale := 1.0
+@export var visual_spin_min_speed := 5.0
 
 @onready var number_label: Label = $NumberLabel
 
 var velocity := Vector2.ZERO
+var visual_spin_angle := 0.0
 var gameplay_enabled := true
 # Wayfinder state stays intentionally small: anomaly identity plus current activation.
 var is_wayfinder := false
@@ -144,6 +159,7 @@ var _treasure_leg_phase := 0.0
 var _embezzler_willingness_visual_strength := 0.0
 var _embezzler_stored_value_visual_strength := 0.0
 var _embezzler_escape_visual_strength := 0.0
+var _last_visual_spin_redraw_angle := 0.0
 
 
 func _ready() -> void:
@@ -162,6 +178,7 @@ func _process(delta: float) -> void:
 	if _spawn_drop_active:
 		_update_spawn_drop(delta)
 
+	_update_visual_spin(delta)
 	_update_anchor_influence_visual(delta)
 	_update_cannon_presence_visual(delta)
 	_update_treasure_leg_visual(delta)
@@ -366,6 +383,7 @@ func setup(
 	is_cannon_ball = new_is_cannon_ball
 	is_treasure_ball = new_is_treasure_ball
 	is_embezzler_ball = new_is_embezzler_ball
+	_reset_visual_spin()
 	set_cannon_presence_visual(0.0, Vector2.RIGHT)
 	_cannon_presence_visual_strength = 0.0
 	_cannon_presence_flash_strength = 0.0
@@ -516,6 +534,7 @@ func sink() -> void:
 	_spawn_landing_damping_remaining = 0.0
 	_trail_suppression_remaining = 0.0
 	_trail_points.clear()
+	_reset_visual_spin()
 	visible = false
 	_clear_anchor_influence_visual()
 	_clear_treasure_leg_visual()
@@ -537,6 +556,7 @@ func respawn_at(new_position: Vector2) -> void:
 	_spawn_drop_horizontal_offset = Vector2.ZERO
 	_spawn_landing_damping_remaining = 0.0
 	_trail_suppression_remaining = 0.0
+	_reset_visual_spin()
 	_clear_anchor_influence_visual()
 	_clear_treasure_leg_visual()
 	_clear_embezzler_willingness_visual()
@@ -557,6 +577,7 @@ func begin_spawn_drop(final_position: Vector2) -> void:
 	global_position = final_position
 	_spawn_drop_visual_offset = Vector2.UP * spawn_drop_initial_visual_height + _spawn_drop_horizontal_offset
 	scale = Vector2.ONE * spawn_drop_start_scale
+	_reset_visual_spin()
 	_update_label_layout()
 	_reset_trail()
 	_clear_anchor_influence_visual()
@@ -866,17 +887,88 @@ func _queue_trail_redraw() -> void:
 func _update_label_layout() -> void:
 	number_label.size = Vector2(radius * 2.0, radius * 2.0)
 	number_label.position = _get_visual_draw_origin() + Vector2(-radius, -radius - 1.0)
+	number_label.pivot_offset = Vector2(radius, radius)
+	_sync_number_label_spin()
 
 
 func _get_visual_draw_origin() -> Vector2:
 	return _spawn_drop_visual_offset + _impact_shimmy_visual_offset
 
 
+func _update_visual_spin(delta: float) -> void:
+	if not visual_spin_enabled:
+		if number_label != null and absf(number_label.rotation) > 0.001:
+			_sync_number_label_spin()
+			queue_redraw()
+		return
+
+	if not visible or not gameplay_enabled or _spawn_drop_active:
+		return
+
+	var speed: float = velocity.length()
+	if speed < visual_spin_min_speed or radius <= 0.0:
+		return
+
+	var spin_delta: float = speed / radius * delta * visual_spin_speed_scale * _get_visual_spin_direction()
+	if is_zero_approx(spin_delta):
+		return
+
+	visual_spin_angle = wrapf(visual_spin_angle + spin_delta, -PI, PI)
+	var angle_change: float = absf(wrapf(visual_spin_angle - _last_visual_spin_redraw_angle, -PI, PI))
+	if angle_change < VISUAL_SPIN_REDRAW_MIN_DELTA:
+		return
+
+	_last_visual_spin_redraw_angle = visual_spin_angle
+	_sync_number_label_spin()
+	queue_redraw()
+
+
+func _get_visual_spin_direction() -> float:
+	var dominant_motion: float = velocity.x
+	if absf(dominant_motion) < 1.0:
+		dominant_motion = velocity.y
+	return 1.0 if dominant_motion >= 0.0 else -1.0
+
+
+func _reset_visual_spin() -> void:
+	visual_spin_angle = 0.0
+	_last_visual_spin_redraw_angle = 0.0
+	_sync_number_label_spin()
+
+
+func _sync_number_label_spin() -> void:
+	if number_label == null:
+		return
+
+	number_label.rotation = _get_visual_detail_rotation()
+
+
+func _get_visual_detail_rotation() -> float:
+	if not visual_spin_enabled:
+		return 0.0
+	return visual_spin_angle
+
+
 func _update_label() -> void:
-	if ball_type == BallType.CUE or is_wayfinder or is_powder_keg or is_anchor_ball or is_cannon_ball or is_treasure_ball or is_embezzler_ball:
+	if not _should_show_standard_number_visuals():
+		number_label.visible = false
 		number_label.text = ""
-	else:
-		number_label.text = str(ball_number)
+		return
+
+	number_label.visible = true
+	number_label.text = str(ball_number)
+
+
+func _should_show_standard_number_visuals() -> bool:
+	return (
+		show_ball_numbers
+		and not is_wayfinder
+		and not is_anchor_ball
+		and not is_cannon_ball
+		and not is_treasure_ball
+		and not is_embezzler_ball
+		and (ball_type == BallType.OBJECT or ball_type == BallType.EIGHT)
+	)
 
 
 func _update_number_color() -> void:
@@ -943,9 +1035,9 @@ func _draw() -> void:
 
 	var origin: Vector2 = _get_visual_draw_origin()
 	var display_color: Color = _get_display_color()
-	var rim_color: Color = display_color.darkened(0.45)
+	var rim_color: Color = _get_rim_color(display_color)
 	var shadow_color: Color = Color(0, 0, 0, 0.22)
-	var shine_color: Color = Color(1, 1, 1, 0.34)
+	var shine_color: Color = _get_shine_color()
 
 	if anchor_visuals_enabled and _anchor_influence_visual_strength > 0.0:
 		_draw_anchor_influence_indicator(origin)
@@ -968,34 +1060,7 @@ func _draw() -> void:
 	draw_circle(origin + Vector2(-radius * 0.18, -radius * 0.22), radius * 0.72, display_color.lightened(0.16))
 	draw_arc(origin, radius - rim_width * 0.5, 0.0, TAU, 40, rim_color, rim_width)
 
-	if not is_wayfinder and not is_anchor_ball and not is_cannon_ball and not is_treasure_ball and not is_embezzler_ball and (ball_type == BallType.OBJECT or ball_type == BallType.EIGHT):
-		var number_spot_color := Color.WHITE
-		draw_circle(origin, radius * number_spot_scale, number_spot_color)
-		draw_arc(
-			origin,
-			radius * number_spot_scale,
-			0.0,
-			TAU,
-			30,
-			Color(0.14, 0.08, 0.05, 0.28),
-			1.2
-		)
-		if ball_type == BallType.EIGHT:
-			draw_circle(origin, radius * number_spot_scale * 0.72, Color("151515"))
-
-	if is_wayfinder:
-		draw_arc(origin, radius - 3.2, 0.0, TAU, 40, WAYFINDER_RING_COLOR, 1.6)
-		_draw_wayfinder_mark(origin)
-	elif is_powder_keg:
-		_draw_powder_keg_mark(origin)
-	elif is_anchor_ball:
-		_draw_anchor_mark(origin)
-	elif is_cannon_ball:
-		_draw_cannon_ball_mark(origin)
-	elif is_treasure_ball:
-		_draw_treasure_ball_mark(origin)
-	elif is_embezzler_ball:
-		_draw_embezzler_ball_mark(origin)
+	_draw_spinning_ball_details(origin, display_color)
 
 	if is_treasure_ball and _treasure_leg_visual_strength > 0.0:
 		_draw_treasure_feet(origin)
@@ -1003,6 +1068,77 @@ func _draw() -> void:
 		_draw_embezzler_escape_feet(origin)
 
 	draw_circle(origin + Vector2(-radius * 0.32, -radius * 0.36), radius * highlight_scale, shine_color)
+	if _is_eight_ball_visual():
+		_draw_eight_ball_ethereal_mark(origin)
+
+
+func _draw_spinning_ball_details(origin: Vector2, display_color: Color) -> void:
+	draw_set_transform(origin, _get_visual_detail_rotation(), Vector2.ONE)
+	_draw_roll_surface_marks(Vector2.ZERO, display_color)
+
+	if _has_number_spot():
+		_draw_number_spot(Vector2.ZERO)
+
+	if is_wayfinder:
+		draw_arc(Vector2.ZERO, radius - 3.2, 0.0, TAU, 40, WAYFINDER_RING_COLOR, 1.6)
+		_draw_wayfinder_mark(Vector2.ZERO)
+	elif _is_eight_ball_visual():
+		_draw_eight_ball_obsidian_detail(Vector2.ZERO)
+	elif is_powder_keg:
+		_draw_powder_keg_mark(Vector2.ZERO)
+	elif is_anchor_ball:
+		_draw_anchor_mark(Vector2.ZERO)
+	elif is_cannon_ball:
+		_draw_cannon_ball_mark(Vector2.ZERO)
+	elif is_treasure_ball:
+		_draw_treasure_ball_mark(Vector2.ZERO)
+	elif is_embezzler_ball:
+		_draw_embezzler_ball_mark(Vector2.ZERO)
+
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+
+
+func _draw_roll_surface_marks(origin: Vector2, display_color: Color) -> void:
+	var mark_color: Color = display_color.lightened(0.45)
+	mark_color.a = 0.13
+	draw_arc(
+		origin + Vector2(0.0, -radius * 0.24),
+		radius * 0.58,
+		deg_to_rad(205.0),
+		deg_to_rad(335.0),
+		18,
+		mark_color,
+		1.0
+	)
+	draw_arc(
+		origin + Vector2(0.0, radius * 0.22),
+		radius * 0.52,
+		deg_to_rad(25.0),
+		deg_to_rad(155.0),
+		18,
+		mark_color,
+		1.0
+	)
+
+
+func _has_number_spot() -> bool:
+	return _should_show_standard_number_visuals()
+
+
+func _draw_number_spot(origin: Vector2) -> void:
+	var number_spot_color := Color.WHITE
+	draw_circle(origin, radius * number_spot_scale, number_spot_color)
+	draw_arc(
+		origin,
+		radius * number_spot_scale,
+		0.0,
+		TAU,
+		30,
+		Color(0.14, 0.08, 0.05, 0.28),
+		1.2
+	)
+	if ball_type == BallType.EIGHT:
+		draw_circle(origin, radius * number_spot_scale * 0.72, Color("151515"))
 
 
 func _get_display_color() -> Color:
@@ -1021,6 +1157,9 @@ func _get_display_color() -> Color:
 	if is_powder_keg:
 		return POWDER_KEG_BASE_COLOR
 
+	if _is_eight_ball_visual():
+		return EIGHT_BALL_OBSIDIAN_BASE_COLOR
+
 	if not is_wayfinder:
 		return ball_color
 
@@ -1028,6 +1167,138 @@ func _get_display_color() -> Color:
 		return WAYFINDER_BASE_COLOR.lightened(0.18)
 
 	return WAYFINDER_BASE_COLOR
+
+
+func _get_rim_color(display_color: Color) -> Color:
+	if _is_eight_ball_visual():
+		return EIGHT_BALL_OBSIDIAN_RIM_COLOR
+
+	return display_color.darkened(0.45)
+
+
+func _get_shine_color() -> Color:
+	if _is_eight_ball_visual():
+		var obsidian_shine: Color = EIGHT_BALL_OBSIDIAN_GLEAM_COLOR
+		obsidian_shine.a = 0.42
+		return obsidian_shine
+
+	return Color(1, 1, 1, 0.34)
+
+
+func _is_eight_ball_visual() -> bool:
+	return ball_type == BallType.EIGHT and not _has_anomaly_visual_identity()
+
+
+func _has_anomaly_visual_identity() -> bool:
+	return (
+		is_wayfinder
+		or is_powder_keg
+		or is_anchor_ball
+		or is_cannon_ball
+		or is_treasure_ball
+		or is_embezzler_ball
+	)
+
+
+func _draw_eight_ball_obsidian_detail(origin: Vector2) -> void:
+	var sheen_color: Color = EIGHT_BALL_OBSIDIAN_MARK_COLOR
+	sheen_color.a = 0.24
+	draw_arc(
+		origin + Vector2(-radius * 0.05, -radius * 0.05),
+		radius * 0.56,
+		deg_to_rad(205.0),
+		deg_to_rad(315.0),
+		22,
+		sheen_color,
+		1.25
+	)
+
+	var crack_color: Color = EIGHT_BALL_OBSIDIAN_MARK_COLOR.lightened(0.22)
+	crack_color.a = 0.30
+	draw_polyline(
+		PackedVector2Array([
+			origin + Vector2(-radius * 0.46, radius * 0.04),
+			origin + Vector2(-radius * 0.23, radius * 0.00),
+			origin + Vector2(-radius * 0.06, radius * 0.16),
+			origin + Vector2(radius * 0.18, radius * 0.11),
+		]),
+		crack_color,
+		0.85
+	)
+	draw_polyline(
+		PackedVector2Array([
+			origin + Vector2(radius * 0.17, -radius * 0.42),
+			origin + Vector2(radius * 0.04, -radius * 0.22),
+			origin + Vector2(radius * 0.24, -radius * 0.10),
+		]),
+		crack_color,
+		0.75
+	)
+
+	var gleam_color: Color = EIGHT_BALL_OBSIDIAN_GLEAM_COLOR
+	gleam_color.a = 0.30
+	draw_circle(origin + Vector2(radius * 0.26, -radius * 0.34), radius * 0.075, gleam_color)
+
+
+func _draw_eight_ball_ethereal_mark(origin: Vector2) -> void:
+	var mark_origin: Vector2 = origin + Vector2(0.0, -2.0)
+	var path: PackedVector2Array = _make_eight_ball_ethereal_path(mark_origin)
+	var glow_outer_width: float = maxf(4.2, radius * 0.30)
+	var glow_inner_width: float = maxf(3.0, radius * 0.22)
+	var outer_width: float = maxf(2.2, radius * 0.17)
+	var core_width: float = maxf(1.25, radius * 0.10)
+
+	var glow_color: Color = EIGHT_BALL_ETHEREAL_GLOW_COLOR
+	glow_color.a = 0.18
+	_draw_eight_ball_ethereal_path(path, glow_color, glow_outer_width)
+
+	glow_color.a = 0.30
+	_draw_eight_ball_ethereal_path(path, glow_color, glow_inner_width)
+
+	var undertone_color: Color = EIGHT_BALL_ETHEREAL_UNDERTONE_COLOR
+	undertone_color.a = 0.46
+	_draw_eight_ball_ethereal_path(path, undertone_color, outer_width)
+
+	var smoke_color: Color = EIGHT_BALL_ETHEREAL_MARK_COLOR
+	smoke_color.a = 0.70
+	_draw_eight_ball_ethereal_path(path, smoke_color, core_width)
+
+	var pinch_color: Color = EIGHT_BALL_ETHEREAL_UNDERTONE_COLOR
+	pinch_color.a = 0.38
+	var pinch_glow: Color = EIGHT_BALL_ETHEREAL_GLOW_COLOR
+	pinch_glow.a = 0.24
+	draw_line(
+		mark_origin + Vector2(-radius * 0.20, 0.0),
+		mark_origin + Vector2(radius * 0.20, 0.0),
+		pinch_glow,
+		maxf(1.8, radius * 0.13)
+	)
+	draw_line(
+		mark_origin + Vector2(-radius * 0.18, 0.0),
+		mark_origin + Vector2(radius * 0.18, 0.0),
+		pinch_color,
+		maxf(0.8, radius * 0.06)
+	)
+
+
+func _make_eight_ball_ethereal_path(mark_origin: Vector2) -> PackedVector2Array:
+	var points: PackedVector2Array = PackedVector2Array()
+	points.resize(EIGHT_BALL_ETHEREAL_PATH_POINTS + 1)
+	var horizontal_radius: float = radius * 1.12
+	var vertical_radius: float = radius * 0.92
+	for point_index in range(EIGHT_BALL_ETHEREAL_PATH_POINTS + 1):
+		var ratio: float = float(point_index) / float(EIGHT_BALL_ETHEREAL_PATH_POINTS)
+		var theta: float = ratio * TAU
+		var point: Vector2 = Vector2(
+			horizontal_radius * sin(theta) * cos(theta),
+			vertical_radius * sin(theta)
+		)
+		points[point_index] = mark_origin + point
+	return points
+
+
+func _draw_eight_ball_ethereal_path(path: PackedVector2Array, color: Color, width: float) -> void:
+	draw_polyline(path, color, width, true)
 
 
 func _draw_wayfinder_mark(origin: Vector2) -> void:
