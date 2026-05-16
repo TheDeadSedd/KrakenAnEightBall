@@ -512,6 +512,44 @@ func _make_ball_drops_score_panel_text(snapshot: Dictionary) -> String:
 		snapshot["active_score_glow_labels"],
 		snapshot["active_score_popup_tweens"],
 	])
+	lines.append("Score stacks: %s total / %s foundational / %s skilled / %s heroic / %s legendary" % [
+		snapshot["active_score_stacks"],
+		snapshot["active_foundational_score_stacks"],
+		snapshot["active_skilled_score_stacks"],
+		snapshot["active_heroic_score_stacks"],
+		snapshot["active_legendary_score_stacks"],
+	])
+	lines.append("Foundational routes: %s stack / %s fallback / %s updates / %s avoided" % [
+		snapshot["score_foundational_stack_routes"],
+		snapshot["score_foundational_fallback_routes"],
+		snapshot["score_stack_coalesces"],
+		snapshot["score_stack_labels_avoided"],
+	])
+	lines.append("Skilled routes: %s stack / %s updates / %s popups avoided" % [
+		snapshot["score_skilled_stack_routes"],
+		snapshot["score_skilled_stack_coalesces"],
+		snapshot["score_skilled_special_popups_avoided"],
+	])
+	lines.append("Heroic routes: %s stack / %s updates / %s popups avoided" % [
+		snapshot["score_heroic_stack_routes"],
+		snapshot["score_heroic_stack_coalesces"],
+		snapshot["score_heroic_special_popups_avoided"],
+	])
+	lines.append("Legendary routes: %s stack / %s updates / %s popups avoided" % [
+		snapshot["score_legendary_stack_routes"],
+		snapshot["score_legendary_stack_coalesces"],
+		snapshot["score_legendary_special_popups_avoided"],
+	])
+	lines.append("Stack lanes: %s conflicts / %s yields / %s early fades / %s replacements" % [
+		snapshot["score_stack_lane_conflicts"],
+		snapshot["score_stack_yields"],
+		snapshot["score_stack_early_fades"],
+		snapshot["score_stack_replacements"],
+	])
+	lines.append("Fallback popup routes: %s" % [
+		snapshot["score_special_popup_routes"],
+	])
+	lines.append("Score route last: %s" % snapshot["score_last_popup_route"])
 	return "\n".join(lines)
 
 
@@ -749,6 +787,43 @@ func _make_visual_cost_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["active_score_popup_labels"],
 			snapshot["active_score_glow_labels"],
 			snapshot["active_score_popup_tweens"],
+		],
+		"Score stacks: %s total / %s foundational / %s skilled / %s heroic / %s legendary" % [
+			snapshot["active_score_stacks"],
+			snapshot["active_foundational_score_stacks"],
+			snapshot["active_skilled_score_stacks"],
+			snapshot["active_heroic_score_stacks"],
+			snapshot["active_legendary_score_stacks"],
+		],
+		"Foundational routes: %s stack / %s fallback / %s updates / %s avoided" % [
+			snapshot["score_foundational_stack_routes"],
+			snapshot["score_foundational_fallback_routes"],
+			snapshot["score_stack_coalesces"],
+			snapshot["score_stack_labels_avoided"],
+		],
+		"Skilled routes: %s stack / %s updates / %s popups avoided" % [
+			snapshot["score_skilled_stack_routes"],
+			snapshot["score_skilled_stack_coalesces"],
+			snapshot["score_skilled_special_popups_avoided"],
+		],
+		"Heroic routes: %s stack / %s updates / %s popups avoided" % [
+			snapshot["score_heroic_stack_routes"],
+			snapshot["score_heroic_stack_coalesces"],
+			snapshot["score_heroic_special_popups_avoided"],
+		],
+		"Legendary routes: %s stack / %s updates / %s popups avoided" % [
+			snapshot["score_legendary_stack_routes"],
+			snapshot["score_legendary_stack_coalesces"],
+			snapshot["score_legendary_special_popups_avoided"],
+		],
+		"Stack lanes: %s conflicts / %s yields / %s early fades / %s replacements" % [
+			snapshot["score_stack_lane_conflicts"],
+			snapshot["score_stack_yields"],
+			snapshot["score_stack_early_fades"],
+			snapshot["score_stack_replacements"],
+		],
+		"Fallback popup routes: %s" % [
+			snapshot["score_special_popup_routes"],
 		],
 		"Debug UI: last %.2f ms / %s panels visible" % [
 			float(snapshot["debug_overlay_refresh_ms"]),

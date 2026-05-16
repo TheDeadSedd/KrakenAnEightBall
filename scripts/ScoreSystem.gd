@@ -8,6 +8,7 @@ signal doubloons_awarded(amount: int, total: int)
 # Converts ShotEventSystem histories into Doubloon rewards.
 # This owns lightweight score presentation, but not coin sprays or pocket VFX.
 const DEBUG_SCORE_BREAKDOWNS := false
+const DEBUG_SCORE_POPUP_ROUTING_LOGS := false
 const UI_FONT := preload("res://assets/fonts/Gothic Pixels.ttf")
 const BASE_SINK_REWARD := 10
 const BANK_REWARD := 5
@@ -67,6 +68,102 @@ const SCORE_LABEL_GLOW_FADE_TIME := 0.28
 const SCORE_LABEL_GLOW_FONT_COLOR := Color(1.0, 0.96, 0.8, 0.18)
 const SCORE_LABEL_GLOW_OUTLINE_COLOR := Color(1.0, 0.88, 0.45, 0.78)
 const SCORE_LABEL_GLOW_OUTLINE_SIZE := 10
+const SCORE_STACK_LANE_CONFLICT_DISTANCE := 168.0
+const SCORE_STACK_LANE_SIDE_STEP := 22.0
+const SCORE_STACK_RETREAT_SPEED := 72.0
+const SCORE_STACK_INACTIVE_RETREAT_RATIO := 0.35
+const SCORE_STACK_BOTTOM_POCKET_SUBTITLE_EXTRA_GAP := 10.0
+const SCORE_STACK_CENTER_POCKET_SUBTITLE_GAP_SCALE := 0.72
+const FOUNDATIONAL_STACK_CLASS_ID := "foundational_sink"
+const FOUNDATIONAL_STACK_HOLD_TIME := 1.35
+const FOUNDATIONAL_STACK_FADE_TIME := 0.28
+const FOUNDATIONAL_STACK_UPDATE_PULSE_SCALE := Vector2(1.18, 1.18)
+const FOUNDATIONAL_STACK_UPDATE_PULSE_TIME := 0.08
+const FOUNDATIONAL_STACK_NEAREST_POCKET_MAX_DISTANCE := 140.0
+const FOUNDATIONAL_STACK_SUBTITLE_GAP := 22.0
+const FOUNDATIONAL_STACK_SUBTITLE_FONT_SIZE := 15
+const FOUNDATIONAL_STACK_SUBTITLE_COLOR := Color(1.0, 0.92, 0.62, 0.86)
+const SKILLED_STACK_CLASS_ID := "skilled"
+const SKILLED_STACK_HOLD_TIME := 1.55
+const SKILLED_STACK_FADE_TIME := 0.32
+const SKILLED_STACK_NUMBER_FONT_SIZE := 32
+const SKILLED_STACK_NUMBER_COLOR := Color(0.68, 0.92, 1.0, 1.0)
+const SKILLED_STACK_OUTLINE_COLOR := Color(0.05, 0.26, 0.66, 0.96)
+const SKILLED_STACK_SHADOW_COLOR := Color(0.02, 0.08, 0.20, 0.86)
+const SKILLED_STACK_POP_FLASH_COLOR := Color(0.78, 1.08, 1.22, 1.0)
+const SKILLED_STACK_POP_SCALE := Vector2(1.42, 1.42)
+const SKILLED_STACK_GLOW_COLOR := Color(0.35, 0.82, 1.0, 0.44)
+const SKILLED_STACK_GLOW_FONT_COLOR := Color(0.74, 0.96, 1.0, 0.22)
+const SKILLED_STACK_GLOW_OUTLINE_COLOR := Color(0.18, 0.55, 1.0, 0.72)
+const SKILLED_STACK_GLOW_OUTLINE_SIZE := 12
+const SKILLED_STACK_OUTWARD_OFFSET := 38.0
+const SKILLED_STACK_SUBTITLE_GAP := 25.0
+const SKILLED_STACK_SUBTITLE_FONT_SIZE := 16
+const SKILLED_STACK_SUBTITLE_COLOR := Color(0.72, 0.96, 1.0, 0.90)
+const SKILLED_STACK_UPDATE_PULSE_SCALE := Vector2(1.24, 1.24)
+const SKILLED_STACK_UPDATE_PULSE_TIME := 0.10
+const HEROIC_STACK_CLASS_ID := "heroic"
+const HEROIC_STACK_HOLD_TIME := 1.8
+const HEROIC_STACK_FADE_TIME := 0.36
+const HEROIC_STACK_NUMBER_FONT_SIZE := 36
+const HEROIC_STACK_NUMBER_COLOR := Color(0.92, 0.72, 1.0, 1.0)
+const HEROIC_STACK_OUTLINE_COLOR := Color(0.33, 0.08, 0.62, 0.98)
+const HEROIC_STACK_SHADOW_COLOR := Color(0.10, 0.02, 0.20, 0.90)
+const HEROIC_STACK_POP_FLASH_COLOR := Color(1.08, 0.82, 1.28, 1.0)
+const HEROIC_STACK_POP_SCALE := Vector2(1.50, 1.50)
+const HEROIC_STACK_GLOW_COLOR := Color(0.72, 0.28, 1.0, 0.46)
+const HEROIC_STACK_GLOW_FONT_COLOR := Color(0.94, 0.76, 1.0, 0.25)
+const HEROIC_STACK_GLOW_OUTLINE_COLOR := Color(0.60, 0.18, 1.0, 0.78)
+const HEROIC_STACK_GLOW_OUTLINE_SIZE := 14
+const HEROIC_STACK_OUTWARD_OFFSET := 78.0
+const HEROIC_STACK_SUBTITLE_GAP := 28.0
+const HEROIC_STACK_SUBTITLE_FONT_SIZE := 17
+const HEROIC_STACK_SUBTITLE_COLOR := Color(0.94, 0.78, 1.0, 0.92)
+const HEROIC_STACK_UPDATE_PULSE_SCALE := Vector2(1.32, 1.32)
+const HEROIC_STACK_UPDATE_PULSE_TIME := 0.12
+const LEGENDARY_STACK_CLASS_ID := "legendary"
+const LEGENDARY_STACK_HOLD_TIME := 2.05
+const LEGENDARY_STACK_FADE_TIME := 0.40
+const LEGENDARY_STACK_NUMBER_FONT_SIZE := 40
+const LEGENDARY_STACK_NUMBER_COLOR := Color(1.0, 0.92, 0.38, 1.0)
+const LEGENDARY_STACK_OUTLINE_COLOR := Color(0.62, 0.34, 0.02, 1.0)
+const LEGENDARY_STACK_SHADOW_COLOR := Color(0.20, 0.10, 0.00, 0.92)
+const LEGENDARY_STACK_POP_FLASH_COLOR := Color(1.28, 1.10, 0.48, 1.0)
+const LEGENDARY_STACK_POP_SCALE := Vector2(1.60, 1.60)
+const LEGENDARY_STACK_GLOW_COLOR := Color(1.0, 0.74, 0.14, 0.52)
+const LEGENDARY_STACK_GLOW_FONT_COLOR := Color(1.0, 0.95, 0.50, 0.30)
+const LEGENDARY_STACK_GLOW_OUTLINE_COLOR := Color(1.0, 0.68, 0.08, 0.84)
+const LEGENDARY_STACK_GLOW_OUTLINE_SIZE := 16
+const LEGENDARY_STACK_OUTWARD_OFFSET := 124.0
+const LEGENDARY_STACK_SUBTITLE_GAP := 31.0
+const LEGENDARY_STACK_SUBTITLE_FONT_SIZE := 18
+const LEGENDARY_STACK_SUBTITLE_COLOR := Color(1.0, 0.90, 0.48, 0.94)
+const LEGENDARY_STACK_UPDATE_PULSE_SCALE := Vector2(1.40, 1.40)
+const LEGENDARY_STACK_UPDATE_PULSE_TIME := 0.14
+const FOUNDATIONAL_EVENT_TYPES := {
+	ShotEventSystem.EVENT_BANK: true,
+	ShotEventSystem.EVENT_CHAIN: true,
+	ShotEventSystem.EVENT_MULTI_CHAIN: true,
+	ShotEventSystem.EVENT_MULTI_SINK: true,
+	ShotEventSystem.EVENT_ANOMALY_TOUCH: true,
+}
+const SKILLED_EVENT_TYPES := {
+	ShotEventSystem.EVENT_KRAKEN_KICK: true,
+	ShotEventSystem.EVENT_DOUBLE_BANK: true,
+	ShotEventSystem.EVENT_THIN_CUT: true,
+	ShotEventSystem.EVENT_CLUSTER_BREAK: true,
+}
+const HEROIC_EVENT_TYPES := {
+	ShotEventSystem.EVENT_CROSS_CORNER_BANK: true,
+	ShotEventSystem.EVENT_FULL_TABLE_KICK: true,
+	ShotEventSystem.EVENT_POWDER_ROUTE: true,
+	ShotEventSystem.EVENT_KRAKEN_CURRENT: true,
+}
+const LEGENDARY_EVENT_TYPES := {
+	ShotEventSystem.EVENT_TRIPLE_BANK: true,
+	ShotEventSystem.EVENT_CANNON_CHAIN: true,
+	ShotEventSystem.EVENT_TREASURE_SNARE: true,
+}
 const EVENT_REWARDS := {
 	ShotEventSystem.EVENT_BANK: BANK_REWARD,
 	ShotEventSystem.EVENT_CHAIN: CHAIN_REWARD,
@@ -106,15 +203,60 @@ class ScorePopup:
 	var hold_timer := 0.0
 	var removal_started := false
 
+class ScoreStack:
+	var stack_key := ""
+	var stack_class_id := FOUNDATIONAL_STACK_CLASS_ID
+	var label: Label
+	var subtitle_label: Label
+	var anchor_position := Vector2.ZERO
+	var outward_direction := Vector2.UP
+	var inward_direction := Vector2.DOWN
+	var tangent_direction := Vector2.RIGHT
+	var lifetime_drift := Vector2.ZERO
+	var lane_tangent_offset := 0.0
+	var retreat_offset := 0.0
+	var retreat_target := 0.0
+	var line_rotation := 0.0
+	var is_corner_pocket := false
+	var pocket_radius := 0.0
+	var total := 0
+	var latest_summary := ""
+	var hold_timer := 0.0
+	var removal_started := false
+
 var table
 var doubloons_total := 0
 var awarded_base_ball_ids: Dictionary = {}
 var awarded_event_types_by_ball: Dictionary = {}
 var sink_contexts_by_ball: Dictionary = {}
 var score_popups_by_ball: Dictionary = {}
+var score_stacks_by_key: Dictionary = {}
 var active_score_popups: Array[ScorePopup] = []
+var active_score_stacks: Array[ScoreStack] = []
 var active_score_glow_label_count := 0
 var active_score_popup_tween_count := 0
+var foundational_score_stack_coalesces := 0
+var foundational_score_stack_labels_avoided := 0
+var foundational_stack_path_count := 0
+var foundational_fallback_stack_path_count := 0
+var skilled_score_stack_coalesces := 0
+var skilled_score_stack_labels_avoided := 0
+var skilled_stack_path_count := 0
+var skilled_special_popups_avoided := 0
+var heroic_score_stack_coalesces := 0
+var heroic_score_stack_labels_avoided := 0
+var heroic_stack_path_count := 0
+var heroic_special_popups_avoided := 0
+var legendary_score_stack_coalesces := 0
+var legendary_score_stack_labels_avoided := 0
+var legendary_stack_path_count := 0
+var legendary_special_popups_avoided := 0
+var score_stack_lane_conflicts := 0
+var score_stack_replacements := 0
+var score_stack_early_fades := 0
+var score_stack_yields := 0
+var special_popup_path_count := 0
+var last_score_popup_route := "none"
 
 
 func setup(table_ref) -> void:
@@ -129,6 +271,9 @@ func _process(delta: float) -> void:
 
 	for popup in active_score_popups.duplicate():
 		_update_score_popup(popup, delta)
+	for stack_value in active_score_stacks.duplicate():
+		var stack: ScoreStack = stack_value as ScoreStack
+		_update_score_stack(stack, delta)
 
 
 func get_doubloons_total() -> int:
@@ -173,7 +318,141 @@ func get_active_popup_label_count() -> int:
 		for event_label in popup.event_labels:
 			if is_instance_valid(event_label):
 				label_count += 1
+	for stack_value in active_score_stacks:
+		var stack: ScoreStack = stack_value as ScoreStack
+		if stack != null and is_instance_valid(stack.label):
+			label_count += 1
+		if stack != null and is_instance_valid(stack.subtitle_label):
+			label_count += 1
 	return label_count
+
+
+func get_active_score_stack_count() -> int:
+	return active_score_stacks.size()
+
+
+func get_active_foundational_score_stack_count() -> int:
+	var count := 0
+	for stack_value in active_score_stacks:
+		var stack: ScoreStack = stack_value as ScoreStack
+		if stack != null and stack.stack_class_id == FOUNDATIONAL_STACK_CLASS_ID:
+			count += 1
+	return count
+
+
+func get_active_skilled_score_stack_count() -> int:
+	var count := 0
+	for stack_value in active_score_stacks:
+		var stack: ScoreStack = stack_value as ScoreStack
+		if stack != null and stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+			count += 1
+	return count
+
+
+func get_active_heroic_score_stack_count() -> int:
+	var count := 0
+	for stack_value in active_score_stacks:
+		var stack: ScoreStack = stack_value as ScoreStack
+		if stack != null and stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+			count += 1
+	return count
+
+
+func get_active_legendary_score_stack_count() -> int:
+	var count := 0
+	for stack_value in active_score_stacks:
+		var stack: ScoreStack = stack_value as ScoreStack
+		if stack != null and stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+			count += 1
+	return count
+
+
+func get_foundational_score_stack_coalesce_count() -> int:
+	return foundational_score_stack_coalesces
+
+
+func get_foundational_score_stack_labels_avoided_count() -> int:
+	return foundational_score_stack_labels_avoided
+
+
+func get_foundational_stack_path_count() -> int:
+	return foundational_stack_path_count
+
+
+func get_foundational_fallback_stack_path_count() -> int:
+	return foundational_fallback_stack_path_count
+
+
+func get_skilled_stack_path_count() -> int:
+	return skilled_stack_path_count
+
+
+func get_skilled_score_stack_coalesce_count() -> int:
+	return skilled_score_stack_coalesces
+
+
+func get_skilled_score_stack_labels_avoided_count() -> int:
+	return skilled_score_stack_labels_avoided
+
+
+func get_skilled_special_popup_avoided_count() -> int:
+	return skilled_special_popups_avoided
+
+
+func get_heroic_stack_path_count() -> int:
+	return heroic_stack_path_count
+
+
+func get_heroic_score_stack_coalesce_count() -> int:
+	return heroic_score_stack_coalesces
+
+
+func get_heroic_score_stack_labels_avoided_count() -> int:
+	return heroic_score_stack_labels_avoided
+
+
+func get_heroic_special_popup_avoided_count() -> int:
+	return heroic_special_popups_avoided
+
+
+func get_legendary_stack_path_count() -> int:
+	return legendary_stack_path_count
+
+
+func get_legendary_score_stack_coalesce_count() -> int:
+	return legendary_score_stack_coalesces
+
+
+func get_legendary_score_stack_labels_avoided_count() -> int:
+	return legendary_score_stack_labels_avoided
+
+
+func get_legendary_special_popup_avoided_count() -> int:
+	return legendary_special_popups_avoided
+
+
+func get_score_stack_lane_conflict_count() -> int:
+	return score_stack_lane_conflicts
+
+
+func get_score_stack_replacement_count() -> int:
+	return score_stack_replacements
+
+
+func get_score_stack_early_fade_count() -> int:
+	return score_stack_early_fades
+
+
+func get_score_stack_yield_count() -> int:
+	return score_stack_yields
+
+
+func get_special_popup_path_count() -> int:
+	return special_popup_path_count
+
+
+func get_last_score_popup_route() -> String:
+	return last_score_popup_route
 
 
 func get_active_score_glow_label_count() -> int:
@@ -214,7 +493,7 @@ func _try_add_base_reward(ball_id: int, line_items: Array[Dictionary]) -> bool:
 		return false
 
 	awarded_base_ball_ids[ball_id] = true
-	line_items.append({"label": "Sink", "amount": BASE_SINK_REWARD})
+	line_items.append({"label": "Sink", "amount": BASE_SINK_REWARD, "event_type": ""})
 	return true
 
 
@@ -266,6 +545,7 @@ func _append_grouped_event_rewards(
 		line_items.append({
 			"label": label_text,
 			"amount": int(reward_data["amount"]),
+			"event_type": event_type,
 		})
 
 
@@ -324,8 +604,7 @@ func _store_sink_context(sink_context: Dictionary) -> void:
 
 
 func _get_popup_anchor_position(ball_id: int) -> Vector2:
-	var context: Dictionary = sink_contexts_by_ball.get(ball_id, {})
-	return context.get("pocket_position", Vector2.ZERO)
+	return _get_score_anchor_position(ball_id)
 
 
 func _get_popup_pocket_radius(ball_id: int) -> float:
@@ -334,9 +613,7 @@ func _get_popup_pocket_radius(ball_id: int) -> float:
 
 
 func _get_popup_outward_direction(ball_id: int) -> Vector2:
-	var context: Dictionary = sink_contexts_by_ball.get(ball_id, {})
-	var pocket_position: Vector2 = context.get("pocket_position", Vector2.ZERO)
-	return -_get_popup_inward_direction_from_position(pocket_position)
+	return -_get_popup_inward_direction_from_position(_get_score_anchor_position(ball_id))
 
 
 func _get_popup_tangent_direction(ball_id: int, is_corner_pocket: bool) -> Vector2:
@@ -348,9 +625,22 @@ func _get_popup_tangent_direction(ball_id: int, is_corner_pocket: bool) -> Vecto
 
 
 func _get_popup_inward_direction(ball_id: int) -> Vector2:
+	return _get_popup_inward_direction_from_position(_get_score_anchor_position(ball_id))
+
+
+func _get_score_anchor_position(ball_id: int) -> Vector2:
 	var context: Dictionary = sink_contexts_by_ball.get(ball_id, {})
 	var pocket_position: Vector2 = context.get("pocket_position", Vector2.ZERO)
-	return _get_popup_inward_direction_from_position(pocket_position)
+	if pocket_position != Vector2.ZERO:
+		return pocket_position
+
+	var sink_position: Vector2 = context.get("sink_position", Vector2.ZERO)
+	if sink_position != Vector2.ZERO:
+		return sink_position
+
+	if table != null:
+		return table.playfield_rect.get_center()
+	return Vector2.ZERO
 
 
 func _get_popup_inward_direction_from_position(pocket_position: Vector2) -> Vector2:
@@ -389,13 +679,45 @@ func _get_popup_hold_time(popup: ScorePopup) -> float:
 	return SCORE_POPUP_MIN_HOLD_TIME + float(popup.line_items.size()) * SCORE_POPUP_HOLD_PER_ITEM
 
 
+# All current scoring tiers route through evolving pocket-side stacks first.
+# The old multi-segment popup path remains as a defensive fallback for future
+# or unclassified rewards that have not been assigned a stack tier yet.
 func _add_line_items_to_score_popup(ball_id: int, ball_label: String, line_items: Array[Dictionary]) -> void:
+	var remaining_line_items: Array[Dictionary] = _route_foundational_line_items_to_score_stack(
+		ball_id,
+		ball_label,
+		line_items
+	)
+	remaining_line_items = _route_skilled_line_items_to_score_stack(
+		ball_id,
+		ball_label,
+		remaining_line_items
+	)
+	remaining_line_items = _route_heroic_line_items_to_score_stack(
+		ball_id,
+		ball_label,
+		remaining_line_items
+	)
+	remaining_line_items = _route_legendary_line_items_to_score_stack(
+		ball_id,
+		ball_label,
+		remaining_line_items
+	)
+	if remaining_line_items.is_empty():
+		return
+
+	_record_score_popup_route(
+		"special_popup",
+		ball_label,
+		remaining_line_items,
+		_sum_line_items(remaining_line_items)
+	)
 	var popup: ScorePopup = _get_or_create_score_popup(ball_id)
 	if popup == null:
 		return
 
-	popup.line_items.append_array(line_items)
-	_print_popup_line_items_added(ball_label, line_items)
+	popup.line_items.append_array(remaining_line_items)
+	_print_popup_line_items_added(ball_label, remaining_line_items)
 	popup.removal_started = false
 	popup.hold_timer = _get_popup_hold_time(popup)
 	if popup.revealed_count == 0:
@@ -404,12 +726,862 @@ func _add_line_items_to_score_popup(ball_id: int, ball_label: String, line_items
 		popup.reveal_timer = 0.0
 
 
+func _route_foundational_line_items_to_score_stack(
+	ball_id: int,
+	ball_label: String,
+	line_items: Array[Dictionary]
+) -> Array[Dictionary]:
+	var foundational_items: Array[Dictionary] = []
+	var remaining_items: Array[Dictionary] = []
+	for line_item in line_items:
+		if _is_foundational_stack_line_item(line_item):
+			foundational_items.append(line_item)
+		else:
+			remaining_items.append(line_item)
+
+	if foundational_items.is_empty():
+		return line_items
+
+	if not _try_add_foundational_items_to_score_stack(ball_id, ball_label, foundational_items):
+		_add_foundational_fallback_score_label(ball_id, ball_label, foundational_items)
+
+	return remaining_items
+
+
+func _route_skilled_line_items_to_score_stack(
+	ball_id: int,
+	ball_label: String,
+	line_items: Array[Dictionary]
+) -> Array[Dictionary]:
+	var skilled_items: Array[Dictionary] = []
+	var remaining_items: Array[Dictionary] = []
+	for line_item in line_items:
+		if _is_skilled_stack_line_item(line_item):
+			skilled_items.append(line_item)
+		else:
+			remaining_items.append(line_item)
+
+	if skilled_items.is_empty():
+		return line_items
+
+	if not _try_add_skilled_items_to_score_stack(ball_id, ball_label, skilled_items):
+		_add_skilled_fallback_score_label(ball_id, ball_label, skilled_items)
+
+	return remaining_items
+
+
+func _route_heroic_line_items_to_score_stack(
+	ball_id: int,
+	ball_label: String,
+	line_items: Array[Dictionary]
+) -> Array[Dictionary]:
+	var heroic_items: Array[Dictionary] = []
+	var remaining_items: Array[Dictionary] = []
+	for line_item in line_items:
+		if _is_heroic_stack_line_item(line_item):
+			heroic_items.append(line_item)
+		else:
+			remaining_items.append(line_item)
+
+	if heroic_items.is_empty():
+		return line_items
+
+	if not _try_add_heroic_items_to_score_stack(ball_id, ball_label, heroic_items):
+		_add_heroic_fallback_score_label(ball_id, ball_label, heroic_items)
+
+	return remaining_items
+
+
+func _route_legendary_line_items_to_score_stack(
+	ball_id: int,
+	ball_label: String,
+	line_items: Array[Dictionary]
+) -> Array[Dictionary]:
+	var legendary_items: Array[Dictionary] = []
+	var remaining_items: Array[Dictionary] = []
+	for line_item in line_items:
+		if _is_legendary_stack_line_item(line_item):
+			legendary_items.append(line_item)
+		else:
+			remaining_items.append(line_item)
+
+	if legendary_items.is_empty():
+		return line_items
+
+	if not _try_add_legendary_items_to_score_stack(ball_id, ball_label, legendary_items):
+		_add_legendary_fallback_score_label(ball_id, ball_label, legendary_items)
+
+	return remaining_items
+
+
+func _try_add_foundational_items_to_score_stack(
+	ball_id: int,
+	ball_label: String,
+	foundational_items: Array[Dictionary]
+) -> bool:
+	var stack_key: String = _get_foundational_stack_key(ball_id)
+	if stack_key.is_empty():
+		return false
+
+	var stack: ScoreStack = _get_active_score_stack(stack_key)
+	var amount: int = _sum_line_items(foundational_items)
+	if amount <= 0:
+		return false
+
+	var did_update_existing_stack: bool = stack != null
+	if stack == null:
+		stack = _create_foundational_score_stack(ball_id, stack_key)
+		if stack == null:
+			return false
+		stack.total = amount
+		stack.latest_summary = _make_foundational_stack_summary(foundational_items)
+		_update_score_stack_label(stack)
+		_play_score_stack_pop_in(stack)
+	else:
+		stack.total += amount
+		stack.latest_summary = _make_foundational_stack_summary(foundational_items)
+		stack.removal_started = false
+		_update_score_stack_label(stack)
+		_play_score_stack_update_pulse(stack)
+		foundational_score_stack_coalesces += 1
+		foundational_score_stack_labels_avoided += maxi(foundational_items.size(), 1)
+
+	if not did_update_existing_stack and foundational_items.size() > 1:
+		foundational_score_stack_labels_avoided += foundational_items.size() - 1
+
+	foundational_stack_path_count += 1
+	_record_score_popup_route("foundational_stack", ball_label, foundational_items, amount)
+	_print_popup_line_items_added(ball_label, foundational_items)
+	_refresh_score_stack_lane_state(stack)
+	return true
+
+
+func _try_add_skilled_items_to_score_stack(
+	ball_id: int,
+	ball_label: String,
+	skilled_items: Array[Dictionary]
+) -> bool:
+	var stack_key: String = _get_skilled_stack_key(ball_id)
+	if stack_key.is_empty():
+		return false
+
+	var stack: ScoreStack = _get_active_score_stack(stack_key)
+	var amount: int = _sum_line_items(skilled_items)
+	if amount <= 0:
+		return false
+
+	var did_update_existing_stack: bool = stack != null
+	if stack == null:
+		stack = _create_skilled_score_stack(ball_id, stack_key)
+		if stack == null:
+			return false
+		stack.total = amount
+		stack.latest_summary = _make_score_stack_summary(skilled_items, "Skilled")
+		_update_score_stack_label(stack)
+		_play_score_stack_pop_in(stack)
+	else:
+		stack.total += amount
+		stack.latest_summary = _make_score_stack_summary(skilled_items, "Skilled")
+		stack.removal_started = false
+		_update_score_stack_label(stack)
+		_play_score_stack_update_pulse(stack)
+		skilled_score_stack_coalesces += 1
+		skilled_score_stack_labels_avoided += maxi(skilled_items.size(), 1)
+
+	if not did_update_existing_stack and skilled_items.size() > 1:
+		skilled_score_stack_labels_avoided += skilled_items.size() - 1
+
+	skilled_stack_path_count += 1
+	skilled_special_popups_avoided += 1
+	_record_score_popup_route("skilled_stack", ball_label, skilled_items, amount)
+	_print_popup_line_items_added(ball_label, skilled_items)
+	_refresh_score_stack_lane_state(stack)
+	return true
+
+
+func _try_add_heroic_items_to_score_stack(
+	ball_id: int,
+	ball_label: String,
+	heroic_items: Array[Dictionary]
+) -> bool:
+	var stack_key: String = _get_heroic_stack_key(ball_id)
+	if stack_key.is_empty():
+		return false
+
+	var stack: ScoreStack = _get_active_score_stack(stack_key)
+	var amount: int = _sum_line_items(heroic_items)
+	if amount <= 0:
+		return false
+
+	var did_update_existing_stack: bool = stack != null
+	if stack == null:
+		stack = _create_heroic_score_stack(ball_id, stack_key)
+		if stack == null:
+			return false
+		stack.total = amount
+		stack.latest_summary = _make_score_stack_summary(heroic_items, "Heroic")
+		_update_score_stack_label(stack)
+		_play_score_stack_pop_in(stack)
+	else:
+		stack.total += amount
+		stack.latest_summary = _make_score_stack_summary(heroic_items, "Heroic")
+		stack.removal_started = false
+		_update_score_stack_label(stack)
+		_play_score_stack_update_pulse(stack)
+		heroic_score_stack_coalesces += 1
+		heroic_score_stack_labels_avoided += maxi(heroic_items.size(), 1)
+
+	if not did_update_existing_stack and heroic_items.size() > 1:
+		heroic_score_stack_labels_avoided += heroic_items.size() - 1
+
+	heroic_stack_path_count += 1
+	heroic_special_popups_avoided += 1
+	_record_score_popup_route("heroic_stack", ball_label, heroic_items, amount)
+	_print_popup_line_items_added(ball_label, heroic_items)
+	_refresh_score_stack_lane_state(stack)
+	return true
+
+
+func _try_add_legendary_items_to_score_stack(
+	ball_id: int,
+	ball_label: String,
+	legendary_items: Array[Dictionary]
+) -> bool:
+	var stack_key: String = _get_legendary_stack_key(ball_id)
+	if stack_key.is_empty():
+		return false
+
+	var stack: ScoreStack = _get_active_score_stack(stack_key)
+	var amount: int = _sum_line_items(legendary_items)
+	if amount <= 0:
+		return false
+
+	var did_update_existing_stack: bool = stack != null
+	if stack == null:
+		stack = _create_legendary_score_stack(ball_id, stack_key)
+		if stack == null:
+			return false
+		stack.total = amount
+		stack.latest_summary = _make_score_stack_summary(legendary_items, "Legendary")
+		_update_score_stack_label(stack)
+		_play_score_stack_pop_in(stack)
+	else:
+		stack.total += amount
+		stack.latest_summary = _make_score_stack_summary(legendary_items, "Legendary")
+		stack.removal_started = false
+		_update_score_stack_label(stack)
+		_play_score_stack_update_pulse(stack)
+		legendary_score_stack_coalesces += 1
+		legendary_score_stack_labels_avoided += maxi(legendary_items.size(), 1)
+
+	if not did_update_existing_stack and legendary_items.size() > 1:
+		legendary_score_stack_labels_avoided += legendary_items.size() - 1
+
+	legendary_stack_path_count += 1
+	legendary_special_popups_avoided += 1
+	_record_score_popup_route("legendary_stack", ball_label, legendary_items, amount)
+	_print_popup_line_items_added(ball_label, legendary_items)
+	_refresh_score_stack_lane_state(stack)
+	return true
+
+
+func _is_foundational_stack_line_item(line_item: Dictionary) -> bool:
+	if int(line_item.get("amount", 0)) <= 0:
+		return false
+	if str(line_item.get("label", "")) == "Sink":
+		return true
+
+	var event_type: String = str(line_item.get("event_type", ""))
+	return FOUNDATIONAL_EVENT_TYPES.has(event_type)
+
+
+func _is_skilled_stack_line_item(line_item: Dictionary) -> bool:
+	if int(line_item.get("amount", 0)) <= 0:
+		return false
+
+	var event_type: String = str(line_item.get("event_type", ""))
+	return SKILLED_EVENT_TYPES.has(event_type)
+
+
+func _is_heroic_stack_line_item(line_item: Dictionary) -> bool:
+	if int(line_item.get("amount", 0)) <= 0:
+		return false
+
+	var event_type: String = str(line_item.get("event_type", ""))
+	return HEROIC_EVENT_TYPES.has(event_type)
+
+
+func _is_legendary_stack_line_item(line_item: Dictionary) -> bool:
+	if int(line_item.get("amount", 0)) <= 0:
+		return false
+
+	var event_type: String = str(line_item.get("event_type", ""))
+	return LEGENDARY_EVENT_TYPES.has(event_type)
+
+
+func _make_foundational_stack_summary(foundational_items: Array[Dictionary]) -> String:
+	return _make_score_stack_summary(foundational_items, "Sink")
+
+func _make_score_stack_summary(line_items: Array[Dictionary], fallback_text: String) -> String:
+	var contributors: Array[String] = []
+	for line_item in line_items:
+		var event_type: String = str(line_item.get("event_type", ""))
+		var label_text: String = _get_event_reward_label(event_type) if not event_type.is_empty() else str(line_item.get("label", ""))
+		if label_text.is_empty() or label_text == "Sink":
+			continue
+		if contributors.has(label_text):
+			continue
+		contributors.append(label_text)
+
+	if contributors.is_empty():
+		return fallback_text
+	return " / ".join(contributors)
+
+
+func _get_foundational_stack_key(ball_id: int) -> String:
+	var context: Dictionary = sink_contexts_by_ball.get(ball_id, {})
+	var pocket_position: Vector2 = context.get("pocket_position", Vector2.ZERO)
+	if pocket_position != Vector2.ZERO:
+		return _make_foundational_position_stack_key(pocket_position)
+
+	var sink_position: Vector2 = context.get("sink_position", Vector2.ZERO)
+	var nearest_pocket_position: Vector2 = _get_nearest_foundational_pocket_position(sink_position)
+	if nearest_pocket_position != Vector2.ZERO:
+		return _make_foundational_position_stack_key(nearest_pocket_position)
+
+	return _make_foundational_fallback_stack_key(ball_id)
+
+
+func _get_skilled_stack_key(ball_id: int) -> String:
+	var context: Dictionary = sink_contexts_by_ball.get(ball_id, {})
+	var pocket_position: Vector2 = context.get("pocket_position", Vector2.ZERO)
+	if pocket_position != Vector2.ZERO:
+		return _make_score_stack_position_key(SKILLED_STACK_CLASS_ID, pocket_position)
+
+	var sink_position: Vector2 = context.get("sink_position", Vector2.ZERO)
+	var nearest_pocket_position: Vector2 = _get_nearest_foundational_pocket_position(sink_position)
+	if nearest_pocket_position != Vector2.ZERO:
+		return _make_score_stack_position_key(SKILLED_STACK_CLASS_ID, nearest_pocket_position)
+
+	return _make_score_stack_fallback_key(SKILLED_STACK_CLASS_ID, ball_id)
+
+
+func _get_heroic_stack_key(ball_id: int) -> String:
+	var context: Dictionary = sink_contexts_by_ball.get(ball_id, {})
+	var pocket_position: Vector2 = context.get("pocket_position", Vector2.ZERO)
+	if pocket_position != Vector2.ZERO:
+		return _make_score_stack_position_key(HEROIC_STACK_CLASS_ID, pocket_position)
+
+	var sink_position: Vector2 = context.get("sink_position", Vector2.ZERO)
+	var nearest_pocket_position: Vector2 = _get_nearest_foundational_pocket_position(sink_position)
+	if nearest_pocket_position != Vector2.ZERO:
+		return _make_score_stack_position_key(HEROIC_STACK_CLASS_ID, nearest_pocket_position)
+
+	return _make_score_stack_fallback_key(HEROIC_STACK_CLASS_ID, ball_id)
+
+
+func _get_legendary_stack_key(ball_id: int) -> String:
+	var context: Dictionary = sink_contexts_by_ball.get(ball_id, {})
+	var pocket_position: Vector2 = context.get("pocket_position", Vector2.ZERO)
+	if pocket_position != Vector2.ZERO:
+		return _make_score_stack_position_key(LEGENDARY_STACK_CLASS_ID, pocket_position)
+
+	var sink_position: Vector2 = context.get("sink_position", Vector2.ZERO)
+	var nearest_pocket_position: Vector2 = _get_nearest_foundational_pocket_position(sink_position)
+	if nearest_pocket_position != Vector2.ZERO:
+		return _make_score_stack_position_key(LEGENDARY_STACK_CLASS_ID, nearest_pocket_position)
+
+	return _make_score_stack_fallback_key(LEGENDARY_STACK_CLASS_ID, ball_id)
+
+
+func _make_foundational_position_stack_key(pocket_position: Vector2) -> String:
+	return _make_score_stack_position_key(FOUNDATIONAL_STACK_CLASS_ID, pocket_position)
+
+
+func _make_score_stack_position_key(stack_class_id: String, pocket_position: Vector2) -> String:
+	var pocket_x: int = int(pocket_position.x + 0.5)
+	var pocket_y: int = int(pocket_position.y + 0.5)
+	return "%s:%s:%s" % [stack_class_id, pocket_x, pocket_y]
+
+
+func _make_foundational_fallback_stack_key(ball_id: int) -> String:
+	return _make_score_stack_fallback_key(FOUNDATIONAL_STACK_CLASS_ID, ball_id)
+
+
+func _make_score_stack_fallback_key(stack_class_id: String, ball_id: int) -> String:
+	return "%s:fallback:%s" % [stack_class_id, ball_id]
+
+
+func _get_nearest_foundational_pocket_position(anchor_position: Vector2) -> Vector2:
+	if table == null or anchor_position == Vector2.ZERO:
+		return Vector2.ZERO
+
+	var pocket_positions: Array[Vector2] = table.pocket_system.get_pocket_positions()
+	var nearest_position: Vector2 = Vector2.ZERO
+	var nearest_distance_squared: float = INF
+	for pocket_position in pocket_positions:
+		var distance_squared: float = anchor_position.distance_squared_to(pocket_position)
+		if distance_squared < nearest_distance_squared:
+			nearest_distance_squared = distance_squared
+			nearest_position = pocket_position
+
+	var max_distance_squared: float = FOUNDATIONAL_STACK_NEAREST_POCKET_MAX_DISTANCE * FOUNDATIONAL_STACK_NEAREST_POCKET_MAX_DISTANCE
+	if nearest_distance_squared > max_distance_squared:
+		return Vector2.ZERO
+	return nearest_position
+
+
+func _get_active_score_stack(stack_key: String) -> ScoreStack:
+	var stack: ScoreStack = score_stacks_by_key.get(stack_key) as ScoreStack
+	if stack == null or stack.removal_started:
+		return null
+	if not is_instance_valid(stack.label):
+		return null
+	return stack
+
+
+func _create_foundational_score_stack(ball_id: int, stack_key: String) -> ScoreStack:
+	return _create_score_stack(ball_id, stack_key, FOUNDATIONAL_STACK_CLASS_ID)
+
+
+func _create_skilled_score_stack(ball_id: int, stack_key: String) -> ScoreStack:
+	return _create_score_stack(ball_id, stack_key, SKILLED_STACK_CLASS_ID)
+
+
+func _create_heroic_score_stack(ball_id: int, stack_key: String) -> ScoreStack:
+	return _create_score_stack(ball_id, stack_key, HEROIC_STACK_CLASS_ID)
+
+
+func _create_legendary_score_stack(ball_id: int, stack_key: String) -> ScoreStack:
+	return _create_score_stack(ball_id, stack_key, LEGENDARY_STACK_CLASS_ID)
+
+
+func _create_score_stack(ball_id: int, stack_key: String, stack_class_id: String) -> ScoreStack:
+	var stack: ScoreStack = ScoreStack.new()
+	stack.stack_key = stack_key
+	stack.stack_class_id = stack_class_id
+	stack.inward_direction = _get_popup_inward_direction(ball_id)
+	stack.anchor_position = _get_popup_anchor_position(ball_id)
+	stack.pocket_radius = _get_popup_pocket_radius(ball_id)
+	stack.is_corner_pocket = _is_corner_pocket_position(stack.anchor_position)
+	stack.outward_direction = _get_popup_outward_direction(ball_id)
+	stack.tangent_direction = _get_popup_tangent_direction(ball_id, stack.is_corner_pocket)
+	stack.line_rotation = stack.tangent_direction.angle()
+	stack.hold_timer = _get_score_stack_hold_time(stack)
+	stack.label = _make_score_stack_label("+0", stack.stack_class_id)
+	stack.subtitle_label = _make_score_stack_subtitle_label("", stack.stack_class_id)
+	table.add_child(stack.label)
+	table.add_child(stack.subtitle_label)
+	_place_score_label_below_gameplay(stack.label)
+	_place_score_label_below_gameplay(stack.subtitle_label)
+	score_stacks_by_key[stack_key] = stack
+	active_score_stacks.append(stack)
+	return stack
+
+
+func _get_score_stack_hold_time(stack: ScoreStack) -> float:
+	if stack != null and stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return LEGENDARY_STACK_HOLD_TIME
+	if stack != null and stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		return HEROIC_STACK_HOLD_TIME
+	if stack != null and stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+		return SKILLED_STACK_HOLD_TIME
+	return FOUNDATIONAL_STACK_HOLD_TIME
+
+
+func _get_score_stack_fade_time(stack: ScoreStack) -> float:
+	if stack != null and stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return LEGENDARY_STACK_FADE_TIME
+	if stack != null and stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		return HEROIC_STACK_FADE_TIME
+	if stack != null and stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+		return SKILLED_STACK_FADE_TIME
+	return FOUNDATIONAL_STACK_FADE_TIME
+
+
+func _get_score_stack_subtitle_gap(stack: ScoreStack) -> float:
+	if stack != null and stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return LEGENDARY_STACK_SUBTITLE_GAP
+	if stack != null and stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		return HEROIC_STACK_SUBTITLE_GAP
+	if stack != null and stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+		return SKILLED_STACK_SUBTITLE_GAP
+	return FOUNDATIONAL_STACK_SUBTITLE_GAP
+
+
+func _get_score_stack_update_pulse_time(stack: ScoreStack) -> float:
+	if stack != null and stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return LEGENDARY_STACK_UPDATE_PULSE_TIME
+	if stack != null and stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		return HEROIC_STACK_UPDATE_PULSE_TIME
+	if stack != null and stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+		return SKILLED_STACK_UPDATE_PULSE_TIME
+	return FOUNDATIONAL_STACK_UPDATE_PULSE_TIME
+
+
+func _get_score_stack_update_pulse_scale(stack: ScoreStack) -> Vector2:
+	if stack != null and stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return LEGENDARY_STACK_UPDATE_PULSE_SCALE
+	if stack != null and stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		return HEROIC_STACK_UPDATE_PULSE_SCALE
+	if stack != null and stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+		return SKILLED_STACK_UPDATE_PULSE_SCALE
+	return FOUNDATIONAL_STACK_UPDATE_PULSE_SCALE
+
+
+func _get_score_stack_pop_scale(stack: ScoreStack) -> Vector2:
+	if stack != null and stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return LEGENDARY_STACK_POP_SCALE
+	if stack != null and stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		return HEROIC_STACK_POP_SCALE
+	if stack != null and stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+		return SKILLED_STACK_POP_SCALE
+	return SCORE_POPUP_POP_SCALE
+
+
+func _get_score_stack_flash_color(stack: ScoreStack) -> Color:
+	if stack != null and stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return LEGENDARY_STACK_POP_FLASH_COLOR
+	if stack != null and stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		return HEROIC_STACK_POP_FLASH_COLOR
+	if stack != null and stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+		return SKILLED_STACK_POP_FLASH_COLOR
+	return SCORE_LABEL_POP_FLASH_COLOR
+
+
+func _get_score_stack_subtitle_char_width(stack: ScoreStack) -> float:
+	if stack != null and stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return 9.6
+	if stack != null and stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		return 9.2
+	if stack != null and stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+		return 8.8
+	return 8.0
+
+
+func _get_score_stack_anchor_offset(stack: ScoreStack) -> Vector2:
+	if stack == null:
+		return Vector2.ZERO
+
+	var outward_offset: float = stack.retreat_offset
+	if stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		outward_offset += LEGENDARY_STACK_OUTWARD_OFFSET
+	elif stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		outward_offset += HEROIC_STACK_OUTWARD_OFFSET
+	elif stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+		outward_offset += SKILLED_STACK_OUTWARD_OFFSET
+	return stack.outward_direction * outward_offset + stack.tangent_direction * stack.lane_tangent_offset
+
+
+func _get_score_stack_subtitle_offset(stack: ScoreStack) -> Vector2:
+	if _is_center_pocket_score_stack(stack):
+		var center_gap: float = _get_score_stack_subtitle_gap(stack) * SCORE_STACK_CENTER_POCKET_SUBTITLE_GAP_SCALE
+		return _get_score_stack_subtitle_direction(stack) * center_gap
+	if _is_bottom_pocket_score_stack(stack):
+		return stack.outward_direction * (_get_score_stack_subtitle_gap(stack) + SCORE_STACK_BOTTOM_POCKET_SUBTITLE_EXTRA_GAP)
+	return _get_score_stack_subtitle_direction(stack) * _get_score_stack_subtitle_gap(stack)
+
+
+func _get_score_stack_subtitle_direction(stack: ScoreStack) -> Vector2:
+	if _is_bottom_pocket_score_stack(stack):
+		return stack.outward_direction
+	return stack.inward_direction
+
+
+func _is_center_pocket_score_stack(stack: ScoreStack) -> bool:
+	return stack != null and not stack.is_corner_pocket
+
+
+func _is_bottom_pocket_score_stack(stack: ScoreStack) -> bool:
+	if stack == null or table == null:
+		return false
+
+	return stack.anchor_position.y > table.playfield_rect.get_center().y
+
+
+func _get_score_stack_tier_priority(stack: ScoreStack) -> int:
+	if stack == null:
+		return -1
+	if stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return 3
+	if stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		return 2
+	if stack.stack_class_id == SKILLED_STACK_CLASS_ID:
+		return 1
+	return 0
+
+
+# Lane pressure is event-time only: stack creation/update checks nearby active
+# stacks once, then stores simple offsets/hold-time changes for normal updates.
+func _refresh_score_stack_lane_state(stack: ScoreStack) -> void:
+	if stack == null:
+		return
+
+	stack.hold_timer = _get_score_stack_hold_time(stack)
+	stack.retreat_target = 0.0
+	_apply_score_stack_lane_pressure(stack)
+	_update_score_stack_label_layout(stack)
+
+
+func _apply_score_stack_lane_pressure(stack: ScoreStack) -> void:
+	if stack == null or stack.removal_started:
+		return
+
+	var stack_priority: int = _get_score_stack_tier_priority(stack)
+	var conflict_index: int = 0
+	for stack_value in active_score_stacks:
+		var other_stack: ScoreStack = stack_value as ScoreStack
+		if _should_skip_score_stack_lane_check(stack, other_stack):
+			continue
+		if not _score_stacks_are_nearby(stack, other_stack):
+			continue
+
+		conflict_index += 1
+		score_stack_lane_conflicts += 1
+		var other_priority: int = _get_score_stack_tier_priority(other_stack)
+		if stack_priority > other_priority:
+			_request_score_stack_yield(other_stack, stack)
+		elif other_priority > stack_priority:
+			_request_score_stack_yield(stack, other_stack)
+		else:
+			_separate_peer_score_stack_lane(stack, other_stack, conflict_index)
+
+
+func _should_skip_score_stack_lane_check(stack: ScoreStack, other_stack: ScoreStack) -> bool:
+	if other_stack == null or other_stack == stack:
+		return true
+	if other_stack.removal_started:
+		return true
+	return not is_instance_valid(other_stack.label)
+
+
+func _score_stacks_are_nearby(stack: ScoreStack, other_stack: ScoreStack) -> bool:
+	var max_distance_squared: float = SCORE_STACK_LANE_CONFLICT_DISTANCE * SCORE_STACK_LANE_CONFLICT_DISTANCE
+	return stack.anchor_position.distance_squared_to(other_stack.anchor_position) <= max_distance_squared
+
+
+func _request_score_stack_yield(yielding_stack: ScoreStack, dominant_stack: ScoreStack) -> void:
+	var yielding_priority: int = _get_score_stack_tier_priority(yielding_stack)
+	var dominant_priority: int = _get_score_stack_tier_priority(dominant_stack)
+	if yielding_priority >= dominant_priority or yielding_priority >= 3:
+		return
+
+	score_stack_yields += 1
+	var target_hold: float = _get_score_stack_yield_hold_time(yielding_priority, dominant_priority)
+	if yielding_stack.hold_timer > target_hold:
+		yielding_stack.hold_timer = target_hold
+		score_stack_early_fades += 1
+		score_stack_replacements += 1
+
+	var retreat_distance: float = _get_score_stack_yield_retreat_distance(yielding_priority, dominant_priority)
+	yielding_stack.retreat_target = maxf(yielding_stack.retreat_target, retreat_distance)
+	_update_score_stack_label_layout(yielding_stack)
+
+
+func _get_score_stack_yield_hold_time(yielding_priority: int, dominant_priority: int) -> float:
+	if yielding_priority == 0:
+		return 0.22 if dominant_priority >= 2 else 0.45
+	if yielding_priority == 1:
+		return 0.34 if dominant_priority >= 3 else 0.58
+	if yielding_priority == 2 and dominant_priority >= 3:
+		return 0.78
+	return 0.6
+
+
+func _get_score_stack_yield_retreat_distance(yielding_priority: int, dominant_priority: int) -> float:
+	if yielding_priority == 0:
+		return 24.0 if dominant_priority >= 2 else 16.0
+	if yielding_priority == 1:
+		return 18.0 if dominant_priority >= 3 else 12.0
+	if yielding_priority == 2:
+		return 10.0
+	return 0.0
+
+
+func _separate_peer_score_stack_lane(stack: ScoreStack, other_stack: ScoreStack, conflict_index: int) -> void:
+	var lane_direction: float = _get_score_stack_tangent_separation_sign(stack, other_stack)
+	var target_offset: float = lane_direction * SCORE_STACK_LANE_SIDE_STEP * float(conflict_index)
+	if absf(stack.lane_tangent_offset) >= absf(target_offset):
+		return
+
+	stack.lane_tangent_offset = target_offset
+	_update_score_stack_label_layout(stack)
+
+
+func _get_score_stack_tangent_separation_sign(stack: ScoreStack, other_stack: ScoreStack) -> float:
+	var tangent_distance: float = (stack.anchor_position - other_stack.anchor_position).dot(stack.tangent_direction)
+	if absf(tangent_distance) > 0.5:
+		return 1.0 if tangent_distance >= 0.0 else -1.0
+
+	var stack_index: int = active_score_stacks.find(stack)
+	return 1.0 if stack_index % 2 == 0 else -1.0
+
+
+func _add_foundational_fallback_score_label(
+	ball_id: int,
+	ball_label: String,
+	foundational_items: Array[Dictionary]
+) -> void:
+	var amount: int = _sum_line_items(foundational_items)
+	if amount <= 0:
+		return
+
+	var stack_key: String = _make_foundational_fallback_stack_key(ball_id)
+	var stack: ScoreStack = _get_active_score_stack(stack_key)
+	if stack == null:
+		stack = _create_foundational_score_stack(ball_id, stack_key)
+		if stack == null:
+			return
+		stack.total = amount
+		stack.latest_summary = _make_foundational_stack_summary(foundational_items)
+		_update_score_stack_label(stack)
+		_play_score_stack_pop_in(stack)
+	else:
+		stack.total += amount
+		stack.latest_summary = _make_foundational_stack_summary(foundational_items)
+		_update_score_stack_label(stack)
+		_play_score_stack_update_pulse(stack)
+		foundational_score_stack_coalesces += 1
+
+	foundational_fallback_stack_path_count += 1
+	foundational_score_stack_labels_avoided += foundational_items.size()
+	_record_score_popup_route("foundational_fallback", ball_label, foundational_items, amount)
+	_print_popup_line_items_added(ball_label, foundational_items)
+	_refresh_score_stack_lane_state(stack)
+
+
+func _add_skilled_fallback_score_label(
+	ball_id: int,
+	ball_label: String,
+	skilled_items: Array[Dictionary]
+) -> void:
+	var amount: int = _sum_line_items(skilled_items)
+	if amount <= 0:
+		return
+
+	var stack_key: String = _make_score_stack_fallback_key(SKILLED_STACK_CLASS_ID, ball_id)
+	var stack: ScoreStack = _get_active_score_stack(stack_key)
+	if stack == null:
+		stack = _create_skilled_score_stack(ball_id, stack_key)
+		if stack == null:
+			return
+		stack.total = amount
+		stack.latest_summary = _make_score_stack_summary(skilled_items, "Skilled")
+		_update_score_stack_label(stack)
+		_play_score_stack_pop_in(stack)
+	else:
+		stack.total += amount
+		stack.latest_summary = _make_score_stack_summary(skilled_items, "Skilled")
+		_update_score_stack_label(stack)
+		_play_score_stack_update_pulse(stack)
+		skilled_score_stack_coalesces += 1
+
+	skilled_stack_path_count += 1
+	skilled_special_popups_avoided += 1
+	skilled_score_stack_labels_avoided += skilled_items.size()
+	_record_score_popup_route("skilled_fallback", ball_label, skilled_items, amount)
+	_print_popup_line_items_added(ball_label, skilled_items)
+	_refresh_score_stack_lane_state(stack)
+
+
+func _add_heroic_fallback_score_label(
+	ball_id: int,
+	ball_label: String,
+	heroic_items: Array[Dictionary]
+) -> void:
+	var amount: int = _sum_line_items(heroic_items)
+	if amount <= 0:
+		return
+
+	var stack_key: String = _make_score_stack_fallback_key(HEROIC_STACK_CLASS_ID, ball_id)
+	var stack: ScoreStack = _get_active_score_stack(stack_key)
+	if stack == null:
+		stack = _create_heroic_score_stack(ball_id, stack_key)
+		if stack == null:
+			return
+		stack.total = amount
+		stack.latest_summary = _make_score_stack_summary(heroic_items, "Heroic")
+		_update_score_stack_label(stack)
+		_play_score_stack_pop_in(stack)
+	else:
+		stack.total += amount
+		stack.latest_summary = _make_score_stack_summary(heroic_items, "Heroic")
+		_update_score_stack_label(stack)
+		_play_score_stack_update_pulse(stack)
+		heroic_score_stack_coalesces += 1
+
+	heroic_stack_path_count += 1
+	heroic_special_popups_avoided += 1
+	heroic_score_stack_labels_avoided += heroic_items.size()
+	_record_score_popup_route("heroic_fallback", ball_label, heroic_items, amount)
+	_print_popup_line_items_added(ball_label, heroic_items)
+	_refresh_score_stack_lane_state(stack)
+
+
+func _add_legendary_fallback_score_label(
+	ball_id: int,
+	ball_label: String,
+	legendary_items: Array[Dictionary]
+) -> void:
+	var amount: int = _sum_line_items(legendary_items)
+	if amount <= 0:
+		return
+
+	var stack_key: String = _make_score_stack_fallback_key(LEGENDARY_STACK_CLASS_ID, ball_id)
+	var stack: ScoreStack = _get_active_score_stack(stack_key)
+	if stack == null:
+		stack = _create_legendary_score_stack(ball_id, stack_key)
+		if stack == null:
+			return
+		stack.total = amount
+		stack.latest_summary = _make_score_stack_summary(legendary_items, "Legendary")
+		_update_score_stack_label(stack)
+		_play_score_stack_pop_in(stack)
+	else:
+		stack.total += amount
+		stack.latest_summary = _make_score_stack_summary(legendary_items, "Legendary")
+		_update_score_stack_label(stack)
+		_play_score_stack_update_pulse(stack)
+		legendary_score_stack_coalesces += 1
+
+	legendary_stack_path_count += 1
+	legendary_special_popups_avoided += 1
+	legendary_score_stack_labels_avoided += legendary_items.size()
+	_record_score_popup_route("legendary_fallback", ball_label, legendary_items, amount)
+	_print_popup_line_items_added(ball_label, legendary_items)
+	_refresh_score_stack_lane_state(stack)
+
+
 func _print_popup_line_items_added(ball_label: String, line_items: Array[Dictionary]) -> void:
 	if not DEBUG_SCORE_BREAKDOWNS:
 		return
 
 	for line_item in line_items:
 		print("Popup add: %s -> %s +%s" % [ball_label, line_item["label"], line_item["amount"]])
+
+
+func _record_score_popup_route(
+	route_name: String,
+	ball_label: String,
+	line_items: Array[Dictionary],
+	amount: int
+) -> void:
+	last_score_popup_route = "%s +%s %s" % [route_name, amount, _make_score_route_summary(line_items)]
+	if route_name == "special_popup":
+		special_popup_path_count += 1
+	if DEBUG_SCORE_POPUP_ROUTING_LOGS:
+		print("Score route: %s -> %s" % [ball_label, last_score_popup_route])
+
+
+func _make_score_route_summary(line_items: Array[Dictionary]) -> String:
+	var labels: Array[String] = []
+	for line_item in line_items:
+		var label_text: String = str(line_item.get("label", ""))
+		if not label_text.is_empty():
+			labels.append(label_text)
+	if labels.is_empty():
+		return "none"
+	return " / ".join(labels)
 
 
 func _get_or_create_score_popup(ball_id: int) -> ScorePopup:
@@ -446,6 +1618,16 @@ func _update_score_popup(popup: ScorePopup, delta: float) -> void:
 	popup.hold_timer -= delta
 	if popup.hold_timer <= 0.0:
 		_fade_out_score_popup(popup)
+
+
+func _update_score_stack(stack: ScoreStack, delta: float) -> void:
+	if stack == null or stack.removal_started:
+		return
+
+	_update_score_stack_drift(stack, delta)
+	stack.hold_timer -= delta
+	if stack.hold_timer <= 0.0:
+		_fade_out_score_stack(stack)
 
 
 func _reveal_next_score_item(popup: ScorePopup) -> void:
@@ -564,6 +1746,159 @@ func _make_score_segment_label(text: String) -> Label:
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_apply_score_segment_theme(label)
+	label.modulate = SCORE_LABEL_HIDDEN_MODULATE
+	return label
+
+
+func _make_score_stack_label(text: String, stack_class_id: String) -> Label:
+	if stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return _make_legendary_score_stack_label(text)
+	if stack_class_id == HEROIC_STACK_CLASS_ID:
+		return _make_heroic_score_stack_label(text)
+	if stack_class_id == SKILLED_STACK_CLASS_ID:
+		return _make_skilled_score_stack_label(text)
+	return _make_score_segment_label(text)
+
+
+func _make_skilled_score_stack_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.scale = SCORE_POPUP_START_SCALE
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", SKILLED_STACK_NUMBER_FONT_SIZE)
+	label.add_theme_color_override("font_color", SKILLED_STACK_NUMBER_COLOR)
+	label.add_theme_color_override("font_shadow_color", SKILLED_STACK_SHADOW_COLOR)
+	label.add_theme_color_override("font_outline_color", SKILLED_STACK_OUTLINE_COLOR)
+	label.add_theme_constant_override("shadow_offset_x", 2)
+	label.add_theme_constant_override("shadow_offset_y", 2)
+	label.add_theme_constant_override("outline_size", 6)
+	label.modulate = SCORE_LABEL_HIDDEN_MODULATE
+	return label
+
+
+func _make_heroic_score_stack_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.scale = SCORE_POPUP_START_SCALE
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", HEROIC_STACK_NUMBER_FONT_SIZE)
+	label.add_theme_color_override("font_color", HEROIC_STACK_NUMBER_COLOR)
+	label.add_theme_color_override("font_shadow_color", HEROIC_STACK_SHADOW_COLOR)
+	label.add_theme_color_override("font_outline_color", HEROIC_STACK_OUTLINE_COLOR)
+	label.add_theme_constant_override("shadow_offset_x", 2)
+	label.add_theme_constant_override("shadow_offset_y", 2)
+	label.add_theme_constant_override("outline_size", 7)
+	label.modulate = SCORE_LABEL_HIDDEN_MODULATE
+	return label
+
+
+func _make_legendary_score_stack_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.scale = SCORE_POPUP_START_SCALE
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", LEGENDARY_STACK_NUMBER_FONT_SIZE)
+	label.add_theme_color_override("font_color", LEGENDARY_STACK_NUMBER_COLOR)
+	label.add_theme_color_override("font_shadow_color", LEGENDARY_STACK_SHADOW_COLOR)
+	label.add_theme_color_override("font_outline_color", LEGENDARY_STACK_OUTLINE_COLOR)
+	label.add_theme_constant_override("shadow_offset_x", 2)
+	label.add_theme_constant_override("shadow_offset_y", 2)
+	label.add_theme_constant_override("outline_size", 8)
+	label.modulate = SCORE_LABEL_HIDDEN_MODULATE
+	return label
+
+
+func _make_score_stack_subtitle_label(text: String, stack_class_id: String) -> Label:
+	if stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		return _make_legendary_stack_subtitle_label(text)
+	if stack_class_id == HEROIC_STACK_CLASS_ID:
+		return _make_heroic_stack_subtitle_label(text)
+	if stack_class_id == SKILLED_STACK_CLASS_ID:
+		return _make_skilled_stack_subtitle_label(text)
+	return _make_foundational_stack_subtitle_label(text)
+
+
+func _make_foundational_stack_subtitle_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.scale = SCORE_POPUP_START_SCALE
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", FOUNDATIONAL_STACK_SUBTITLE_FONT_SIZE)
+	label.add_theme_color_override("font_color", FOUNDATIONAL_STACK_SUBTITLE_COLOR)
+	label.add_theme_color_override("font_shadow_color", Color(0.04, 0.02, 0.0, 0.74))
+	label.add_theme_color_override("font_outline_color", Color(0.16, 0.08, 0.02, 0.90))
+	label.add_theme_constant_override("shadow_offset_x", 1)
+	label.add_theme_constant_override("shadow_offset_y", 1)
+	label.add_theme_constant_override("outline_size", 2)
+	label.modulate = SCORE_LABEL_HIDDEN_MODULATE
+	return label
+
+
+func _make_skilled_stack_subtitle_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.scale = SCORE_POPUP_START_SCALE
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", SKILLED_STACK_SUBTITLE_FONT_SIZE)
+	label.add_theme_color_override("font_color", SKILLED_STACK_SUBTITLE_COLOR)
+	label.add_theme_color_override("font_shadow_color", SKILLED_STACK_SHADOW_COLOR)
+	label.add_theme_color_override("font_outline_color", SKILLED_STACK_OUTLINE_COLOR)
+	label.add_theme_constant_override("shadow_offset_x", 1)
+	label.add_theme_constant_override("shadow_offset_y", 1)
+	label.add_theme_constant_override("outline_size", 3)
+	label.modulate = SCORE_LABEL_HIDDEN_MODULATE
+	return label
+
+
+func _make_heroic_stack_subtitle_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.scale = SCORE_POPUP_START_SCALE
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", HEROIC_STACK_SUBTITLE_FONT_SIZE)
+	label.add_theme_color_override("font_color", HEROIC_STACK_SUBTITLE_COLOR)
+	label.add_theme_color_override("font_shadow_color", HEROIC_STACK_SHADOW_COLOR)
+	label.add_theme_color_override("font_outline_color", HEROIC_STACK_OUTLINE_COLOR)
+	label.add_theme_constant_override("shadow_offset_x", 1)
+	label.add_theme_constant_override("shadow_offset_y", 1)
+	label.add_theme_constant_override("outline_size", 4)
+	label.modulate = SCORE_LABEL_HIDDEN_MODULATE
+	return label
+
+
+func _make_legendary_stack_subtitle_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.scale = SCORE_POPUP_START_SCALE
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", LEGENDARY_STACK_SUBTITLE_FONT_SIZE)
+	label.add_theme_color_override("font_color", LEGENDARY_STACK_SUBTITLE_COLOR)
+	label.add_theme_color_override("font_shadow_color", LEGENDARY_STACK_SHADOW_COLOR)
+	label.add_theme_color_override("font_outline_color", LEGENDARY_STACK_OUTLINE_COLOR)
+	label.add_theme_constant_override("shadow_offset_x", 1)
+	label.add_theme_constant_override("shadow_offset_y", 1)
+	label.add_theme_constant_override("outline_size", 4)
 	label.modulate = SCORE_LABEL_HIDDEN_MODULATE
 	return label
 
@@ -795,11 +2130,33 @@ func _get_readable_corner_rotation(rotation: float) -> float:
 	return rotation
 
 
-func _spawn_reveal_glow(label: Label, target_position: Variant = null) -> void:
-	call_deferred("_spawn_reveal_glow_deferred", label, target_position)
+func _spawn_reveal_glow(
+	label: Label,
+	target_position: Variant = null,
+	glow_font_color: Color = SCORE_LABEL_GLOW_FONT_COLOR,
+	glow_outline_color: Color = SCORE_LABEL_GLOW_OUTLINE_COLOR,
+	glow_outline_size: int = SCORE_LABEL_GLOW_OUTLINE_SIZE,
+	glow_modulate: Color = SCORE_LABEL_GLOW_COLOR
+) -> void:
+	call_deferred(
+		"_spawn_reveal_glow_deferred",
+		label,
+		target_position,
+		glow_font_color,
+		glow_outline_color,
+		glow_outline_size,
+		glow_modulate
+	)
 
 
-func _spawn_reveal_glow_deferred(label: Label, target_position: Variant = null) -> void:
+func _spawn_reveal_glow_deferred(
+	label: Label,
+	target_position: Variant = null,
+	glow_font_color: Color = SCORE_LABEL_GLOW_FONT_COLOR,
+	glow_outline_color: Color = SCORE_LABEL_GLOW_OUTLINE_COLOR,
+	glow_outline_size: int = SCORE_LABEL_GLOW_OUTLINE_SIZE,
+	glow_modulate: Color = SCORE_LABEL_GLOW_COLOR
+) -> void:
 	if not is_instance_valid(label) or label.get_parent() == null:
 		return
 
@@ -813,8 +2170,8 @@ func _spawn_reveal_glow_deferred(label: Label, target_position: Variant = null) 
 	glow_label.pivot_offset = label.pivot_offset
 	glow_label.rotation = label.rotation
 	glow_label.scale = label.scale * SCORE_LABEL_GLOW_SCALE_BOOST
-	glow_label.modulate = SCORE_LABEL_GLOW_COLOR
-	_apply_glow_label_theme(label, glow_label)
+	glow_label.modulate = glow_modulate
+	_apply_glow_label_theme(label, glow_label, glow_font_color, glow_outline_color, glow_outline_size)
 	table.add_child(glow_label)
 	table.move_child(glow_label, label.get_index())
 	_track_score_glow_label(glow_label)
@@ -828,15 +2185,58 @@ func _spawn_reveal_glow_deferred(label: Label, target_position: Variant = null) 
 	tween.chain().tween_callback(glow_label.queue_free)
 
 
-func _apply_glow_label_theme(source: Label, target: Label) -> void:
+func _apply_glow_label_theme(
+	source: Label,
+	target: Label,
+	glow_font_color: Color,
+	glow_outline_color: Color,
+	glow_outline_size: int
+) -> void:
 	target.add_theme_font_override("font", source.get_theme_font("font"))
 	target.add_theme_font_size_override("font_size", source.get_theme_font_size("font_size"))
-	target.add_theme_color_override("font_color", SCORE_LABEL_GLOW_FONT_COLOR)
+	target.add_theme_color_override("font_color", glow_font_color)
 	target.add_theme_color_override("font_shadow_color", Color(1, 1, 1, 0))
-	target.add_theme_color_override("font_outline_color", SCORE_LABEL_GLOW_OUTLINE_COLOR)
-	target.add_theme_constant_override("outline_size", SCORE_LABEL_GLOW_OUTLINE_SIZE)
+	target.add_theme_color_override("font_outline_color", glow_outline_color)
+	target.add_theme_constant_override("outline_size", glow_outline_size)
 	target.add_theme_constant_override("shadow_offset_x", 0)
 	target.add_theme_constant_override("shadow_offset_y", 0)
+
+
+func _spawn_score_stack_reveal_glow(stack: ScoreStack) -> void:
+	if stack == null or not is_instance_valid(stack.label):
+		return
+	if stack.stack_class_id == LEGENDARY_STACK_CLASS_ID:
+		_spawn_reveal_glow(
+			stack.label,
+			null,
+			LEGENDARY_STACK_GLOW_FONT_COLOR,
+			LEGENDARY_STACK_GLOW_OUTLINE_COLOR,
+			LEGENDARY_STACK_GLOW_OUTLINE_SIZE,
+			LEGENDARY_STACK_GLOW_COLOR
+		)
+		return
+	if stack.stack_class_id == HEROIC_STACK_CLASS_ID:
+		_spawn_reveal_glow(
+			stack.label,
+			null,
+			HEROIC_STACK_GLOW_FONT_COLOR,
+			HEROIC_STACK_GLOW_OUTLINE_COLOR,
+			HEROIC_STACK_GLOW_OUTLINE_SIZE,
+			HEROIC_STACK_GLOW_COLOR
+		)
+		return
+	if stack.stack_class_id != SKILLED_STACK_CLASS_ID:
+		_spawn_reveal_glow(stack.label)
+		return
+
+	_spawn_reveal_glow(
+		stack.label,
+		null,
+		SKILLED_STACK_GLOW_FONT_COLOR,
+		SKILLED_STACK_GLOW_OUTLINE_COLOR,
+		SKILLED_STACK_GLOW_OUTLINE_SIZE,
+		SKILLED_STACK_GLOW_COLOR
+	)
 
 
 func _play_score_segment_pop_in(label: Label) -> void:
@@ -847,6 +2247,35 @@ func _play_score_segment_pop_in(label: Label) -> void:
 	tween.tween_property(label, "scale", SCORE_POPUP_POP_SCALE, SCORE_POPUP_POP_IN_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	tween.chain().tween_property(label, "modulate", SCORE_LABEL_BASE_MODULATE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 	tween.chain().tween_property(label, "scale", Vector2.ONE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+
+func _play_score_stack_pop_in(stack: ScoreStack) -> void:
+	if stack == null or not is_instance_valid(stack.label):
+		return
+
+	_spawn_score_stack_reveal_glow(stack)
+	var tween: Tween = _create_score_popup_tween()
+	tween.set_parallel(true)
+	tween.tween_property(stack.label, "modulate", _get_score_stack_flash_color(stack), SCORE_POPUP_POP_IN_TIME)
+	tween.tween_property(stack.label, "scale", _get_score_stack_pop_scale(stack), SCORE_POPUP_POP_IN_TIME).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if is_instance_valid(stack.subtitle_label):
+		tween.tween_property(stack.subtitle_label, "modulate", SCORE_LABEL_BASE_MODULATE, SCORE_POPUP_POP_IN_TIME)
+	tween.chain().tween_property(stack.label, "modulate", SCORE_LABEL_BASE_MODULATE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.chain().tween_property(stack.label, "scale", Vector2.ONE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+
+
+func _play_score_stack_update_pulse(stack: ScoreStack) -> void:
+	if stack == null or not is_instance_valid(stack.label):
+		return
+
+	var tween: Tween = _create_score_popup_tween()
+	tween.set_parallel(true)
+	tween.tween_property(stack.label, "modulate", _get_score_stack_flash_color(stack), _get_score_stack_update_pulse_time(stack))
+	tween.tween_property(stack.label, "scale", _get_score_stack_update_pulse_scale(stack), _get_score_stack_update_pulse_time(stack)).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	if is_instance_valid(stack.subtitle_label):
+		tween.tween_property(stack.subtitle_label, "modulate", SCORE_LABEL_BASE_MODULATE, _get_score_stack_update_pulse_time(stack))
+	tween.chain().tween_property(stack.label, "modulate", SCORE_LABEL_BASE_MODULATE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	tween.chain().tween_property(stack.label, "scale", Vector2.ONE, SCORE_POPUP_SETTLE_TIME).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 
 
 func _pulse_final_score_total(popup: ScorePopup) -> void:
@@ -861,6 +2290,16 @@ func _pulse_final_score_total(popup: ScorePopup) -> void:
 
 func _show_event_label_for_latest_item(popup: ScorePopup) -> void:
 	var line_item: Dictionary = popup.line_items[popup.revealed_count - 1]
+	# Stack-routed tiers should not reach this fallback path, but keep the guard
+	# so future route edits cannot accidentally resurrect named-label overlap.
+	if (
+		_is_foundational_stack_line_item(line_item)
+		or _is_skilled_stack_line_item(line_item)
+		or _is_heroic_stack_line_item(line_item)
+		or _is_legendary_stack_line_item(line_item)
+	):
+		return
+
 	var label_text: String = str(line_item["label"])
 	if label_text == "Sink":
 		return
@@ -992,6 +2431,60 @@ func _update_score_popup_drift(popup: ScorePopup, delta: float) -> void:
 			event_label.position += drift_step
 
 
+func _update_score_stack_drift(stack: ScoreStack, delta: float) -> void:
+	var drift_step: Vector2 = stack.outward_direction * SCORE_POPUP_LIFETIME_DRIFT_SPEED * delta
+	stack.lifetime_drift += drift_step
+	_update_score_stack_retreat(stack, delta)
+	_update_score_stack_label_layout(stack)
+
+
+func _update_score_stack_retreat(stack: ScoreStack, delta: float) -> void:
+	if stack == null:
+		return
+
+	var hold_time: float = _get_score_stack_hold_time(stack)
+	if hold_time > 0.0 and stack.hold_timer <= hold_time * SCORE_STACK_INACTIVE_RETREAT_RATIO:
+		stack.retreat_target = maxf(stack.retreat_target, _get_score_stack_inactive_retreat_distance(stack))
+
+	var retreat_step: float = SCORE_STACK_RETREAT_SPEED * delta
+	stack.retreat_offset = move_toward(stack.retreat_offset, stack.retreat_target, retreat_step)
+
+
+func _get_score_stack_inactive_retreat_distance(stack: ScoreStack) -> float:
+	var priority: int = _get_score_stack_tier_priority(stack)
+	if priority <= 0:
+		return 12.0
+	if priority == 1:
+		return 9.0
+	if priority == 2:
+		return 6.0
+	return 3.0
+
+
+func _update_score_stack_label(stack: ScoreStack) -> void:
+	if stack == null or not is_instance_valid(stack.label):
+		return
+
+	stack.label.text = "+%s" % stack.total
+	if is_instance_valid(stack.subtitle_label):
+		stack.subtitle_label.text = stack.latest_summary
+		stack.subtitle_label.modulate = SCORE_LABEL_BASE_MODULATE
+	_update_score_stack_label_layout(stack)
+
+
+func _update_score_stack_label_layout(stack: ScoreStack) -> void:
+	if stack == null or not is_instance_valid(stack.label):
+		return
+
+	var width: float = maxf(36.0, float(stack.label.text.length()) * SCORE_SEGMENT_CHAR_WIDTH)
+	var center: Vector2 = stack.anchor_position + stack.lifetime_drift + _get_score_stack_anchor_offset(stack)
+	_apply_score_segment_label_layout(stack.label, center, width, stack.line_rotation)
+	if is_instance_valid(stack.subtitle_label):
+		var subtitle_width: float = maxf(56.0, float(stack.subtitle_label.text.length()) * _get_score_stack_subtitle_char_width(stack))
+		var subtitle_center: Vector2 = center + _get_score_stack_subtitle_offset(stack)
+		_apply_score_segment_label_layout(stack.subtitle_label, subtitle_center, subtitle_width, stack.line_rotation)
+
+
 func _place_score_label_below_gameplay(label: Label) -> void:
 	table.move_child(label, table.aim_preview.get_index())
 
@@ -1012,6 +2505,24 @@ func _fade_out_score_popup(popup: ScorePopup) -> void:
 	tween.chain().tween_callback(_remove_score_popup.bind(popup))
 
 
+func _fade_out_score_stack(stack: ScoreStack) -> void:
+	stack.removal_started = true
+	if not is_instance_valid(stack.label):
+		_remove_score_stack(stack)
+		return
+
+	var tween: Tween = _create_score_popup_tween()
+	var drift: Vector2 = stack.outward_direction * SCORE_POPUP_OUTWARD_DRIFT_DISTANCE
+	var fade_time: float = _get_score_stack_fade_time(stack)
+	tween.set_parallel(true)
+	tween.tween_property(stack.label, "position", stack.label.position + drift, fade_time)
+	tween.tween_property(stack.label, "modulate:a", 0.0, fade_time)
+	if is_instance_valid(stack.subtitle_label):
+		tween.tween_property(stack.subtitle_label, "position", stack.subtitle_label.position + drift, fade_time)
+		tween.tween_property(stack.subtitle_label, "modulate:a", 0.0, fade_time)
+	tween.chain().tween_callback(_remove_score_stack.bind(stack))
+
+
 func _remove_score_popup(popup: ScorePopup) -> void:
 	active_score_popups.erase(popup)
 	score_popups_by_ball.erase(popup.ball_id)
@@ -1021,6 +2532,17 @@ func _remove_score_popup(popup: ScorePopup) -> void:
 	for event_label in popup.event_labels:
 		if is_instance_valid(event_label):
 			event_label.queue_free()
+
+
+func _remove_score_stack(stack: ScoreStack) -> void:
+	active_score_stacks.erase(stack)
+	var mapped_stack: ScoreStack = score_stacks_by_key.get(stack.stack_key) as ScoreStack
+	if mapped_stack == stack:
+		score_stacks_by_key.erase(stack.stack_key)
+	if is_instance_valid(stack.label):
+		stack.label.queue_free()
+	if is_instance_valid(stack.subtitle_label):
+		stack.subtitle_label.queue_free()
 
 
 func _track_score_glow_label(glow_label: Label) -> void:
