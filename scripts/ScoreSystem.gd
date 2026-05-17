@@ -330,6 +330,34 @@ func award_embezzler_recovery(amount: int, sink_context: Dictionary = {}) -> int
 	return recovery_amount
 
 
+func award_pocket_streak(multiplier: int, streak_context: Dictionary = {}) -> int:
+	var streak_multiplier: int = maxi(multiplier, 0)
+	if streak_multiplier < 2:
+		return 0
+
+	var same_pocket_subtotal: int = maxi(int(streak_context.get("score_subtotal", 0)), 0)
+	var bonus_already_awarded: int = maxi(int(streak_context.get("bonus_already_awarded", 0)), 0)
+	var desired_total_bonus: int = same_pocket_subtotal * (streak_multiplier - 1)
+	var streak_reward: int = maxi(desired_total_bonus - bonus_already_awarded, 0)
+	if streak_reward <= 0:
+		return 0
+
+	doubloons_total += streak_reward
+	doubloons_changed.emit(doubloons_total)
+	doubloons_awarded.emit(streak_reward, doubloons_total)
+	score_feed_message.emit("Same pocket streak x%s! +%s Doubloons (%s pocket base)" % [
+		streak_multiplier,
+		streak_reward,
+		same_pocket_subtotal,
+	])
+	last_score_popup_route = "pocket_streak x%s subtotal %s +%s" % [
+		streak_multiplier,
+		same_pocket_subtotal,
+		streak_reward,
+	]
+	return streak_reward
+
+
 func get_active_popup_label_count() -> int:
 	var label_count := 0
 	for popup_value in active_score_popups:
@@ -487,21 +515,21 @@ func get_active_score_popup_tween_count() -> int:
 	return active_score_popup_tween_count
 
 
-func score_sunk_ball_snapshot(snapshot: Dictionary, sink_context: Dictionary = {}) -> void:
+func score_sunk_ball_snapshot(snapshot: Dictionary, sink_context: Dictionary = {}) -> int:
 	_store_sink_context(sink_context)
-	_score_sunk_ball_snapshot(snapshot)
+	return _score_sunk_ball_snapshot(snapshot)
 
 
-func _score_sunk_ball_snapshot(snapshot: Dictionary) -> void:
+func _score_sunk_ball_snapshot(snapshot: Dictionary) -> int:
 	var ball_id: int = int(snapshot.get("ball_id", 0))
 	if ball_id == 0:
-		return
+		return 0
 
 	var line_items: Array[Dictionary] = []
 	var includes_base_reward: bool = _try_add_base_reward(ball_id, line_items)
 	_try_add_event_rewards(ball_id, snapshot, line_items)
 	if line_items.is_empty():
-		return
+		return 0
 
 	var gained_total: int = _sum_line_items(line_items)
 	doubloons_total += gained_total
@@ -511,6 +539,7 @@ func _score_sunk_ball_snapshot(snapshot: Dictionary) -> void:
 	_add_line_items_to_score_popup(ball_id, ball_label, line_items)
 	_emit_score_feed_message(ball_label, line_items, gained_total)
 	_print_score_breakdown(ball_label, line_items, gained_total, includes_base_reward)
+	return gained_total
 
 
 func _try_add_base_reward(ball_id: int, line_items: Array[Dictionary]) -> bool:

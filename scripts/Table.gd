@@ -35,7 +35,7 @@ const PERFORMANCE_SECTION_VISUAL_COST := "visual_cost"
 const PERFORMANCE_SECTION_AIM_PREVIEW := "aim_preview"
 const PERFORMANCE_SECTION_PHYSICS := "physics"
 const PERFORMANCE_SECTION_QUARTERMASTER := "quartermaster"
-const SHIP_FLOOR_TEXTURE := preload("res://assets/table_art/ship_floor.png")
+const SHIP_FLOOR_TEXTURE := preload("res://assets/table_art/ship_floor_full.png")
 const TABLE_FRAME_TEXTURE := preload("res://assets/table_art/pool_table_frame.png")
 const KRAKEN_SILHOUETTE_TEXTURE := preload("res://assets/table_art/kraken_silhouette.png")
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
@@ -60,6 +60,7 @@ const PRESENTATION_MARGIN_LEFT := 120.0
 const PRESENTATION_MARGIN_RIGHT := 120.0
 const PRESENTATION_MARGIN_TOP := 80.0
 const PRESENTATION_MARGIN_BOTTOM := 120.0
+const SHIP_FLOOR_FULL_ART_RECT := Rect2(0, 0, 1920, 1080)
 const TABLE_FRAME_VISIBLE_BOUNDS := Rect2(311, 130, 1294, 794)
 const KRAKEN_ART_ALPHA := 0.18
 const READY_STATUS_TEXT := "The Kraken waits with payment."
@@ -114,6 +115,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var boundary_system: BoundarySystem = $BoundarySystem
 @onready var shot_event_system: ShotEventSystem = $ShotEventSystem
 @onready var score_system: ScoreSystem = $ScoreSystem
+@onready var pocket_streak_system: PocketStreakSystem = $PocketStreakSystem
 @onready var ball_drop_system: BallDropSystem = $BallDropSystem
 @onready var ball_audio_system: BallAudioSystem = $BallAudioSystem
 @onready var aim_preview: AimPreview = $AimPreview
@@ -128,6 +130,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var treasure_ball_system: TreasureBallSystem = $TreasureBallSystem
 @onready var embezzler_system: EmbezzlerSystem = $EmbezzlerSystem
 @onready var table_impact_shake_system: TableImpactShakeSystem = $TableImpactShakeSystem
+@onready var pocket_streak_presenter: PocketStreakPresenter = $PocketStreakPresenter
 @onready var cue_controller: CueController = $CuePivot
 #endregion
 
@@ -189,6 +192,7 @@ func _ready() -> void:
 	boundary_system.setup(self)
 	shot_event_system.setup(self)
 	score_system.setup(self)
+	pocket_streak_system.setup(self)
 	ball_drop_system.setup(self)
 	ball_audio_system.setup(self)
 	_connect_score_drop_events()
@@ -360,11 +364,11 @@ func _draw() -> void:
 
 
 func _draw_table_art() -> void:
-	var presentation_rect: Rect2 = get_presentation_rect()
 	var floor_offset: Vector2 = table_impact_shake_system.get_floor_visual_offset()
 	var table_art_offset: Vector2 = table_impact_shake_system.get_table_art_visual_offset()
-	draw_texture_rect(SHIP_FLOOR_TEXTURE, _offset_rect(presentation_rect, floor_offset), false)
-	draw_rect(_offset_rect(presentation_rect, floor_offset), Color(0, 0, 0, 0.18), true)
+	var floor_rect: Rect2 = _offset_rect(SHIP_FLOOR_FULL_ART_RECT, floor_offset)
+	draw_texture_rect(SHIP_FLOOR_TEXTURE, floor_rect, false)
+	draw_rect(floor_rect, Color(0, 0, 0, 0.18), true)
 	draw_texture_rect(TABLE_FRAME_TEXTURE, _offset_rect(table_frame_art_rect, table_art_offset), false)
 	_draw_kraken_felt_art(table_art_offset)
 
@@ -909,9 +913,13 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 
 	ball.sink()
 	ball.queue_free()
-	_note_object_ball_pocketed(ball, score_context)
+	var shot_sink_recorded: bool = _note_object_ball_pocketed(ball, score_context)
 	var score_snapshot: Dictionary = shot_event_system.get_sunk_ball_score_snapshot(int(score_context["ball_id"]))
-	score_system.score_sunk_ball_snapshot(score_snapshot, score_context)
+	var scored_amount: int = score_system.score_sunk_ball_snapshot(score_snapshot, score_context)
+	var pocket_streak_result: Dictionary = {}
+	if shot_sink_recorded:
+		pocket_streak_result = pocket_streak_system.record_object_ball_sink(score_context, scored_amount)
+	_handle_pocket_streak_result(pocket_streak_result)
 	status_text_changed.emit("Ball %s sunk." % ball.ball_number)
 
 
@@ -1033,6 +1041,7 @@ func _start_shot_tracking() -> void:
 	shot_bank_bonus_awarded = false
 	shot_bank_eligible_ball_ids.clear()
 	shot_event_system.start_shot(cue_ball.global_position)
+	pocket_streak_system.start_shot()
 	embezzler_system.handle_shot_started()
 
 
@@ -1142,6 +1151,7 @@ func _make_sink_score_context(ball: Ball) -> Dictionary:
 		"sink_position": ball.global_position,
 		"sink_velocity": ball.velocity,
 		"pocket_position": pocket_system.get_last_captured_pocket_position(),
+		"pocket_index": pocket_system.get_last_captured_pocket_index(),
 		"pocket_radius": pocket_system.get_last_captured_pocket_radius(),
 	}
 
@@ -1150,9 +1160,9 @@ func _is_scoring_object_ball(ball: Ball) -> bool:
 	return ball != null and ball.ball_type == Ball.BallType.OBJECT
 
 
-func _note_object_ball_pocketed(ball: Ball, score_context: Dictionary) -> void:
+func _note_object_ball_pocketed(ball: Ball, score_context: Dictionary) -> bool:
 	if not shot_active:
-		return
+		return false
 
 	shot_event_system.record_ball_sunk(ball, score_context)
 	shot_pocketed_object_balls += 1
@@ -1163,6 +1173,25 @@ func _note_object_ball_pocketed(ball: Ball, score_context: Dictionary) -> void:
 
 	_award_base_spawn_progress()
 	_try_award_multi_pocket_bonus()
+	return true
+
+
+func _handle_pocket_streak_result(pocket_streak_result: Dictionary) -> void:
+	if not bool(pocket_streak_result.get("triggered", false)):
+		return
+
+	var multiplier: int = int(pocket_streak_result.get("multiplier", 0))
+	var awarded: int = score_system.award_pocket_streak(multiplier, pocket_streak_result)
+	if awarded <= 0:
+		return
+
+	pocket_streak_system.note_bonus_awarded(pocket_streak_result, awarded)
+	var pocket_position: Vector2 = Vector2.ZERO
+	var pocket_position_value: Variant = pocket_streak_result.get("pocket_position", Vector2.ZERO)
+	if pocket_position_value is Vector2:
+		pocket_position = pocket_position_value
+	var pocket_radius: float = float(pocket_streak_result.get("pocket_radius", 0.0))
+	pocket_streak_presenter.show_streak(multiplier, pocket_position, pocket_radius)
 
 
 func _try_finish_shot() -> void:
@@ -1176,6 +1205,7 @@ func _try_finish_shot() -> void:
 	cue_reclaim_blocker_reason = "No active shot"
 	aim_preview.stop_actual_path_recording()
 	shot_event_system.finish_shot()
+	pocket_streak_system.finish_shot()
 	if should_advance_anchor_chains:
 		_handle_cue_control_regained_after_shot()
 

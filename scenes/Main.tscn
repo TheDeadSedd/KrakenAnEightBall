@@ -2,15 +2,15 @@
 
 [ext_resource type="PackedScene" path="res://scenes/Table.tscn" id="1_table_scene"]
 [ext_resource type="Script" uid="uid://cpk1835bhdruv" path="res://scripts/Main.gd" id="2_main_script"]
-[ext_resource type="FontFile" path="res://assets/fonts/NotJamOldStyle11.ttf" id="3_ui_font"]
+[ext_resource type="FontFile" uid="uid://b4jk3m14mv2u2" path="res://assets/fonts/NotJamOldStyle11.ttf" id="3_ui_font"]
 [ext_resource type="Script" uid="uid://cg0xx05qehx7o" path="res://scripts/DebugOverlay.gd" id="4_debug_overlay"]
 [ext_resource type="Script" uid="uid://bxpjxcy4cbps4" path="res://scripts/BallDropMeter.gd" id="5_ball_drop_meter"]
 [ext_resource type="Script" uid="uid://bg1rdbmkpcn84" path="res://scripts/PauseMenu.gd" id="6_pause_menu"]
 [ext_resource type="Script" uid="uid://dea5qsnybmcuc" path="res://scripts/DebugPanel.gd" id="7_debug_panel"]
 [ext_resource type="Script" uid="uid://c5h88rg15m2pu" path="res://scripts/ReserveSlotsUI.gd" id="8_reserve_slots_ui"]
 [ext_resource type="Script" uid="uid://clp8ek2x13i4q" path="res://scripts/ReserveDeploymentPresenter.gd" id="9_reserve_deploy_presenter"]
-[ext_resource type="Script" path="res://scripts/HudFeed.gd" id="10_hud_feed"]
-[ext_resource type="Script" path="res://scripts/QuartermasterHUD.gd" id="11_quartermaster_hud"]
+[ext_resource type="Script" uid="uid://d37dyx8pma2f6" path="res://scripts/HudFeed.gd" id="10_hud_feed"]
+[ext_resource type="Script" uid="uid://dy86pgjpqxn3s" path="res://scripts/QuartermasterHUD.gd" id="11_quartermaster_hud"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -75,6 +75,7 @@ script = ExtResource("2_main_script")
 [node name="Table" parent="." unique_id=1446886136 instance=ExtResource("1_table_scene")]
 
 [node name="Boundaries" type="Node2D" parent="Table" unique_id=2023568208]
+visible = false
 
 [node name="TopRail1" type="StaticBody2D" parent="Table/Boundaries" unique_id=1820286007]
 
@@ -178,6 +179,7 @@ position = Vector2(-1, 1)
 shape = SubResource("SegmentShape2D_q8u5g")
 
 [node name="Pockets" type="Node2D" parent="Table" unique_id=168170532]
+visible = false
 
 [node name="PocketTopLeft" type="Area2D" parent="Table/Pockets" unique_id=1290076813]
 
@@ -260,10 +262,10 @@ theme_override_font_sizes/font_size = 28
 text = "Doubloons: 0"
 horizontal_alignment = 2
 
-[node name="HudFeed" type="Control" parent="CanvasLayer/HUD"]
+[node name="HudFeed" type="Control" parent="CanvasLayer/HUD" unique_id=634428339]
 process_mode = 3
 z_index = 18
-layout_mode = 0
+anchors_preset = 0
 offset_left = 32.0
 offset_top = 772.0
 offset_right = 608.0
@@ -290,10 +292,10 @@ offset_right = 1044.0
 offset_bottom = 288.0
 script = ExtResource("8_reserve_slots_ui")
 
-[node name="QuartermasterHUD" type="Control" parent="CanvasLayer/HUD"]
+[node name="QuartermasterHUD" type="Control" parent="CanvasLayer/HUD" unique_id=471012165]
 process_mode = 3
 z_index = 22
-layout_mode = 0
+anchors_preset = 0
 offset_left = 1512.0
 offset_top = 326.0
 offset_right = 1640.0
@@ -935,17 +937,17 @@ theme_override_constants/separation = 10
 visible = false
 layout_mode = 2
 size_flags_horizontal = 3
-disabled = true
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 17
+disabled = true
 text = "Quartermaster"
 
 [node name="DebugTabButton" type="Button" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox/TabBar" unique_id=1795779873]
 layout_mode = 2
 size_flags_horizontal = 3
-disabled = true
 theme_override_fonts/font = ExtResource("3_ui_font")
 theme_override_font_sizes/font_size = 17
+disabled = true
 text = "Debug"
 
 [node name="QuartermasterSection" type="VBoxContainer" parent="CanvasLayer/HUD/PauseMenu/Shade/MenuPanel/Margin/VBox" unique_id=1807518371]
