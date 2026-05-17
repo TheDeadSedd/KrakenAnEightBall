@@ -6,7 +6,7 @@ Kraken An Eight Ball is a Godot 4 / GDScript pirate-eldritch systemic arcade-cha
 
 The project is now a playable escalation sandbox with multiple interacting systems. The current core loop is:
 
-better play -> more score/Doubloons -> more score-tied ball drops -> more interactions and chaos -> survive an escalating table state.
+better shots -> more Doubloons -> Kraken Intervention opportunities -> player-chosen Table Events -> more balls/anomalies/chaos -> better scoring opportunities -> survive an escalating table state.
 
 Core pillars:
 
@@ -14,7 +14,9 @@ Core pillars:
 - Pirate/kraken table presentation and in-engine charm.
 - Doubloons scoring driven by trick-shot event history.
 - Pocket-side score celebrations instead of generic center-screen scoring spam.
-- Score-tied ball drops that turn successful play into rising table pressure.
+- Kraken Intervention, a shot-earned Table Event economy that replaces automatic score-triggered BallDrop rewards with player-chosen chaos.
+- Pocket Streak scoring and localized pocket wake-up presentation for repeated same-pocket sinks in one shot.
+- Rolling HudFeed captain's-log messages for readable scoring, penalty, anomaly, and intervention history.
 - The Quartermaster tactical shop, rotating offers, reserve slots, and reusable ball placement flow.
 - Active anomaly balls: Wayfinder Ball, Powder Keg, Anchor curse seeds, Cannon Ball, Treasure Ball, and Embezzler experiments.
 - Expanded foundational, skilled, heroic, and legendary trick-shot event rewards.
@@ -61,9 +63,11 @@ Does not own debug counter meanings, snapshot generation, gameplay state, or pau
 
 ### `scripts/PauseMenu.gd`
 
-Owns pause menu UI, tab presentation, resume/quit button wiring, Quartermaster tab rendering, and debug-panel toggles.
+Owns pause menu UI, tab presentation, resume/quit button wiring, legacy/hidden Quartermaster tab state, debug-panel toggles, and temporary Event Test Button checkboxes.
 
-Does not own gameplay simulation, physics, scoring, shot math, or anomaly updates. `get_tree().paused` freezes gameplay; pause menu, debug overlay, and debug panels are allowed to keep processing so the player can interact with UI while gameplay is frozen.
+The active Quartermaster purchasing UI now lives in `QuartermasterHUD.gd`, not the pause-menu shop flow. Pause menu debug controls can reveal the right-side Wayfinder Current and Broadside test buttons, but those controls should remain debug-only and should not spend Doubloons or affect Kraken Intervention progress.
+
+Does not own gameplay simulation, physics, scoring, shot math, Table Event execution, or anomaly updates. `get_tree().paused` freezes gameplay; pause menu, debug overlay, and debug panels are allowed to keep processing so the player can interact with UI while gameplay is frozen.
 
 ### `scripts/CueController.gd`
 
@@ -83,9 +87,9 @@ AimPreview.gd must remain prediction/presentation only. It must not change real 
 
 ### `scripts/SpawnSystem.gd`
 
-Owns cue ball start/reset helpers, starting rack/object-ball creation, reward spawns, debug ball spawns, safe spawn search, drop animation coordination, spawn-related callouts, regular anomaly pool odds, and debug creation requests such as Anchor curse-seed transformation.
+Owns cue ball start/reset helpers, starting rack/object-ball creation, Table Event ball drops/launches, debug ball spawns, safe spawn search, drop animation coordination, spawn landing callbacks, spawn-related callouts, regular anomaly pool odds, and debug creation requests such as Anchor curse-seed transformation.
 
-Does not own scoring, pocket consequences, shot lifecycle, physics tuning, score-tied reward decisions, or anomaly behavior after a ball exists.
+Does not own scoring, pocket consequences, shot lifecycle, physics tuning, Kraken Intervention thresholds/purchases, legacy automatic-drop decisions, or anomaly behavior after a ball exists.
 
 ### `scripts/BallPlacementSystem.gd`
 
@@ -99,13 +103,21 @@ Owns Quartermaster shop inventory, item IDs, prices, descriptions, affordability
 
 Current economy flow is Quartermaster buy -> first open Reserve slot fills. Purchases are allowed only when the player can afford the item and Reserve has space. A successful purchase spends Doubloons, fills the first empty Reserve slot, and refreshes only the purchased offer slot.
 
-Does not place balls directly, emit `doubloons_awarded`, advance `BallDropSystem` progress, own placement validation, or own Reserve deployment presentation. No passive stock timers should be introduced unless explicitly requested; offer refresh should stay event-driven.
+Does not place balls directly, emit `doubloons_awarded`, advance Kraken Intervention or legacy BallDrop progress, own placement validation, or own Reserve deployment presentation. No passive stock timers should be introduced unless explicitly requested; offer refresh should stay event-driven.
 
 ### `scripts/QuartermasterOfferRefreshEffect.gd`
 
 Owns the presentation-only fresh-stock cue for a changed Quartermaster offer: soft gold glow, quick shimmer sweep, and fade/pop settling.
 
 Does not own stock selection, prices, affordability, Reserve behavior, spending, or gameplay state. It should remain lightweight UI tween/draw work and process while paused.
+
+### `scripts/QuartermasterHUD.gd`
+
+Owns the active live-gameplay Quartermaster side-rail shop presentation: compact right-side square item slots, cost text, hover tooltip content, affordability tinting, refresh shimmer, shared item icon drawing, and cue-input-safe click routing into `QuartermasterSystem.gd`.
+
+This replaces the old active pause-menu purchasing presentation. Tooltips should stay lightweight and only appear on hover; item descriptions should not become permanent inventory-panel text again. Empty HUD space should pass through to gameplay, hover should not interrupt an active cue drag, and clicks on actual item slots should intentionally consume UI input.
+
+Does not own offer inventory, prices, stock refresh, Doubloon spending, Reserve slot mutation, placement validation, or event economy. `QuartermasterSystem.gd` remains the shop/economy owner.
 
 ### `scripts/ReserveSystem.gd`
 
@@ -127,9 +139,11 @@ Does not own placement rules, deployment state, safe-position checks, spawning, 
 
 ### `scripts/WayfinderSystem.gd`
 
-Owns Wayfinder activation/deactivation, guided-ball tracking, pocket cone selection, timed guidance, redirect cooldowns, and Wayfinder debug logging.
+Owns Wayfinder activation/deactivation, guided-ball tracking, pocket cone selection, timed guidance, redirect cooldowns, temporary Wayfinder Current carriers, transfer-on-hit current propagation, current-caused scoring snapshots, and Wayfinder debug logging.
 
-Does not own ball-to-ball collision response, pocket geometry, spawn chance, or general anomaly architecture.
+Wayfinder Current is the rare Kraken Intervention extension of this system: temporary possession with transferable guided momentum, like a cursed tide grabbing loose cargo and passing through collisions. It reuses existing Wayfinder guidance rather than creating a second steering system. Two dropped Wayfinders trigger localized current pulses; eligible regular object balls receive a strong initial impulse, become temporary current carriers, transfer on eligible collisions, and expire after a short lifetime or transfer-depth limit. Nearby affected-ball count is intentionally uncapped for now, but cue ball, eight ball, sinking/invalid balls, and unsafe anomaly balls remain excluded.
+
+Does not own ball-to-ball collision response, pocket geometry, spawn chance, Table Event offer rules, or general anomaly architecture. Base Wayfinder cue-contact behavior should remain separate from temporary current support.
 
 ### `scripts/PowderKegSystem.gd`
 
@@ -167,7 +181,7 @@ Owns the Embezzler anomaly identity as a living greed mechanic separate from Tre
 
 The Embezzler copies a percentage of positive Doubloons awarded while alive; it does not reduce the player's original score. Capturing/pocketing it pays out stored value through the normal award flow so the recovered loot feels like real scoring. Escaping removes/despawns it and clears state without subtracting player score in the current first pass.
 
-Does not own Treasure behavior, scoring values, BallDropSystem rules beyond using existing award flow on capture payout, pocket geometry, cue feel, physics, Quartermaster/Reserve behavior, spawn odds, or anomaly special interactions. Aim pressure may raise future willingness, but it must not spam escape rolls; the primary escape decision should happen once per cue-ball hit/shot cycle.
+Does not own Treasure behavior, scoring values, Kraken Intervention/BallDrop rules beyond using existing award flow on capture payout, pocket geometry, cue feel, physics, Quartermaster/Reserve behavior, spawn odds, or anomaly special interactions. Aim pressure may raise future willingness, but it must not spam escape rolls; the primary escape decision should happen once per cue-ball hit/shot cycle.
 
 ### `scripts/PocketSystem.gd`
 
@@ -200,7 +214,7 @@ Does not award Doubloons, show UI, change gameplay outcomes, or alter physics. I
 
 Owns Doubloons reward values for all implemented shot-event tiers, running Doubloons total, scoring breakdown debug logs, HUD total signal, and pocket-side score popup presentation.
 
-Does not own shot event tracking, pocket capture, physics, anomaly behavior, reward spawning, score-tied ball drop decisions, shops, progression, or heavy VFX.
+Does not own shot event tracking, pocket capture, physics, anomaly behavior, reward spawning, Kraken Intervention/Table Event economy, shops, progression, or heavy VFX.
 
 Current score presentation notes:
 
@@ -214,22 +228,89 @@ Current score presentation notes:
 
 ### `scripts/BallDropSystem.gd`
 
-Owns the score-tied ball drop architecture spine: enabled state, Doubloon progress toward earned drops, threshold tuning, deciding how many earned drops to queue after ScoreSystem reports awarded Doubloons, and cue/eight-ball sink penalty amount/message selection.
+Owns a small legacy/gated automatic reward-drop surface plus active cue/eight-ball sink penalty amount/message selection.
 
-Does not own object-ball scoring values, score popup presentation, actual ball creation, spawn placement, drop animation, physics, cue-ball penalty removal animation, or Anchor curse-seed penalty selection. `SpawnSystem.gd` still performs actual drops, and `Table.gd` only coordinates pocket consequences, cue-ball penalty removal, and eight-ball Anchor curse-seed penalty routing.
+The old automatic score-triggered BallDrop reward loop is history, not the current spine. `TableEventSystem.gd` gates automatic BallDrop reward spawning by default and replaces it with Kraken Intervention opportunities and player-chosen Table Events. Treat BallDrop reward logic as backstage legacy/debug plumbing unless explicitly asked to revive it.
 
-Current first-pass behavior:
+Current active responsibilities:
 
-- `ScoreSystem.gd` emits awarded Doubloon amounts.
-- `BallDropSystem.gd` adds those amounts to `drop_progress`.
-- When progress reaches `doubloons_per_drop`, it queues drops through `SpawnSystem.gd`.
-- Leftover progress is preserved.
-- Large scoring events can queue multiple drops.
-- Legacy non-score gameplay reward drops are disabled by default so normal reward drops come from `BallDropSystem.gd`.
-- Score-earned drops choose rotating themed callout messages from `BallDropSystem.gd`; debug/manual spawns can keep direct spawn labels.
 - Cue-ball and eight-ball sinks apply a 25 Doubloon penalty through `BallDropSystem.gd` / `ScoreSystem.gd` without adding to drop progress.
 - Cue-ball sinks still remove one eligible object ball as the physical penalty.
 - Eight-ball sinks now try to transform one eligible existing object ball into an Anchor curse seed instead of using the old remove-ball-only penalty path.
+- Legacy score-progress/drop helpers should not emit normal gameplay callouts such as `+1 Ball Dropped` while Kraken Intervention is active.
+
+Does not own object-ball scoring values, score popup presentation, Kraken Intervention thresholds, Table Event offer selection, actual ball creation, spawn placement, drop animation, physics, cue-ball penalty removal animation, or Anchor curse-seed penalty selection.
+
+### `scripts/TableEventSystem.gd`
+
+Owns the active Kraken Intervention / Table Event economy: per-shot Doubloon threshold tracking, pending intervention state, cue-control-gated readiness, weighted/rarity-based offer selection, purchase validation/spending, event execution routing, debug event triggers, Table Event debug snapshots, and the default gate that disables old automatic BallDrop reward spawning.
+
+This is the chosen-chaos spine: strong shots earn a paid opportunity instead of invisible score-to-spawn plumbing. Keep the fuller design philosophy in the Kraken Intervention boundary below as the canonical wording.
+
+Current flow:
+
+- Scoring still awards Doubloons immediately through `ScoreSystem.gd`.
+- Only Doubloons earned during an active shot advance the Kraken Intervention meter.
+- The current first-pass threshold is 30 shot-earned Doubloons.
+- Reaching the threshold creates a pending intervention opportunity instead of automatically spawning balls.
+- The opportunity becomes clickable only after cue control returns / the player has a decision window.
+- The player opens the intervention menu manually and chooses one offer, or closes/cancels and keeps the opportunity.
+- Buying an offer spends Doubloons through the safe spend path and must not refill the meter.
+
+Current offer pool:
+
+- Cheap Cargo: Common, weight 10, cost 20, drops 5 regular object balls.
+- Loose Cargo: Common, weight 8, cost 40, drops 10 regular object balls.
+- Wayfinder's Favor: Uncommon, weight 5, cost 55, drops 2 Wayfinder Balls.
+- Powder Cache: Uncommon, weight 4, cost 75, drops 3 Powder Kegs.
+- Cannon Warning: Rare, weight 2, cost 90, drops 1 Cannon Ball.
+- Broadside Attack: Rare, weight 1, cost 140, drops staged Powder Kegs first, then delayed Cannon Balls.
+- Wayfinder Current: Rare, weight 3, cost 120, drops 2 Wayfinders and triggers temporary current behavior.
+
+Signature intervention notes:
+
+- Broadside Attack is the first authored staged Kraken Intervention milestone: a readable pirate artillery scenario with a warning beat, Powder Kegs falling in lanes, and delayed Cannon Balls following through. It should feel like the table has opened a gun deck, not like random spawn noise.
+- Wayfinder Current is the rare Wayfinder-themed intervention. Its cursed-tide carrier behavior is owned by `WayfinderSystem.gd`; this system should only route the event and its purchase/debug triggers.
+
+Broadside sequencing lives here, while `SpawnSystem.gd`, `PowderKegSystem.gd`, and `CannonBallSystem.gd` still own creation/drop helpers and post-spawn behavior.
+
+Wayfinder Current is also routed from here, but temporary carrier/guidance behavior lives in `WayfinderSystem.gd`. Table Event debug triggers for Broadside and Wayfinder Current may bypass cost/readiness only; they should call the same event behavior and must not refill Kraken Intervention.
+
+Does not own scoring values, pocket capture, physics, cue feel, anomaly behavior after spawn, Reserve/Quartermaster inventory, or UI drawing. `Table.gd` should coordinate wiring only.
+
+### `scripts/TableEventMeter.gd`
+
+Owns the horizontal bottom-center Kraken Intervention meter presentation: `KRAKEN INTERVENTION` label, shot-earned progress text, percentage text, smooth bar fill, pending/ready pulse feedback, and the clickable ready icon.
+
+Does not own threshold math, offer generation, spending, event execution, scoring, cue control, or old BallDrop progress. Empty meter space should not steal cue input; the ready icon should consume only intentional clicks.
+
+### `scripts/TableEventMenu.gd`
+
+Owns the compact `Request Kraken Intervention...` choice menu: modal presentation, three weighted unique offer cards, cost/rarity/description/status text, affordability state, hover highlighting, close/cancel behavior, and forwarding selected offer indexes to `TableEventSystem.gd`.
+
+Does not own offer pool contents, weights, costs, purchase rules, event execution, scoring, physics, or HUD meters. The menu should feel like a tactical ritual/omen choice, not a debug panel or full-screen RPG inventory.
+
+### `scripts/PocketStreakSystem.gd`
+
+Owns same-pocket streak tracking for the current shot: per-pocket object-ball sink counts, same-pocket score subtotals, X2/X3/X4+ multiplier context, duplicate/double-award safety, and debug counters.
+
+Pocket Streak is separate from `MULTI_SINK`: `MULTI_SINK` rewards multiple balls in one shot generally, while Pocket Streak rewards repeated object-ball sinks into the same pocket during that shot. Streak bonuses use same-pocket scoring context rather than the old flat per-step bonus.
+
+Does not own pocket capture, normal sunk-ball score values, score stack presentation, X2/X3 visuals, audio, whirlpool VFX, suction, or pocket physics.
+
+### `scripts/PocketStreakPresenter.gd`
+
+Owns Pocket Streak presentation only: queued X2/X3/X4+ multiplier notifications, gold/arcade glow, localized X4+ whirlpool visuals, threat-tell dust/ripple/glints, fixed-pool Pocket Streak audio playback, cooldown counters, pitch/volume escalation, and the dedicated Pocket Streak reverb bus.
+
+Presentation is intentionally queued so rapid X2 -> X3 -> X4 events are seen/heard as escalation while scoring happens immediately. The current whirlpool/threat-tell system is deliberately presentation-only: it is a psychological "hungry pocket" tell, not unfinished suction. Real pocket pull, suction, radius changes, or force behavior belong only in a future explicit gameplay pass.
+
+Does not own scoring math, pocket capture, physics, cue feel, collision audio, or HudFeed wording.
+
+### `scripts/HudFeed.gd`
+
+Owns the bottom-left rolling captain's-log feed: message history, newest-at-bottom stacking, progressive age fading, hover-to-review full-opacity reveal, mouse-wheel scrolling, multiline wrapped entries with hanging indentation, and compact atmospheric text presentation.
+
+The feed is a readable history/log for scoring, penalties, anomalies, Pocket Streaks, Table Events, and shop/event feedback. It must not replace pocket-side score celebrations or become a gameplay system. Empty feed space should pass through to gameplay unless the player is intentionally hovering/scrolling the feed.
 
 ### `scripts/Main.gd`
 
@@ -243,7 +324,7 @@ Owns title-screen presentation, main menu input, button wiring, and safe transit
 
 Current main menu uses layered UI over authored art: `assets/ui/mainmenu_bg.png` for sky/moon/ocean/distant scenery, lightweight animated overlay passes, then `assets/ui/mainmenu_fg.png` for ship/tentacles/foreground waves, then fog and menu UI. Start Run loads `Main.tscn`, Options is placeholder/disabled-style shell behavior, and Quit exits the game.
 
-Does not own gameplay systems, pause menu state, debug systems, physics, scoring, BallDropSystem, Quartermaster/Reserve behavior, or persistent options.
+Does not own gameplay systems, pause menu state, debug systems, physics, scoring, Kraken Intervention/BallDrop systems, Quartermaster/Reserve behavior, or persistent options.
 
 ### `scripts/MainMenuPresentationOverlay.gd`
 
@@ -253,9 +334,9 @@ Does not own menu buttons, scene loading, gameplay state, shaders, particles, or
 
 ### `scripts/BallDropMeter.gd`
 
-Owns player-facing progress presentation for the next score-earned ball drop.
+Owns the retired/legacy vertical right-side progress presentation for the old automatic BallDrop loop.
 
-Reads BallDropSystem progress signals/snapshots and renders a vertical right-side HUD meter with lightweight pulse/flash feedback.
+The active player-facing progression meter is now `TableEventMeter.gd` / Kraken Intervention. Do not present `BallDropMeter.gd` as the main progression UI unless the legacy BallDrop loop is explicitly re-enabled for testing.
 
 Does not own drop rules, scoring, spawn timing, debug overlay counters, or gameplay state.
 
@@ -272,6 +353,20 @@ Fake-3D presentation systems should move only drawn presentation layers or draw 
 Owns pooled event-driven billiards collision audio: random hit selection, pitch variation, intensity scaling, cooldown filtering, and collision SFX playback routing.
 
 Does not own collision math, physics timing, scoring, anomaly logic, or gameplay state. Audio should remain event-driven and lightweight rather than becoming a physics-side concern.
+
+### `scripts/GameplayMusicSystem.gd`
+
+Owns low-volume looping gameplay background music and keeps music separate from collision, Pocket Streak, UI, and anomaly SFX.
+
+Gameplay music should support the cursed-table atmosphere without becoming the loudest thing in the room. Collision clacks, Pocket Streaks, Table Events, scoring feedback, and anomaly tells have priority over music readability.
+
+Does not own game state, scoring, physics, Pocket Streak audio, collision audio, or menu music transitions beyond clean gameplay-scene start/stop behavior.
+
+### `scripts/WayfinderCurrentPresenter.gd`
+
+Owns draw-only Wayfinder Current readability: expanding teal/gold initial pulses from dropped Wayfinders and small transfer flashes when current jumps between balls.
+
+Does not own current eligibility, impulses, guidance, scoring, lifetime, transfer limits, or any ball movement.
 
 ## Physics Rules
 
@@ -299,7 +394,7 @@ Anomaly balls should generally get their own system scripts. Current active anom
 - `WayfinderSystem.gd`
 - `PowderKegSystem.gd`
 - `AnchorBallSystem.gd`
-- `CannonBallSystem.gd` currently owns debug-spawnable Cannon identity, collision tuning, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat-presence thresholds.
+- `CannonBallSystem.gd` currently owns debug-spawnable/Table Event Cannon identity, collision tuning, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat-presence thresholds.
 - `TreasureBallSystem.gd` currently owns debug-spawnable Treasure identity tracking, AimPreview perception reporting, committed hide target selection, gentle hiding movement while perceived, and visual fleeing-state reporting.
 - `EmbezzlerSystem.gd` currently owns debug-spawnable/capped Embezzler identity, copied Doubloon storage, willingness, once-per-shot hide-or-run decisions, escape/capture resolution, and visual state reporting.
 
@@ -315,6 +410,8 @@ Pattern:
 Current anomaly rules:
 
 - Wayfinder activates from cue-ball contact, then can guide eligible object balls toward reachable pockets during collision-driven redirects.
+- Wayfinder Current is the Kraken Intervention expression of Wayfinder behavior: temporary possession with transferable guided momentum, localized impulses, carrier transfers, current-caused scoring, and draw-only pulse/transfer-flash presentation.
+- Wayfinder Current currently uses conservative eligibility, short lifetime, and transfer-depth safety. Nearby affected-ball count is intentionally uncapped for now, so future optimization should tune radius/readability before adding hard caps.
 - Powder Keg explodes on cue-ball or Cannon Ball contact only; normal balls still do not trigger it.
 - Powder Keg pushes nearby balls outward with falloff, then removes itself from the table.
 - Powder Keg launches Cannon Balls with Cannon-owned impulse amplification and a conservative Cannon launch speed cap.
@@ -331,12 +428,12 @@ Current anomaly rules:
 - When all valid chained balls touch the seed, a visible warning timer starts. The timer counts down only while the player can act and pauses during unresolved table motion.
 - If the warning completes, corruption spreads from the touching chained balls into new curse seeds; spread is event-driven and newly created seeds have a short grace window to avoid same-frame recursive spread.
 - Anchor curse seeds can collapse through direct cue-ball hit, Powder Keg, strong Cannon Ball hit, or pocketing a chained ball. Collapse releases chains, clears warning/spread state, and restores the seed to a normal object ball.
-- Cannon Ball is currently debug-spawn only and visually reads as dark heavy iron with ember detail.
+- Cannon Ball is currently debug-spawnable and Table Event/drop-only. It visually reads as dark heavy iron with ember detail.
 - Cannon Ball has collision modifiers against non-anomaly balls only: it gains reduced velocity when hit, retains more velocity when driving into a ball, and transfers stronger force above a minimum impact speed.
 - Cannon Ball can trigger Powder Keg explosions and receives amplified Powder Keg launch impulse.
 - Cannon Ball qualifying heavy impacts can request short, subtle table-impact shake through `TableImpactShakeSystem.gd`, with cooldown to prevent shake spam.
 - Cannon Ball high-speed heat presence is draw-only in `Ball.gd`, tuned by `CannonBallSystem.gd`, and visually capped so chaos degrades presentation before gameplay.
-- Cannon Ball currently has no regular spawn odds and no Cannon-specific special interactions with Anchor or Wayfinder.
+- Cannon Ball currently has no regular spawn odds and no Cannon-specific special interactions with Anchor or Wayfinder beyond existing Powder Keg and Table Event drop/launch paths.
 - Treasure Ball is currently debug-spawn only and behaves physically like a normal object ball.
 - Treasure Ball uses AimPreview's existing prediction/spatial-grid work to report when Treasure is inside the aim-line perception corridor and not occluded by a closer ball.
 - Treasure perception is emotional/perceptual, not merely exact first-hit targeting. Treasure should react to being watched by the aim guide or aimed at too closely, even when it is not the first predicted collision target.
@@ -362,18 +459,27 @@ Possible future anomaly systems:
 
 - `EtherealSystem.gd`
 
-## Ball Drop System Boundary
+## Kraken Intervention / Table Event Boundary
 
-The score-tied ball drop loop should stay in its own focused system, `BallDropSystem.gd`, instead of expanding `ScoreSystem.gd` or `Table.gd`.
+The active progression/economy loop is Kraken Intervention, not automatic score-triggered BallDrop rewards.
+
+Canonical design philosophy: automatic BallDrops made score feel like hidden table plumbing. Kraken Intervention makes escalation legible and chosen: the player earns a dangerous opportunity, decides whether to pay for it, and knowingly invites the cursed table to reshape itself.
 
 Preferred flow:
 
-- `ShotEventSystem.gd` / `ScoreSystem.gd` report score events.
-- `BallDropSystem.gd` decides drop rewards from those score events.
-- `SpawnSystem.gd` performs the actual drops and safe placement.
-- `Table.gd` coordinates only.
+- `ShotEventSystem.gd` records causal shot history.
+- `ScoreSystem.gd` awards Doubloons immediately and emits award amounts.
+- `TableEventSystem.gd` tracks only shot-active earned Doubloons toward the Kraken Intervention threshold.
+- Reaching the threshold creates a pending intervention opportunity, not an automatic spawn.
+- Cue-control regain marks the pending intervention ready and makes the icon clickable.
+- `TableEventMenu.gd` presents three weighted unique offers.
+- `TableEventSystem.gd` validates purchases, spends Doubloons through the safe score/economy path, and routes event execution to the owning systems.
+- `SpawnSystem.gd` performs actual ball drops/launch setup, while anomaly systems own behavior after balls exist.
+- `Table.gd` coordinates wiring and shot lifecycle only.
 
-Do not bury score-tied reward decisions inside `ScoreSystem.gd`, and do not add another large reward subsystem directly to `Table.gd`.
+Spending Doubloons on interventions is not scoring and must not refill Kraken Intervention. Automatic score-triggered BallDrop spawning is gated/disabled by default and should stay retired unless explicitly requested; it is not a parallel active economy.
+
+Do not bury Table Event choice/economy decisions inside `ScoreSystem.gd`, and do not add large event logic directly to `Table.gd`.
 
 ## Score And Doubloons Rules
 
@@ -389,9 +495,11 @@ Do not bury score-tied reward decisions inside `ScoreSystem.gd`, and do not add 
 - Lower-priority stacks may fade/yield when stronger tier moments appear nearby; Legendary should remain the most prominent and least likely to yield.
 - The old popup path should not be used for implemented tier events unless a future/unknown reward intentionally stays outside the stack architecture.
 - Drop/spawn notifications may still use top/center callouts; scoring feedback should not return there unless explicitly requested.
-- Quartermaster spending is not score awarding. Shop purchases should not emit `doubloons_awarded`, feed `BallDropSystem` progress, or appear as sink-score rewards.
+- Pocket Streak tracks repeated object-ball sinks into the same pocket during one shot. It is separate from `MULTI_SINK`, uses same-pocket scoring context, awards immediately through normal Doubloon flow, and logs compact HudFeed flavor lines.
+- Wayfinder Current can score eligible current-caused sinks through a focused current snapshot path without pretending a normal cue shot is active.
+- Quartermaster and Kraken Intervention spending are not score awarding. Purchases should not emit `doubloons_awarded`, feed Kraken Intervention progress, revive BallDrop progress, or appear as sink-score rewards.
 - Do not add coin sprays, progression, or large score VFX without permission.
-- Normal gameplay reward drops should come from score-tied `BallDropSystem.gd` progress, not legacy pocket-count, bank, or multi-pocket reward paths.
+- Normal gameplay reward drops should come from player-chosen Kraken Intervention/Table Event purchases, not automatic score-triggered BallDrop progress.
 
 ## Shot Event Philosophy
 
@@ -399,9 +507,11 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 
 ## Quartermaster, Reserve, And Placement Rules
 
-- Quartermaster currently presents three rotating tactical offers selected from the purchasable item pool.
+- Quartermaster currently presents three rotating tactical offers selected from the purchasable item pool through the live gameplay-mounted `QuartermasterHUD.gd` side rail.
 - Current purchasable items are Loose Object Ball, Wayfinder Ball, and Powder Keg.
 - Buying an offer fills the first empty Reserve slot instead of immediately entering placement mode.
+- The old active pause-menu Quartermaster purchasing flow is retired/hidden; the pause menu only owns shell/debug UI around it.
+- Quartermaster tooltips appear on hover and should stay compact. Permanent item-description panels should not return unless specifically requested.
 - Reserve has exactly three slots in the current implementation.
 - Reserve deployment clicks a filled slot, pauses gameplay if needed, enters `BallPlacementSystem.gd`, and keeps the item in the slot until valid confirm.
 - Confirming a valid deployment places the ball and clears the Reserve slot.
@@ -417,22 +527,51 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 - Star twinkles and ocean shimmer should render behind ship/tentacle foreground silhouettes; fog can remain above the foreground if it reads naturally.
 - Title-screen overlays must remain lightweight and presentation-only: draw code or simple UI nodes, no heavy shaders or particle systems unless explicitly requested.
 - Start Run should load the existing gameplay scene without turning `Main.gd` into a large app shell.
-- Menu polish should not touch gameplay, pause/debug architecture, scoring, BallDropSystem, Quartermaster, Reserve, or anomalies.
+- Menu polish should not touch gameplay, pause/debug architecture, scoring, Kraken Intervention, Quartermaster, Reserve, or anomalies.
+
+## Presentation And HUD Rules
+
+- The player-facing progression meter is the horizontal bottom-center `KRAKEN INTERVENTION` meter, with progress count below/left, percentage to the right, and a nearby ready icon.
+- The intervention menu title is `Request Kraken Intervention...`; keep it compact, centered over the playfield, and styled as an ominous tactical choice rather than a full-screen shop.
+- `HudFeed.gd` owns the borderless bottom-left rolling feed. It should read like a captain's log/ship chatter, support multiline wrapping, fade older entries, and allow hover-scroll review.
+- Quartermaster shop presentation is mounted live on the right-side gameplay rail. It should visually match Reserve slot icon language and use hover tooltips instead of permanent descriptions.
+- Standard object balls use solid, readable, moodier arcade colors rather than visible numbers or stripe-state rolling experiments.
+- The eight ball should remain gameplay-identical to regular object balls but visually distinct through the obsidian body and draw-only floating ethereal sigil.
+- The ship-floor background and table decor are presentation-only. Floor/decor art must sit behind gameplay/HUD layers and must never affect collision, pockets, rails, cue input, scoring, or spawn safety.
+- Table decor randomization should reference only assets that still exist; removed top-left/top-right prop variants should not be revived without restoring the assets.
+- Keep UI font changes shared where practical, but tune per UI category for clipping/readability. Do not force HudFeed's small captain-log sizing onto larger menu/card text.
+
+## Debug And Test Controls
+
+- Modular debug panels should remain draggable, pause-safe, and hidden-work gated.
+- The pause/debug menu exposes temporary Event Test Button checkboxes for Wayfinder Current and Broadside Attack. They should be visible near the top of Debug controls, off by default, and debug-only.
+- The right-side `Current` / `Broadside` test buttons call the same event behavior as real Table Events while bypassing only cost/readiness. They must not spend Doubloons, refill Kraken Intervention, alter offer state, or duplicate event logic.
+- Useful current debug surfaces include Table Event threshold/progress/pending/readiness/offers, Pocket Streak multiplier/queue/audio/whirlpool counters, Wayfinder Current carriers/affected/transfers/current-caused sinks, and Pocket Streak audio cooldown/player-pool state.
+- Debug buttons and panels must consume their own intentional clicks without stealing cue dragging outside their active rectangles.
 
 ## Audio Rules
 
 - Ball-to-ball collision audio is event-driven from meaningful collision reports, not continuous scanning.
 - `BallAudioSystem.gd` owns pooling, stream selection, pitch variation, volume scaling, and cooldown/spam filtering.
 - Tiny settling contacts should remain filtered so high ball counts do not become machine-gun audio.
+- Gameplay music uses a dedicated low-volume loop owner and must stay separate from SFX.
+- Music's job is atmosphere and momentum, not dominance. Keep it low enough that collisions, Pocket Streaks, intervention cues, scoring feedback, and anomaly tells stay readable.
+- Pocket Streak audio uses its own finite audio clip, fixed player pool, cooldown safeguards, pitch/volume caps, and dedicated reverb bus. It must not use `AudioStreamGenerator`, create unmanaged players, or route through collision audio.
+- Collision audio, Pocket Streak audio, UI/menu audio, and music should remain separate enough that one system cannot exhaust or destabilize another.
 - Audio should feel responsive to visible impact timing, but must not change collision math, cue feel, shot velocity, scoring, or anomaly behavior.
-- Add rail, pocket, UI, music, or anomaly-specific audio only in focused future passes.
+- Add rail, pocket, UI, or anomaly-specific audio only in focused future passes.
 
 ## Performance Rules
 
 - Stopped-ball filtering exists and should be preserved.
 - Ball-vs-ball broad-phase spatial grid exists and should be preserved.
 - Rail checks and pocket checks should run only for moving gameplay-active balls.
-- Performance overlay/debug tools exist in `DebugOverlay.gd` and use requested-section snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, `CannonBallSystem.gd`, `TreasureBallSystem.gd`, `EmbezzlerSystem.gd`, `BallDropSystem.gd`, `QuartermasterSystem.gd`, and `ReserveSystem.gd`.
+- Performance overlay/debug tools exist in `DebugOverlay.gd` and use requested-section snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, `CannonBallSystem.gd`, `TreasureBallSystem.gd`, `EmbezzlerSystem.gd`, `BallDropSystem.gd`, `TableEventSystem.gd`, `PocketStreakSystem.gd`, `PocketStreakPresenter.gd`, `QuartermasterSystem.gd`, and `ReserveSystem.gd`.
+- Kraken Intervention should stay shot/event-driven. Do not reintroduce automatic score-triggered drop spawning as hidden per-award churn.
+- Table Event offer generation is weighted/unique and happens at decision moments, not continuously.
+- Wayfinder Current is intentionally chaotic, but still uses localized event triggers, lifetime/transfer-depth safety, conservative eligibility, and draw-only readability hooks.
+- Pocket Streak whirlpool/threat tells are localized presentation only and must not become hidden suction/force updates. No gameplay pull exists yet by design; if that ever changes, it needs a named gameplay pass with physics/pocket validation.
+- HudFeed should keep message history and wrapping lightweight; it is a readable log, not a gameplay scanner.
 - Anchor is now state/event-driven curse-seed gameplay, not a continuous force-field simulation. Do not reintroduce per-frame broad pull scans as Anchor's identity.
 - Embezzler is capped and decision/event-driven: it may track aim pressure and reposition while active, but escape decisions should remain once-per-shot and not become frame-loop random roll spam.
 - Score celebrations should coalesce through evolving stack presentation so high-chaos scoring creates fewer independent UI labels/tweens.
@@ -508,19 +647,23 @@ Avoid generic filler summaries. The review should reinforce Kraken An Eight Ball
 
 ## Next Major Goal
 
-Continue stabilizing score-tied ball drops:
+Continue stabilizing the Kraken Intervention / Table Event economy:
 
-better play -> more score events/Doubloons -> more balls -> more interactions -> higher score before the table empties.
+better shots -> more Doubloons -> earned intervention opportunities -> player-chosen chaos -> stronger scoring opportunities -> survive the escalating table.
 
-The first playable loop now exists in `BallDropSystem.gd`. Next passes should focus on presentation polish, tuning, and placeholder removal-animation replacement without moving reward decisions into `ScoreSystem.gd` or `Table.gd`.
+The first playable intervention loop now exists in `TableEventSystem.gd`, `TableEventMeter.gd`, and `TableEventMenu.gd`. Next passes should focus on event-pool tuning, cost/threshold feel, signature intervention readability, debug clarity, and keeping event execution out of `Table.gd`.
 
-Ball drop messaging now rotates for score-earned drops. Current lines include:
+Current Kraken Intervention offers are:
 
-- "The Kraken provides..."
-- "There's another one here somewhere..."
-- "Austin's got it going on!"
+- Cheap Cargo
+- Loose Cargo
+- Powder Cache
+- Wayfinder's Favor
+- Cannon Warning
+- Broadside Attack
+- Wayfinder Current
 
-The first player-facing Ball Drop progress meter exists in `BallDropMeter.gd` as a vertical right-side rising gauge. It should remain a lightweight UI reader of `BallDropSystem.gd`, not a gameplay decision-maker.
+The player-facing meter is now the horizontal bottom-center `KRAKEN INTERVENTION` meter. The old vertical BallDrop meter and automatic reward spawning are retired/gated legacy support unless explicitly re-enabled for a focused test.
 
 Cue ball and eight ball sinking no longer end the game as this loop comes online:
 

@@ -16,6 +16,14 @@ class SpawnBallRequest:
 	var preferred_position := Vector2.ZERO
 	var has_settle_velocity := false
 	var settle_velocity := Vector2.ZERO
+	var landing_callback := Callable()
+	var landing_callback_data: Dictionary = {}
+
+class SpawnLandingCallback:
+	var ball: Ball
+	var remaining_time := 0.0
+	var callback := Callable()
+	var callback_data: Dictionary = {}
 
 class StartingBallData:
 	var cue_ball: Ball
@@ -68,6 +76,7 @@ const SPAWN_SEARCH_CENTER := Vector2(960.0, 540.0)
 const SPAWN_SEARCH_STEP := 34.0
 const SPAWN_SEARCH_RINGS := 10
 const SPAWN_DROP_STAGGER := 0.14
+const SPAWN_DROP_LANDING_CALLBACK_DELAY := 0.70
 const SPAWN_RANDOM_RADIUS_MIN := 40.0
 const SPAWN_RANDOM_RADIUS_MAX := 180.0
 const SPAWN_BALL_NUMBERS := [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15]
@@ -79,6 +88,7 @@ const RESET_SEARCH_RINGS := 8
 var table
 var pocketed_object_ball_spawn_progress := 0
 var pending_spawn_requests: Array[SpawnBallRequest] = []
+var pending_landing_callbacks: Array[SpawnLandingCallback] = []
 var spawn_drop_cooldown := 0.0
 var next_spawn_ball_index := 0
 
@@ -168,6 +178,29 @@ func queue_plain_object_ball_drops(spawn_count: int, callout_message: String = "
 
 func queue_wayfinder_ball_drops(spawn_count: int, callout_message: String = "") -> void:
 	_queue_specific_ball_drops(spawn_count, true, false, false, callout_message)
+
+
+func queue_wayfinder_current_drops(
+	spawn_count: int,
+	landing_callback: Callable,
+	callout_message: String = "",
+	landing_callback_data: Dictionary = {}
+) -> void:
+	for spawn_index in range(maxi(spawn_count, 0)):
+		var request: SpawnBallRequest = _make_specific_spawn_request(true, false, false, false)
+		request.landing_callback = landing_callback
+		request.landing_callback_data = landing_callback_data.duplicate(true)
+		pending_spawn_requests.append(request)
+		if spawn_index == 0 and not callout_message.is_empty():
+			table.queue_spawn_reward_message(
+				request.is_wayfinder,
+				request.is_powder_keg,
+				request.is_anchor_ball,
+				request.is_cannon_ball,
+				callout_message,
+				request.is_treasure_ball,
+				request.is_embezzler_ball
+			)
 
 
 func queue_powder_keg_drops(spawn_count: int, callout_message: String = "") -> void:
@@ -325,6 +358,8 @@ func queue_debug_normal_ball_spawn() -> void:
 
 
 func process_spawn_queue(delta: float) -> void:
+	_process_landing_callbacks(delta)
+
 	if pending_spawn_requests.is_empty():
 		spawn_drop_cooldown = 0.0
 		return
@@ -598,6 +633,38 @@ func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
 		ball.begin_spawn_drop_with_settle_velocity(spawn_position, request.settle_velocity)
 	else:
 		ball.begin_spawn_drop(spawn_position)
+	_schedule_landing_callback(request, ball)
+
+
+func _schedule_landing_callback(request: SpawnBallRequest, ball: Ball) -> void:
+	if not request.landing_callback.is_valid():
+		return
+
+	var landing_callback: SpawnLandingCallback = SpawnLandingCallback.new()
+	landing_callback.ball = ball
+	landing_callback.remaining_time = SPAWN_DROP_LANDING_CALLBACK_DELAY
+	landing_callback.callback = request.landing_callback
+	landing_callback.callback_data = request.landing_callback_data.duplicate(true)
+	pending_landing_callbacks.append(landing_callback)
+
+
+func _process_landing_callbacks(delta: float) -> void:
+	for callback_index in range(pending_landing_callbacks.size() - 1, -1, -1):
+		var landing_callback: SpawnLandingCallback = pending_landing_callbacks[callback_index] as SpawnLandingCallback
+		if landing_callback == null:
+			pending_landing_callbacks.remove_at(callback_index)
+			continue
+
+		landing_callback.remaining_time -= delta
+		if landing_callback.remaining_time > 0.0:
+			continue
+
+		pending_landing_callbacks.remove_at(callback_index)
+		if not landing_callback.callback.is_valid():
+			continue
+		if landing_callback.ball == null or not is_instance_valid(landing_callback.ball):
+			continue
+		landing_callback.callback.call(landing_callback.ball, landing_callback.callback_data)
 
 
 func _can_spawn_anchor_ball() -> bool:

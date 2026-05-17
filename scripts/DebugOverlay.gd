@@ -15,6 +15,10 @@ const PANEL_POWDER_KEG_WAYFINDER := "powder_keg_wayfinder"
 const PANEL_VISUAL_EFFECTS := "visual_effects"
 const PANEL_PHYSICS := "physics"
 const PANEL_EMBEZZLER := "embezzler"
+const TABLE_EVENT_TEST_BUTTON_SIZE := Vector2(112.0, 36.0)
+const TABLE_EVENT_TEST_BUTTON_RIGHT_OFFSET := 284.0
+const TABLE_EVENT_TEST_BUTTON_TOP := 532.0
+const TABLE_EVENT_TEST_BUTTON_GAP := 8.0
 
 @onready var physics_debug_panel: PanelContainer = $PhysicsDebugPanel
 @onready var physics_debug_label: Label = $PhysicsDebugPanel/Margin/PhysicsDebugLabel
@@ -55,6 +59,8 @@ const PANEL_EMBEZZLER := "embezzler"
 
 var table: BilliardsTable
 var last_debug_overlay_refresh_ms := 0.0
+var wayfinder_current_test_button: Button
+var broadside_attack_test_button: Button
 
 
 func setup(table_ref: BilliardsTable) -> void:
@@ -74,6 +80,7 @@ func setup(table_ref: BilliardsTable) -> void:
 	anchor_single_latch_check_box.visible = false
 	treasure_debug_visual_check_box.set_pressed_no_signal(table.treasure_ball_system.is_debug_visual_enabled())
 	_sync_powder_keg_debug_toggles()
+	_ensure_table_event_debug_buttons()
 	debug_hotkey_label.text = _make_debug_hotkey_text()
 	_connect_debug_controls()
 
@@ -99,6 +106,10 @@ func _connect_debug_controls() -> void:
 		powder_keg_reduced_particles_check_box.toggled.connect(_on_powder_keg_reduced_particles_toggled)
 	if not powder_keg_suppress_trails_check_box.toggled.is_connected(_on_powder_keg_suppress_trails_toggled):
 		powder_keg_suppress_trails_check_box.toggled.connect(_on_powder_keg_suppress_trails_toggled)
+	if wayfinder_current_test_button != null and not wayfinder_current_test_button.pressed.is_connected(_on_wayfinder_current_test_button_pressed):
+		wayfinder_current_test_button.pressed.connect(_on_wayfinder_current_test_button_pressed)
+	if broadside_attack_test_button != null and not broadside_attack_test_button.pressed.is_connected(_on_broadside_attack_test_button_pressed):
+		broadside_attack_test_button.pressed.connect(_on_broadside_attack_test_button_pressed)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -387,6 +398,64 @@ func _toggle_performance_overlay() -> void:
 	performance_overlay_check_box.button_pressed = not performance_overlay_check_box.button_pressed
 
 
+func _ensure_table_event_debug_buttons() -> void:
+	if wayfinder_current_test_button == null:
+		wayfinder_current_test_button = _make_table_event_test_button(
+			"Current",
+			"Debug: trigger Wayfinder Current without spending Doubloons."
+		)
+	if broadside_attack_test_button == null:
+		broadside_attack_test_button = _make_table_event_test_button(
+			"Broadside",
+			"Debug: trigger Broadside Attack without spending Doubloons."
+		)
+	_update_table_event_test_button_layout()
+
+
+func _make_table_event_test_button(text: String, tooltip: String) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.tooltip_text = tooltip
+	button.custom_minimum_size = TABLE_EVENT_TEST_BUTTON_SIZE
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	button.visible = false
+	button.z_index = 36
+	add_child(button)
+	return button
+
+
+func set_wayfinder_current_test_button_visible(enabled: bool) -> void:
+	if wayfinder_current_test_button != null:
+		wayfinder_current_test_button.visible = enabled
+		_update_table_event_test_button_layout()
+
+
+func set_broadside_attack_test_button_visible(enabled: bool) -> void:
+	if broadside_attack_test_button != null:
+		broadside_attack_test_button.visible = enabled
+		_update_table_event_test_button_layout()
+
+
+func _update_table_event_test_button_layout() -> void:
+	var visible_buttons: Array[Button] = []
+	if wayfinder_current_test_button != null and wayfinder_current_test_button.visible:
+		visible_buttons.append(wayfinder_current_test_button)
+	if broadside_attack_test_button != null and broadside_attack_test_button.visible:
+		visible_buttons.append(broadside_attack_test_button)
+
+	for button_index in range(visible_buttons.size()):
+		_position_table_event_test_button(visible_buttons[button_index], button_index)
+
+
+func _position_table_event_test_button(button: Button, stack_index: int) -> void:
+	var top_offset: float = TABLE_EVENT_TEST_BUTTON_TOP + float(stack_index) * (TABLE_EVENT_TEST_BUTTON_SIZE.y + TABLE_EVENT_TEST_BUTTON_GAP)
+	button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	button.offset_left = -TABLE_EVENT_TEST_BUTTON_RIGHT_OFFSET
+	button.offset_right = -TABLE_EVENT_TEST_BUTTON_RIGHT_OFFSET + TABLE_EVENT_TEST_BUTTON_SIZE.x
+	button.offset_top = top_offset
+	button.offset_bottom = top_offset + TABLE_EVENT_TEST_BUTTON_SIZE.y
+
+
 func _on_shot_path_debug_toggled(enabled: bool) -> void:
 	table.set_shot_path_debug_enabled(enabled)
 
@@ -435,6 +504,20 @@ func _on_powder_keg_reduced_particles_toggled(enabled: bool) -> void:
 
 func _on_powder_keg_suppress_trails_toggled(enabled: bool) -> void:
 	table.powder_keg_system.suppress_trails_after_explosion = enabled
+
+
+func _on_wayfinder_current_test_button_pressed() -> void:
+	if table == null or table.table_event_system == null:
+		return
+
+	table.table_event_system.debug_trigger_wayfinder_current()
+
+
+func _on_broadside_attack_test_button_pressed() -> void:
+	if table == null or table.table_event_system == null:
+		return
+
+	table.table_event_system.debug_trigger_broadside_attack()
 
 
 func _make_debug_hotkey_text() -> String:
@@ -629,13 +712,15 @@ func _make_ball_drop_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["table_event_purchased"],
 			snapshot["table_event_denied_purchases"],
 		],
-		"Table Event tuning: Cheap %s/%s, Loose %s/%s, Wayfinder %s/%s, Powder %s/%s, Cannon %s/%s" % [
+		"Table Event tuning: Cheap %s/%s, Loose %s/%s, Wayfinder %s/%s, Current %s/%s, Powder %s/%s, Cannon %s/%s" % [
 			snapshot["table_event_cheap_cargo_ball_count"],
 			snapshot["table_event_cheap_cargo_cost"],
 			snapshot["table_event_loose_cargo_ball_count"],
 			snapshot["table_event_loose_cargo_cost"],
 			snapshot["table_event_wayfinders_favor_ball_count"],
 			snapshot["table_event_wayfinders_favor_cost"],
+			snapshot["table_event_wayfinder_current_ball_count"],
+			snapshot["table_event_wayfinder_current_cost"],
 			snapshot["table_event_powder_cache_ball_count"],
 			snapshot["table_event_powder_cache_cost"],
 			snapshot["table_event_cannon_warning_ball_count"],
@@ -741,6 +826,25 @@ func _make_wayfinder_performance_lines(snapshot: Dictionary) -> Array:
 		"Wayfinder: %s active / %s guided" % [
 			snapshot["active_wayfinders"],
 			snapshot["guided_wayfinder_targets"],
+		],
+		"Wayfinder Current: %s carriers / %s events / %s total hit / %s last hit / %s transfers / %s this event / %s scored / %s expired" % [
+			snapshot["wayfinder_current_carriers"],
+			snapshot["wayfinder_current_events_started"],
+			snapshot["wayfinder_current_initial_affected"],
+			snapshot["wayfinder_current_last_affected"],
+			snapshot["wayfinder_current_transfers"],
+			snapshot["wayfinder_current_last_event_transfers"],
+			snapshot["wayfinder_current_scored_sinks"],
+			snapshot["wayfinder_current_expired"],
+		],
+		"Wayfinder Current FX: %s transfer flashes" % [
+			snapshot["wayfinder_current_transfer_flashes"],
+		],
+		"Wayfinder Current tuning: r %.0f / impulse %.0f / uncapped / %.1fs / depth %s" % [
+			float(snapshot["wayfinder_current_radius"]),
+			float(snapshot["wayfinder_current_impulse_strength"]),
+			float(snapshot["wayfinder_current_lifetime_seconds"]),
+			snapshot["wayfinder_current_transfer_limit"],
 		],
 	]
 

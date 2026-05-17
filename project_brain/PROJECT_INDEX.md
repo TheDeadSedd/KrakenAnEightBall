@@ -19,12 +19,21 @@ This is a fast project map, not a substitute for reading source files and `AGENT
 ## Current Game State
 
 - Kraken An Eight Ball is a systemic arcade-chaos billiards prototype with multiple active escalation systems.
-- Core loop: better play -> more Doubloons -> score-tied ball drops -> more balls -> more interactions -> survive the escalating table state.
+- Core loop: better shots -> more Doubloons -> Kraken Intervention opportunities -> player-chosen Table Events -> more balls/anomalies/chaos -> stronger scoring opportunities -> survive the escalating table state.
 - `MainMenu.tscn` / `MainMenu.gd` now provide an atmospheric layered title screen with lightweight animated overlays.
-- `BallDropSystem.gd` is active; cue-ball and eight-ball sinks are penalties and no longer end the run.
-- `QuartermasterSystem.gd` now presents three rotating tactical offers; successful buys spend Doubloons and fill `ReserveSystem.gd` slots.
+- `TableEventSystem.gd` owns the active Kraken Intervention economy: shot-earned threshold, pending readiness after cue control, weighted offers, purchases, and event routing.
+- Kraken Intervention replaces invisible automatic reward spawning with economic agency, intentional chaos, and tactical risk/reward decisions.
+- `TableEventMeter.gd` and `TableEventMenu.gd` present the horizontal KRAKEN INTERVENTION meter and compact Request Kraken Intervention choice menu.
+- Automatic score-triggered BallDrop rewards are retired/gated. `BallDropSystem.gd` is mostly penalty handling, legacy support, and debug plumbing.
+- Current Table Events include Cheap Cargo, Loose Cargo, Powder Cache, Wayfinder's Favor, Cannon Warning, Broadside Attack, and Wayfinder Current.
+- Broadside Attack is the first authored staged intervention milestone: warning beat, Powder Keg lanes, then delayed Cannon Balls from a cursed gun deck.
+- Wayfinder Current is the cursed-tide intervention: temporary possession with transferable guided momentum and current-caused scoring support.
+- `QuartermasterSystem.gd` owns three rotating tactical offers; `QuartermasterHUD.gd` presents them as a live side-rail shop; successful buys spend Doubloons and fill `ReserveSystem.gd` slots.
 - Reserve deployment uses `BallPlacementSystem.gd`, with `ReserveSlotsUI.gd` and `ReserveDeploymentPresenter.gd` handling icon-only slots and tethered presentation.
 - `BallAudioSystem.gd` owns pooled event-driven ball-to-ball collision sounds with spam filtering.
+- `GameplayMusicSystem.gd` owns low-volume looping gameplay music, separate from SFX and quieter than collision/event readability.
+- `PocketStreakSystem.gd` and `PocketStreakPresenter.gd` own same-pocket streak scoring, queued X2/X3/X4+ presentation, audio, whirlpool visuals, and psychological threat tells with deliberately no gameplay suction.
+- `HudFeed.gd` owns the rolling bottom-left captain's-log feed with fading, hover review, and multiline wrapping.
 - `DebugOverlay.gd` supports modular draggable panels, pause-safe interaction, and requested-section hidden-work gating.
 - `ShotEventSystem.gd` tracks foundational, skilled, heroic, and legendary scoring-event tiers for `ScoreSystem.gd` rewards.
 - `ScoreSystem.gd` routes implemented reward tiers into evolving pocket-side score stacks with count-up totals, tier colors/glows, lane management, and yield/fade behavior.
@@ -38,11 +47,12 @@ This is a fast project map, not a substitute for reading source files and `AGENT
 
 ## Next Major Goal
 
-- Continue stabilizing the score-tied ball drop plus tactical Reserve loop: better play creates score events/Doubloons, more balls, more tactical purchases, and higher score before the table empties.
+- Continue stabilizing the Kraken Intervention/Table Event economy: threshold feel, event costs, offer weights, signature-event readability, and debug clarity.
 - Tune new scoring-event thresholds only through focused passes; do not casually change score values during UI/docs/cleanup work.
-- Future Quartermaster work can add more stock rules, rerolls, or unlocks, but the current event-driven rotating-offer spine should stay small.
+- Future Table Events can expand the intervention pool, but event execution should remain in focused owners rather than growing Table.gd.
+- Future Quartermaster work can add more stock rules, rerolls, or unlocks, but the current event-driven rotating-offer and live HUD spine should stay small.
 - Cue-ball and eight-ball sinks cost 25 Doubloons; cue-ball sinks remove one eligible object ball, while eight-ball sinks try to transform one eligible object ball into an Anchor curse seed.
-- System boundary: `BallDropSystem.gd` decides score-tied drop rewards, then `SpawnSystem.gd` performs drops while `Table.gd` coordinates only.
+- System boundary: `TableEventSystem.gd` decides intervention opportunities/purchases, then `SpawnSystem.gd` and anomaly systems perform consequences while `Table.gd` coordinates only.
 
 ## Metadata Comments
 
@@ -60,14 +70,16 @@ The scanner understands optional comments in source files:
 
 - `scenes/CueBall.tscn` - CueBall. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
 - `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.; owner: mechanics_agent
-- `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
+- `scripts/BallDropSystem.gd` - Ball Drop System. Backstage legacy/gated automatic reward-drop helpers plus active cue/eight-ball sink penalty handling and debug plumbing.; status: In Progress; owner: systems_agent; notes: Legacy/gated automatic reward-drop progress remains retired; cue/eight-ball penalties remain active.
 - `scripts/CannonBallSystem.gd` - Cannon Ball System. Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Cannon Ball anomaly system; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/CueController.gd` - CueController. Owns cue visuals, grab-zone hit testing, pullback, and strike presentation.; owner: mechanics_agent
 - `scripts/EmbezzlerSystem.gd` - Embezzler System. Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters.; status: Prototype; owner: anomaly_ball_agent; notes: Embezzler identity, copied Doubloon storage, willingness, nervous hiding/repositioning, escape resolution, and capture cashout debug state.
+- `scripts/PocketStreakSystem.gd` - PocketStreakSystem. Tracks same-pocket object-ball streaks per shot, same-pocket scoring subtotals, multiplier context, and double-award safety.; owner: mechanics_agent
 - `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and evolving pocket-side score stack presentation.; owner: ui_agent
 - `scripts/ShotEventSystem.gd` - ShotEventSystem. Tracks causal per-shot foundational, skilled, heroic, and legendary scoring events for sunk balls.; owner: mechanics_agent
-- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, owns regular anomaly odds, and routes debug Anchor requests into curse-seed transformation.; owner: systems_agent
+- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, performs safe spawn searches, owns regular anomaly odds, executes Table Event drop/launch helpers, and routes debug Anchor requests into curse-seed transformation.; owner: systems_agent
 - `scripts/Table.gd` - Table. High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/TableEventSystem.gd` - TableEventSystem. Owns Kraken Intervention shot-earned threshold tracking, pending readiness, weighted offers, purchases, debug triggers, and player-chosen Table Event execution routing.; owner: systems_agent
 - `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception with grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only legs.
 
 ## Physics
@@ -86,7 +98,7 @@ The scanner understands optional comments in source files:
 - `scripts/EmbezzlerSystem.gd` - Embezzler System. Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters.; status: Prototype; owner: anomaly_ball_agent; notes: Embezzler identity, copied Doubloon storage, willingness, nervous hiding/repositioning, escape resolution, and capture cashout debug state.
 - `scripts/PowderKegSystem.gd` - PowderKegSystem. Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.; owner: anomaly_ball_agent
 - `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception with grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only legs.
-- `scripts/WayfinderSystem.gd` - WayfinderSystem. Handles Wayfinder activation and temporary guided-ball redirects.; owner: anomaly_ball_agent
+- `scripts/WayfinderSystem.gd` - WayfinderSystem. Handles Wayfinder activation, guided redirects, temporary Wayfinder Current carriers, transfer-on-hit guided momentum, and current-caused scoring snapshots.; owner: anomaly_ball_agent
 
 ## Systems
 
@@ -98,27 +110,36 @@ The scanner understands optional comments in source files:
 - `scenes/Table.tscn` - Table. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
 - `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.; owner: anomaly_ball_agent
 - `scripts/BallAudioSystem.gd` - BallAudioSystem. Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering.; owner: systems_agent
-- `scripts/BallDropMeter.gd` - Ball Drop Meter. Vertical right-side HUD meter for progress toward the next score-earned ball drop.; status: In Progress; owner: ui_agent; notes: Vertical right-side meter for score progress toward the next earned ball drop.
-- `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
+- `scripts/BallDropMeter.gd` - Ball Drop Meter. Retired/legacy vertical HUD meter for the old automatic BallDrop loop; current progression UI is TableEventMeter.; status: In Progress; owner: ui_agent; notes: Retired legacy BallDrop meter; current progression UI is the horizontal Kraken Intervention meter.
+- `scripts/BallDropSystem.gd` - Ball Drop System. Backstage legacy/gated automatic reward-drop helpers plus active cue/eight-ball sink penalty handling and debug plumbing.; status: In Progress; owner: systems_agent; notes: Legacy/gated automatic reward-drop progress remains retired; cue/eight-ball penalties remain active.
 - `scripts/BallPlacementSystem.gd` - BallPlacementSystem. Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects.; owner: systems_agent
 - `scripts/BoundarySystem.gd` - BoundarySystem. Loads authored rail/boundary geometry and shared boundary helpers.; owner: systems_agent
 - `scripts/CannonBallSystem.gd` - Cannon Ball System. Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Cannon Ball anomaly system; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/EmbezzlerSystem.gd` - Embezzler System. Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters.; status: Prototype; owner: anomaly_ball_agent; notes: Embezzler identity, copied Doubloon storage, willingness, nervous hiding/repositioning, escape resolution, and capture cashout debug state.
+- `scripts/GameplayMusicSystem.gd` - GameplayMusicSystem. Low-volume looping gameplay music owner, separate from collision, UI, Pocket Streak, and anomaly SFX.; owner: systems_agent
+- `scripts/HudFeed.gd` - HudFeed. Bottom-left rolling captain's-log feed with fading stack, hover-scroll review, history, and multiline wrapped entries.; owner: ui_agent
 - `scripts/Main.gd` - Main. Small app shell and top-level scene wiring.; owner: systems_agent
-- `scripts/PauseMenu.gd` - PauseMenu. Pause menu tabs, resume/quit wiring, Quartermaster tab rendering, and debug panel toggles.; owner: ui_agent
+- `scripts/PauseMenu.gd` - PauseMenu. Pause menu shell, resume/quit wiring, legacy/hidden Quartermaster tab state, debug panel toggles, and temporary Event Test Button checkboxes.; owner: ui_agent
+- `scripts/PocketStreakPresenter.gd` - PocketStreakPresenter. Queued Pocket Streak multiplier presentation, fixed-pool audio/reverb, X4+ whirlpool visuals, and localized presentation-only threat tells.; owner: ui_agent
+- `scripts/PocketStreakSystem.gd` - PocketStreakSystem. Tracks same-pocket object-ball streaks per shot, same-pocket scoring subtotals, multiplier context, and double-award safety.; owner: mechanics_agent
 - `scripts/PocketSystem.gd` - PocketSystem. Loads authored pocket geometry and detects pocket captures.; owner: systems_agent
 - `scripts/PowderKegSystem.gd` - PowderKegSystem. Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.; owner: anomaly_ball_agent
+- `scripts/QuartermasterHUD.gd` - QuartermasterHUD. Live right-side Quartermaster side-rail shop presentation with item slots, costs, hover tooltips, affordability tinting, and cue-safe clicks.; owner: ui_agent
 - `scripts/QuartermasterSystem.gd` - QuartermasterSystem. Owns Quartermaster inventory, prices, affordability, active rotating offers, event-driven offer refresh, and purchase-to-Reserve state.; owner: systems_agent
 - `scripts/ReserveDeploymentPresenter.gd` - Reserve Deployment Presenter. Draw-only cursor icon and dotted tether presentation while deploying a reserved item.; status: In Progress; owner: ui_agent; notes: Draws presentation-only reserve deployment cursor icon and dotted tether.
 - `scripts/ReserveSlotsUI.gd` - Reserve Slots UI. Icon-only upper table-frame Reserve slot UI with hover glow, click consumption, and deployment request wiring.; status: In Progress; owner: ui_agent; notes: Draws icon-only reserve slots, emits filled-slot deploy requests, and consumes slot press input.
 - `scripts/ReserveSystem.gd` - Reserve System. Owns three Reserve slot contents, selected/deploying state, deployment confirm/cancel bookkeeping, snapshots, and simple debug counters.; status: In Progress; owner: systems_agent; notes: Owns tactical reserve slot contents, selection/deployment state, snapshots, and reserve counters.
 - `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and evolving pocket-side score stack presentation.; owner: ui_agent
 - `scripts/ShotEventSystem.gd` - ShotEventSystem. Tracks causal per-shot foundational, skilled, heroic, and legendary scoring events for sunk balls.; owner: mechanics_agent
-- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, owns regular anomaly odds, and routes debug Anchor requests into curse-seed transformation.; owner: systems_agent
+- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, performs safe spawn searches, owns regular anomaly odds, executes Table Event drop/launch helpers, and routes debug Anchor requests into curse-seed transformation.; owner: systems_agent
 - `scripts/Table.gd` - Table. High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/TableEventMenu.gd` - TableEventMenu. Compact Request Kraken Intervention menu with three weighted offer cards, affordability, rarity display, hover, close, and purchase forwarding.; owner: ui_agent
+- `scripts/TableEventMeter.gd` - TableEventMeter. Horizontal bottom-center KRAKEN INTERVENTION meter with shot progress, percent text, pulse feedback, and ready icon.; owner: ui_agent
+- `scripts/TableEventSystem.gd` - TableEventSystem. Owns Kraken Intervention shot-earned threshold tracking, pending readiness, weighted offers, purchases, debug triggers, and player-chosen Table Event execution routing.; owner: systems_agent
 - `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
 - `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception with grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only legs.
-- `scripts/WayfinderSystem.gd` - WayfinderSystem. Handles Wayfinder activation and temporary guided-ball redirects.; owner: anomaly_ball_agent
+- `scripts/WayfinderCurrentPresenter.gd` - WayfinderCurrentPresenter. Draw-only Wayfinder Current readability presentation for initial teal/gold pulses and transfer flashes.; owner: ui_agent
+- `scripts/WayfinderSystem.gd` - WayfinderSystem. Handles Wayfinder activation, guided redirects, temporary Wayfinder Current carriers, transfer-on-hit guided momentum, and current-caused scoring snapshots.; owner: anomaly_ball_agent
 
 ## UI
 
@@ -126,30 +147,39 @@ The scanner understands optional comments in source files:
 - `scenes/Main.tscn` - Main. Godot scene file used for authored node layout and scene wiring.; owner: ui_agent
 - `scenes/MainMenu.tscn` - MainMenu. Layered title-screen scene with background art, animated overlay passes, foreground art, fog, and menu UI.; owner: ui_agent
 - `scripts/AimPreview.gd` - AimPreview. Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure/Embezzler perception snapshots, and AimPreview broad-phase counters.; owner: performance_agent
-- `scripts/BallDropMeter.gd` - Ball Drop Meter. Vertical right-side HUD meter for progress toward the next score-earned ball drop.; status: In Progress; owner: ui_agent; notes: Vertical right-side meter for score progress toward the next earned ball drop.
-- `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
+- `scripts/BallDropMeter.gd` - Ball Drop Meter. Retired/legacy vertical HUD meter for the old automatic BallDrop loop; current progression UI is TableEventMeter.; status: In Progress; owner: ui_agent; notes: Retired legacy BallDrop meter; current progression UI is the horizontal Kraken Intervention meter.
+- `scripts/BallDropSystem.gd` - Ball Drop System. Backstage legacy/gated automatic reward-drop helpers plus active cue/eight-ball sink penalty handling and debug plumbing.; status: In Progress; owner: systems_agent; notes: Legacy/gated automatic reward-drop progress remains retired; cue/eight-ball penalties remain active.
 - `scripts/BallPlacementSystem.gd` - BallPlacementSystem. Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects.; owner: systems_agent
 - `scripts/CueController.gd` - CueController. Owns cue visuals, grab-zone hit testing, pullback, and strike presentation.; owner: mechanics_agent
 - `scripts/DebugOverlay.gd` - DebugOverlay. Formats debug menu, modular visible debug panels, requested-section performance snapshots, full F3 overlay, toggles, and physics debug text.; owner: ui_agent
 - `scripts/DebugPanel.gd` - DebugPanel. Reusable draggable debug panel shell with pause-safe input consumption and lightweight text display.; owner: ui_agent
+- `scripts/GameplayMusicSystem.gd` - GameplayMusicSystem. Low-volume looping gameplay music owner, separate from collision, UI, Pocket Streak, and anomaly SFX.; owner: systems_agent
+- `scripts/HudFeed.gd` - HudFeed. Bottom-left rolling captain's-log feed with fading stack, hover-scroll review, history, and multiline wrapped entries.; owner: ui_agent
 - `scripts/Main.gd` - Main. Small app shell and top-level scene wiring.; owner: systems_agent
 - `scripts/MainMenu.gd` - Main Menu. Title-screen shell, layered menu presentation, button input, and transition into the gameplay scene.; status: In Progress; owner: ui_agent; notes: Lightweight title screen shell using layered main menu artwork as the primary visual foundation.
 - `scripts/MainMenuPresentationOverlay.gd` - Main Menu Presentation Overlay. Draw-only layered title-screen atmosphere for moon glow, stars, ocean shimmer, and fog.; status: In Progress; owner: ui_agent; notes: Draw-only title screen atmosphere that can be split across layered main menu artwork.
-- `scripts/PauseMenu.gd` - PauseMenu. Pause menu tabs, resume/quit wiring, Quartermaster tab rendering, and debug panel toggles.; owner: ui_agent
+- `scripts/PauseMenu.gd` - PauseMenu. Pause menu shell, resume/quit wiring, legacy/hidden Quartermaster tab state, debug panel toggles, and temporary Event Test Button checkboxes.; owner: ui_agent
+- `scripts/PocketStreakPresenter.gd` - PocketStreakPresenter. Queued Pocket Streak multiplier presentation, fixed-pool audio/reverb, X4+ whirlpool visuals, and localized presentation-only threat tells.; owner: ui_agent
+- `scripts/PocketStreakSystem.gd` - PocketStreakSystem. Tracks same-pocket object-ball streaks per shot, same-pocket scoring subtotals, multiplier context, and double-award safety.; owner: mechanics_agent
+- `scripts/QuartermasterHUD.gd` - QuartermasterHUD. Live right-side Quartermaster side-rail shop presentation with item slots, costs, hover tooltips, affordability tinting, and cue-safe clicks.; owner: ui_agent
 - `scripts/QuartermasterOfferRefreshEffect.gd` - QuartermasterOfferRefreshEffect. Presentation-only fresh-stock glow/shimmer effect for newly refreshed Quartermaster offers.; owner: ui_agent
 - `scripts/QuartermasterSystem.gd` - QuartermasterSystem. Owns Quartermaster inventory, prices, affordability, active rotating offers, event-driven offer refresh, and purchase-to-Reserve state.; owner: systems_agent
 - `scripts/ReserveDeploymentPresenter.gd` - Reserve Deployment Presenter. Draw-only cursor icon and dotted tether presentation while deploying a reserved item.; status: In Progress; owner: ui_agent; notes: Draws presentation-only reserve deployment cursor icon and dotted tether.
 - `scripts/ReserveSlotsUI.gd` - Reserve Slots UI. Icon-only upper table-frame Reserve slot UI with hover glow, click consumption, and deployment request wiring.; status: In Progress; owner: ui_agent; notes: Draws icon-only reserve slots, emits filled-slot deploy requests, and consumes slot press input.
 - `scripts/ReserveSystem.gd` - Reserve System. Owns three Reserve slot contents, selected/deploying state, deployment confirm/cancel bookkeeping, snapshots, and simple debug counters.; status: In Progress; owner: systems_agent; notes: Owns tactical reserve slot contents, selection/deployment state, snapshots, and reserve counters.
 - `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and evolving pocket-side score stack presentation.; owner: ui_agent
+- `scripts/TableEventMenu.gd` - TableEventMenu. Compact Request Kraken Intervention menu with three weighted offer cards, affordability, rarity display, hover, close, and purchase forwarding.; owner: ui_agent
+- `scripts/TableEventMeter.gd` - TableEventMeter. Horizontal bottom-center KRAKEN INTERVENTION meter with shot progress, percent text, pulse feedback, and ready icon.; owner: ui_agent
+- `scripts/TableEventSystem.gd` - TableEventSystem. Owns Kraken Intervention shot-earned threshold tracking, pending readiness, weighted offers, purchases, debug triggers, and player-chosen Table Event execution routing.; owner: systems_agent
 - `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
+- `scripts/WayfinderCurrentPresenter.gd` - WayfinderCurrentPresenter. Draw-only Wayfinder Current readability presentation for initial teal/gold pulses and transfer flashes.; owner: ui_agent
 
 ## Debug Tools
 
 - `AGENTS.md` - AGENTS. Project documentation or checkpoint notes.; owner: cleanup_agent
 - `scripts/DebugOverlay.gd` - DebugOverlay. Formats debug menu, modular visible debug panels, requested-section performance snapshots, full F3 overlay, toggles, and physics debug text.; owner: ui_agent
 - `scripts/DebugPanel.gd` - DebugPanel. Reusable draggable debug panel shell with pause-safe input consumption and lightweight text display.; owner: ui_agent
-- `scripts/PauseMenu.gd` - PauseMenu. Pause menu tabs, resume/quit wiring, Quartermaster tab rendering, and debug panel toggles.; owner: ui_agent
+- `scripts/PauseMenu.gd` - PauseMenu. Pause menu shell, resume/quit wiring, legacy/hidden Quartermaster tab state, debug panel toggles, and temporary Event Test Button checkboxes.; owner: ui_agent
 
 ## Performance Concerns
 
@@ -157,17 +187,22 @@ The scanner understands optional comments in source files:
 - `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.; owner: anomaly_ball_agent
 - `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.; owner: mechanics_agent
 - `scripts/BallAudioSystem.gd` - BallAudioSystem. Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering.; owner: systems_agent
-- `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
+- `scripts/BallDropSystem.gd` - Ball Drop System. Backstage legacy/gated automatic reward-drop helpers plus active cue/eight-ball sink penalty handling and debug plumbing.; status: In Progress; owner: systems_agent; notes: Legacy/gated automatic reward-drop progress remains retired; cue/eight-ball penalties remain active.
 - `scripts/BallPlacementSystem.gd` - BallPlacementSystem. Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects.; owner: systems_agent
 - `scripts/BoundarySystem.gd` - BoundarySystem. Loads authored rail/boundary geometry and shared boundary helpers.; owner: systems_agent
 - `scripts/CannonBallSystem.gd` - Cannon Ball System. Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Cannon Ball anomaly system; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/DebugPanel.gd` - DebugPanel. Reusable draggable debug panel shell with pause-safe input consumption and lightweight text display.; owner: ui_agent
+- `scripts/HudFeed.gd` - HudFeed. Bottom-left rolling captain's-log feed with fading stack, hover-scroll review, history, and multiline wrapped entries.; owner: ui_agent
+- `scripts/PocketStreakPresenter.gd` - PocketStreakPresenter. Queued Pocket Streak multiplier presentation, fixed-pool audio/reverb, X4+ whirlpool visuals, and localized presentation-only threat tells.; owner: ui_agent
 - `scripts/PocketSystem.gd` - PocketSystem. Loads authored pocket geometry and detects pocket captures.; owner: systems_agent
 - `scripts/PowderKegSystem.gd` - PowderKegSystem. Handles Powder Keg cue/Cannon-contact explosions, radial pushes, Cannon launches, and particle bursts.; owner: anomaly_ball_agent
+- `scripts/QuartermasterHUD.gd` - QuartermasterHUD. Live right-side Quartermaster side-rail shop presentation with item slots, costs, hover tooltips, affordability tinting, and cue-safe clicks.; owner: ui_agent
 - `scripts/QuartermasterOfferRefreshEffect.gd` - QuartermasterOfferRefreshEffect. Presentation-only fresh-stock glow/shimmer effect for newly refreshed Quartermaster offers.; owner: ui_agent
 - `scripts/Table.gd` - Table. High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/TableEventSystem.gd` - TableEventSystem. Owns Kraken Intervention shot-earned threshold tracking, pending readiness, weighted offers, purchases, debug triggers, and player-chosen Table Event execution routing.; owner: systems_agent
 - `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
 - `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception with grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only legs.
+- `scripts/WayfinderCurrentPresenter.gd` - WayfinderCurrentPresenter. Draw-only Wayfinder Current readability presentation for initial teal/gold pulses and transfer flashes.; owner: ui_agent
 
 ## In Progress
 
@@ -175,30 +210,37 @@ The scanner understands optional comments in source files:
 - `scenes/MainMenu.tscn` - MainMenu. Layered title-screen scene with background art, animated overlay passes, foreground art, fog, and menu UI.; owner: ui_agent
 - `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.; owner: anomaly_ball_agent
 - `scripts/BallAudioSystem.gd` - BallAudioSystem. Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering.; owner: systems_agent
-- `scripts/BallDropMeter.gd` - Ball Drop Meter. Vertical right-side HUD meter for progress toward the next score-earned ball drop.; status: In Progress; owner: ui_agent; notes: Vertical right-side meter for score progress toward the next earned ball drop.
-- `scripts/BallDropSystem.gd` - Ball Drop System. Tracks Doubloon progress toward score-tied reward drops and cue/eight-ball sink penalties.; status: In Progress; owner: systems_agent; notes: Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
+- `scripts/BallDropMeter.gd` - Ball Drop Meter. Retired/legacy vertical HUD meter for the old automatic BallDrop loop; current progression UI is TableEventMeter.; status: In Progress; owner: ui_agent; notes: Retired legacy BallDrop meter; current progression UI is the horizontal Kraken Intervention meter.
+- `scripts/BallDropSystem.gd` - Ball Drop System. Backstage legacy/gated automatic reward-drop helpers plus active cue/eight-ball sink penalty handling and debug plumbing.; status: In Progress; owner: systems_agent; notes: Legacy/gated automatic reward-drop progress remains retired; cue/eight-ball penalties remain active.
 - `scripts/BallPlacementSystem.gd` - BallPlacementSystem. Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects.; owner: systems_agent
 - `scripts/CannonBallSystem.gd` - Cannon Ball System. Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.; status: In Progress; owner: anomaly_ball_agent; notes: Cannon Ball anomaly system; owns heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and heat presence tuning.
 - `scripts/DebugPanel.gd` - DebugPanel. Reusable draggable debug panel shell with pause-safe input consumption and lightweight text display.; owner: ui_agent
 - `scripts/EmbezzlerSystem.gd` - Embezzler System. Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters.; status: Prototype; owner: anomaly_ball_agent; notes: Embezzler identity, copied Doubloon storage, willingness, nervous hiding/repositioning, escape resolution, and capture cashout debug state.
+- `scripts/GameplayMusicSystem.gd` - GameplayMusicSystem. Low-volume looping gameplay music owner, separate from collision, UI, Pocket Streak, and anomaly SFX.; owner: systems_agent
+- `scripts/HudFeed.gd` - HudFeed. Bottom-left rolling captain's-log feed with fading stack, hover-scroll review, history, and multiline wrapped entries.; owner: ui_agent
 - `scripts/MainMenu.gd` - Main Menu. Title-screen shell, layered menu presentation, button input, and transition into the gameplay scene.; status: In Progress; owner: ui_agent; notes: Lightweight title screen shell using layered main menu artwork as the primary visual foundation.
 - `scripts/MainMenuPresentationOverlay.gd` - Main Menu Presentation Overlay. Draw-only layered title-screen atmosphere for moon glow, stars, ocean shimmer, and fog.; status: In Progress; owner: ui_agent; notes: Draw-only title screen atmosphere that can be split across layered main menu artwork.
-- `scripts/PauseMenu.gd` - PauseMenu. Pause menu tabs, resume/quit wiring, Quartermaster tab rendering, and debug panel toggles.; owner: ui_agent
+- `scripts/PauseMenu.gd` - PauseMenu. Pause menu shell, resume/quit wiring, legacy/hidden Quartermaster tab state, debug panel toggles, and temporary Event Test Button checkboxes.; owner: ui_agent
+- `scripts/PocketStreakPresenter.gd` - PocketStreakPresenter. Queued Pocket Streak multiplier presentation, fixed-pool audio/reverb, X4+ whirlpool visuals, and localized presentation-only threat tells.; owner: ui_agent
+- `scripts/PocketStreakSystem.gd` - PocketStreakSystem. Tracks same-pocket object-ball streaks per shot, same-pocket scoring subtotals, multiplier context, and double-award safety.; owner: mechanics_agent
+- `scripts/QuartermasterHUD.gd` - QuartermasterHUD. Live right-side Quartermaster side-rail shop presentation with item slots, costs, hover tooltips, affordability tinting, and cue-safe clicks.; owner: ui_agent
 - `scripts/QuartermasterOfferRefreshEffect.gd` - QuartermasterOfferRefreshEffect. Presentation-only fresh-stock glow/shimmer effect for newly refreshed Quartermaster offers.; owner: ui_agent
 - `scripts/QuartermasterSystem.gd` - QuartermasterSystem. Owns Quartermaster inventory, prices, affordability, active rotating offers, event-driven offer refresh, and purchase-to-Reserve state.; owner: systems_agent
 - `scripts/ReserveDeploymentPresenter.gd` - Reserve Deployment Presenter. Draw-only cursor icon and dotted tether presentation while deploying a reserved item.; status: In Progress; owner: ui_agent; notes: Draws presentation-only reserve deployment cursor icon and dotted tether.
 - `scripts/ReserveSlotsUI.gd` - Reserve Slots UI. Icon-only upper table-frame Reserve slot UI with hover glow, click consumption, and deployment request wiring.; status: In Progress; owner: ui_agent; notes: Draws icon-only reserve slots, emits filled-slot deploy requests, and consumes slot press input.
 - `scripts/ReserveSystem.gd` - Reserve System. Owns three Reserve slot contents, selected/deploying state, deployment confirm/cancel bookkeeping, snapshots, and simple debug counters.; status: In Progress; owner: systems_agent; notes: Owns tactical reserve slot contents, selection/deployment state, snapshots, and reserve counters.
 - `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and evolving pocket-side score stack presentation.; owner: ui_agent
-- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, owns regular anomaly odds, and routes debug Anchor requests into curse-seed transformation.; owner: systems_agent
+- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, performs safe spawn searches, owns regular anomaly odds, executes Table Event drop/launch helpers, and routes debug Anchor requests into curse-seed transformation.; owner: systems_agent
+- `scripts/TableEventMenu.gd` - TableEventMenu. Compact Request Kraken Intervention menu with three weighted offer cards, affordability, rarity display, hover, close, and purchase forwarding.; owner: ui_agent
+- `scripts/TableEventMeter.gd` - TableEventMeter. Horizontal bottom-center KRAKEN INTERVENTION meter with shot progress, percent text, pulse feedback, and ready icon.; owner: ui_agent
+- `scripts/TableEventSystem.gd` - TableEventSystem. Owns Kraken Intervention shot-earned threshold tracking, pending readiness, weighted offers, purchases, debug triggers, and player-chosen Table Event execution routing.; owner: systems_agent
 - `scripts/TableImpactShakeSystem.gd` - Table Impact Shake System. Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.; status: In Progress; owner: ui_agent; notes: Presentation-only fake-3D table impact shake for Powder Keg explosions and Cannon heavy impacts.
 - `scripts/TreasureBallSystem.gd` - Treasure Ball System. Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting.; status: In Progress; owner: anomaly_ball_agent; notes: Treasure Ball identity, AimPreview corridor perception with grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only legs.
+- `scripts/WayfinderCurrentPresenter.gd` - WayfinderCurrentPresenter. Draw-only Wayfinder Current readability presentation for initial teal/gold pulses and transfer flashes.; owner: ui_agent
 
 ## Needs Review
 
 - `AGENTS.md` - AGENTS. Project documentation or checkpoint notes.; owner: cleanup_agent
-- `CHECKPOINT_EscalationLoopPlayable.md` - CHECKPOINT EscalationLoopPlayable. Project documentation or checkpoint notes.; owner: cleanup_agent
-- `CHECKPOINT_PrototypePhysicsPlayable.md` - CHECKPOINT PrototypePhysicsPlayable. Project documentation or checkpoint notes.; owner: cleanup_agent
 - `NOTES.md` - NOTES. Project documentation or checkpoint notes.; owner: lore_agent
 - `STACK.md` - STACK. Project documentation or checkpoint notes.; owner: lore_agent
 
@@ -208,25 +250,25 @@ Changed scanned files:
 - `AGENTS.md` - AGENTS. Project documentation or checkpoint notes.; owner: cleanup_agent
 - `NOTES.md` - NOTES. Project documentation or checkpoint notes.; owner: lore_agent
 - `STACK.md` - STACK. Project documentation or checkpoint notes.; owner: lore_agent
-- `scenes/Main.tscn` - Main. Godot scene file used for authored node layout and scene wiring.; owner: ui_agent
-- `scenes/Table.tscn` - Table. Godot scene file used for authored node layout and scene wiring.; owner: mechanics_agent
-- `scripts/AimPreview.gd` - AimPreview. Draws polished aim lines, swept cue/target prediction, pocket stopping, endpoint markers, Treasure/Embezzler perception snapshots, and AimPreview broad-phase counters.; owner: performance_agent
-- `scripts/AnchorBallSystem.gd` - AnchorBallSystem. Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.; owner: anomaly_ball_agent
 - `scripts/Ball.gd` - Ball. Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.; owner: mechanics_agent
 - `scripts/DebugOverlay.gd` - DebugOverlay. Formats debug menu, modular visible debug panels, requested-section performance snapshots, full F3 overlay, toggles, and physics debug text.; owner: ui_agent
-- `scripts/EmbezzlerSystem.gd` - Embezzler System. Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters.; status: Prototype; owner: anomaly_ball_agent; notes: Embezzler identity, copied Doubloon storage, willingness, nervous hiding/repositioning, escape resolution, and capture cashout debug state.
-- `scripts/PauseMenu.gd` - PauseMenu. Pause menu tabs, resume/quit wiring, Quartermaster tab rendering, and debug panel toggles.; owner: ui_agent
-- `scripts/ScoreSystem.gd` - ScoreSystem. Converts shot-event history into Doubloons and evolving pocket-side score stack presentation.; owner: ui_agent
-- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, queues reward drops, performs safe spawn searches, owns regular anomaly odds, and routes debug Anchor requests into curse-seed transformation.; owner: systems_agent
+- `scripts/Main.gd` - Main. Small app shell and top-level scene wiring.; owner: systems_agent
+- `scripts/PauseMenu.gd` - PauseMenu. Pause menu shell, resume/quit wiring, legacy/hidden Quartermaster tab state, debug panel toggles, and temporary Event Test Button checkboxes.; owner: ui_agent
+- `scripts/SpawnSystem.gd` - SpawnSystem. Creates balls, performs safe spawn searches, owns regular anomaly odds, executes Table Event drop/launch helpers, and routes debug Anchor requests into curse-seed transformation.; owner: systems_agent
 - `scripts/Table.gd` - Table. High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics.; owner: mechanics_agent
+- `scripts/TableEventSystem.gd` - TableEventSystem. Owns Kraken Intervention shot-earned threshold tracking, pending readiness, weighted offers, purchases, debug triggers, and player-chosen Table Event execution routing.; owner: systems_agent
+- `scripts/WayfinderCurrentPresenter.gd` - WayfinderCurrentPresenter. Draw-only Wayfinder Current readability presentation for initial teal/gold pulses and transfer flashes.; owner: ui_agent
+- `scripts/WayfinderSystem.gd` - WayfinderSystem. Handles Wayfinder activation, guided redirects, temporary Wayfinder Current carriers, transfer-on-hit guided momentum, and current-caused scoring snapshots.; owner: anomaly_ball_agent
 
 Changed files outside scanner set:
-- `scripts/EmbezzlerSystem.gd.uid` - Recently changed but outside the scanned file set.
+- `export_presets.cfg` - Recently changed but outside the scanned file set.
+- `scripts/WayfinderCurrentPresenter.gd.uid` - Recently changed but outside the scanned file set.
 - `tools/build_project_brain.py` - Recently changed but outside the scanned file set.
 
 ## Unclassified
 
-No files currently mapped here.
+- `scripts/ItemIconDraw.gd` - ItemIconDraw. Scanned project file; classification is best-effort.; owner: cleanup_agent
+- `scripts/TableDecorRandomizer.gd` - TableDecorRandomizer. Scanned project file; classification is best-effort.; owner: mechanics_agent
 
 ## Notes
 

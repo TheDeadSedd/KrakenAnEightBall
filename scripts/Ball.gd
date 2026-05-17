@@ -18,6 +18,9 @@ const WAYFINDER_BASE_COLOR := Color("2f9f96")
 const WAYFINDER_MARK_COLOR := Color("f3d27a")
 const WAYFINDER_ACTIVE_GLOW_COLOR := Color("8ef7ea")
 const WAYFINDER_RING_COLOR := Color("173d3a")
+const WAYFINDER_CURRENT_GLOW_COLOR := Color("56efe0")
+const WAYFINDER_CURRENT_GOLD_COLOR := Color("f4d37a")
+const WAYFINDER_CURRENT_TRAIL_COLOR := Color("b9fff6")
 const POWDER_KEG_BASE_COLOR := Color("7b4723")
 const POWDER_KEG_BAND_COLOR := Color("e0b15e")
 const POWDER_KEG_STAVE_COLOR := Color("4a2714")
@@ -159,6 +162,7 @@ var _treasure_leg_phase := 0.0
 var _embezzler_willingness_visual_strength := 0.0
 var _embezzler_stored_value_visual_strength := 0.0
 var _embezzler_escape_visual_strength := 0.0
+var _wayfinder_current_visual_active := false
 var _last_visual_spin_redraw_angle := 0.0
 
 
@@ -182,6 +186,9 @@ func _process(delta: float) -> void:
 	_update_anchor_influence_visual(delta)
 	_update_cannon_presence_visual(delta)
 	_update_treasure_leg_visual(delta)
+
+	if _wayfinder_current_visual_active and visible and gameplay_enabled:
+		queue_redraw()
 
 	if is_wayfinder and wayfinder_active and gameplay_enabled:
 		queue_redraw()
@@ -362,6 +369,14 @@ func set_embezzler_visual_state(willingness_strength: float, stored_value_streng
 	queue_redraw()
 
 
+func set_wayfinder_current_visual_active(enabled: bool) -> void:
+	if _wayfinder_current_visual_active == enabled:
+		return
+
+	_wayfinder_current_visual_active = enabled
+	queue_redraw()
+
+
 func setup(
 	new_type: int,
 	new_number: int,
@@ -390,6 +405,7 @@ func setup(
 	_cannon_presence_flash_remaining = 0.0
 	_clear_treasure_leg_visual()
 	_clear_embezzler_willingness_visual()
+	set_wayfinder_current_visual_active(false)
 	_reset_wayfinder_state()
 	_update_label()
 	_update_number_color()
@@ -409,6 +425,7 @@ func become_anchor_curse_seed() -> void:
 	is_embezzler_ball = false
 	_clear_treasure_leg_visual()
 	_clear_embezzler_willingness_visual()
+	set_wayfinder_current_visual_active(false)
 	_clear_anchor_influence_visual()
 	set_cannon_presence_visual(0.0, Vector2.RIGHT)
 	_cannon_presence_visual_strength = 0.0
@@ -1052,6 +1069,9 @@ func _draw() -> void:
 
 	if is_cannon_ball and _get_cannon_presence_draw_strength() > 0.0:
 		_draw_cannon_presence(origin)
+
+	if _wayfinder_current_visual_active:
+		_draw_wayfinder_current_marker(origin)
 
 	if is_wayfinder:
 		_draw_wayfinder_aura(origin)
@@ -1736,6 +1756,35 @@ func _draw_wayfinder_aura(origin: Vector2) -> void:
 		var inner_glow: Color = WAYFINDER_MARK_COLOR
 		inner_glow.a = 0.22
 		draw_arc(origin, aura_radius - 4.0, 0.0, TAU, 32, inner_glow, 1.4)
+
+
+func _draw_wayfinder_current_marker(origin: Vector2) -> void:
+	var time: float = Time.get_ticks_msec() / 1000.0
+	var pulse: float = 0.5 + 0.5 * sin(time * 10.0)
+	var speed_strength: float = clampf(velocity.length() / 900.0, 0.0, 1.0)
+
+	var glow_color: Color = WAYFINDER_CURRENT_GLOW_COLOR
+	glow_color.a = 0.14 + pulse * 0.07
+	draw_circle(origin, radius * (1.28 + pulse * 0.12), glow_color)
+
+	var gold_color: Color = WAYFINDER_CURRENT_GOLD_COLOR
+	gold_color.a = 0.26 + speed_strength * 0.14
+	var spin: float = time * 5.8
+	draw_arc(origin, radius + 4.8, spin, spin + TAU * 0.45, 28, gold_color, 2.0)
+	draw_arc(origin, radius + 7.2, -spin * 0.82, -spin * 0.82 + TAU * 0.34, 24, glow_color, 1.7)
+
+	if velocity.length_squared() <= 1.0:
+		return
+
+	var direction: Vector2 = velocity.normalized()
+	var tangent := Vector2(-direction.y, direction.x)
+	var trail_color: Color = WAYFINDER_CURRENT_TRAIL_COLOR
+	trail_color.a = 0.22 + speed_strength * 0.16
+	for streak_index in range(3):
+		var offset: Vector2 = tangent * radius * (float(streak_index) - 1.0) * 0.26
+		var start: Vector2 = origin - direction * radius * (0.70 + float(streak_index) * 0.16) + offset
+		var end: Vector2 = start - direction * radius * (0.56 + speed_strength * 0.28)
+		draw_line(start, end, trail_color, 1.1)
 
 
 func _draw_anchor_influence_indicator(origin: Vector2) -> void:

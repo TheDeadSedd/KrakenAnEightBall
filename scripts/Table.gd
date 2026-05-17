@@ -920,8 +920,10 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 	ball.sink()
 	ball.queue_free()
 	var shot_sink_recorded: bool = _note_object_ball_pocketed(ball, score_context)
-	var score_snapshot: Dictionary = shot_event_system.get_sunk_ball_score_snapshot(int(score_context["ball_id"]))
+	var score_snapshot: Dictionary = _get_object_ball_score_snapshot(ball, score_context, shot_sink_recorded)
 	var scored_amount: int = score_system.score_sunk_ball_snapshot(score_snapshot, score_context)
+	if scored_amount > 0:
+		wayfinder_system.note_wayfinder_current_sink_scored(ball)
 	var pocket_streak_result: Dictionary = {}
 	if shot_sink_recorded:
 		pocket_streak_result = pocket_streak_system.record_object_ball_sink(score_context, scored_amount)
@@ -1183,6 +1185,30 @@ func _note_object_ball_pocketed(ball: Ball, score_context: Dictionary) -> bool:
 	return true
 
 
+func _get_object_ball_score_snapshot(ball: Ball, score_context: Dictionary, shot_sink_recorded: bool) -> Dictionary:
+	var ball_id: int = int(score_context["ball_id"])
+	var current_snapshot: Dictionary = wayfinder_system.get_wayfinder_current_sink_score_snapshot(ball)
+	if shot_sink_recorded:
+		var shot_snapshot: Dictionary = shot_event_system.get_sunk_ball_score_snapshot(ball_id)
+		if shot_snapshot.is_empty():
+			return current_snapshot
+		if not current_snapshot.is_empty():
+			_merge_score_snapshot_events(shot_snapshot, current_snapshot)
+		return shot_snapshot
+
+	return current_snapshot
+
+
+func _merge_score_snapshot_events(target_snapshot: Dictionary, source_snapshot: Dictionary) -> void:
+	if target_snapshot.is_empty() or source_snapshot.is_empty():
+		return
+
+	var target_events: Array = target_snapshot.get("events", [])
+	for event_type in source_snapshot.get("events", []):
+		target_events.append(event_type)
+	target_snapshot["events"] = target_events
+
+
 func _handle_pocket_streak_result(pocket_streak_result: Dictionary) -> void:
 	if not bool(pocket_streak_result.get("triggered", false)):
 		return
@@ -1320,9 +1346,23 @@ func _get_table_performance_snapshot(counts: Dictionary) -> Dictionary:
 
 
 func _get_wayfinder_performance_snapshot(counts: Dictionary) -> Dictionary:
+	var wayfinder_current_snapshot: Dictionary = wayfinder_system.get_wayfinder_current_debug_snapshot()
 	return {
 		"active_wayfinders": counts["active_wayfinders"],
 		"guided_wayfinder_targets": wayfinder_system.get_guided_target_count(),
+		"wayfinder_current_carriers": wayfinder_current_snapshot["current_carriers"],
+		"wayfinder_current_events_started": wayfinder_current_snapshot["current_events_started"],
+		"wayfinder_current_initial_affected": wayfinder_current_snapshot["current_initial_affected"],
+		"wayfinder_current_transfers": wayfinder_current_snapshot["current_transfers"],
+		"wayfinder_current_expired": wayfinder_current_snapshot["current_expired"],
+		"wayfinder_current_last_affected": wayfinder_current_snapshot["current_last_affected"],
+		"wayfinder_current_last_event_transfers": wayfinder_current_snapshot["current_last_event_transfers"],
+		"wayfinder_current_scored_sinks": wayfinder_current_snapshot["current_scored_sinks"],
+		"wayfinder_current_transfer_flashes": wayfinder_current_snapshot["current_transfer_flashes"],
+		"wayfinder_current_radius": wayfinder_current_snapshot["current_radius"],
+		"wayfinder_current_impulse_strength": wayfinder_current_snapshot["current_impulse_strength"],
+		"wayfinder_current_lifetime_seconds": wayfinder_current_snapshot["current_lifetime_seconds"],
+		"wayfinder_current_transfer_limit": wayfinder_current_snapshot["current_transfer_limit"],
 	}
 
 
@@ -1534,6 +1574,8 @@ func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dict
 		"table_event_powder_cache_ball_count": table_event_snapshot["powder_cache_ball_count"],
 		"table_event_cannon_warning_cost": table_event_snapshot["cannon_warning_cost"],
 		"table_event_cannon_warning_ball_count": table_event_snapshot["cannon_warning_ball_count"],
+		"table_event_wayfinder_current_cost": table_event_snapshot["wayfinder_current_cost"],
+		"table_event_wayfinder_current_ball_count": table_event_snapshot["wayfinder_current_ball_count"],
 	}
 
 

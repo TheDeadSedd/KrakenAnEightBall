@@ -17,10 +17,12 @@ const EVENT_POWDER_CACHE := "powder_cache"
 const EVENT_WAYFINDERS_FAVOR := "wayfinders_favor"
 const EVENT_CANNON_WARNING := "cannon_warning"
 const EVENT_BROADSIDE_ATTACK := "broadside_attack"
+const EVENT_WAYFINDER_CURRENT := "wayfinder_current"
 const OFFER_SLOT_COUNT := 3
 const OFFER_RNG_SEED := 1742026
 const EMPTY_OFFER_ID := ""
 const CANNON_WARNING_BALL_COUNT := 1
+const WAYFINDER_CURRENT_BALL_COUNT := 2
 const BROADSIDE_PHASE_NONE := 0
 const BROADSIDE_PHASE_WARNING := 1
 const BROADSIDE_PHASE_CANNON := 2
@@ -37,6 +39,7 @@ const EVENT_POOL := [
 	EVENT_WAYFINDERS_FAVOR,
 	EVENT_CANNON_WARNING,
 	EVENT_BROADSIDE_ATTACK,
+	EVENT_WAYFINDER_CURRENT,
 ]
 const EVENT_DATA := {
 	"loose_cargo": {
@@ -93,6 +96,15 @@ const EVENT_DATA := {
 		"rarity": "Rare",
 		"weight": 1,
 	},
+	"wayfinder_current": {
+		"id": EVENT_WAYFINDER_CURRENT,
+		"name": "Wayfinder Current",
+		"description": "Two Wayfinders drop. Nearby balls are swept into guided motion.",
+		"flavor": "Compass stones drag the tide sideways.",
+		"icon_key": "wayfinder_ball",
+		"rarity": "Rare",
+		"weight": 3,
+	},
 }
 
 @export var enabled := true
@@ -108,6 +120,7 @@ const EVENT_DATA := {
 @export_range(1, 12, 1) var powder_cache_ball_count := 3
 @export_range(0, 9999, 1) var cannon_warning_cost := 90
 @export_range(0, 9999, 1) var broadside_attack_cost := 140
+@export_range(0, 9999, 1) var wayfinder_current_cost := 120
 @export_range(3, 5, 1) var broadside_powder_keg_count := 4
 @export_range(2, 4, 1) var broadside_cannon_ball_count := 3
 @export_range(0.1, 1.0, 0.05) var broadside_warning_delay := 0.35
@@ -139,6 +152,7 @@ var broadside_delay_remaining := 0.0
 var broadside_phase := BROADSIDE_PHASE_NONE
 var broadside_pending_powder_positions: Array[Vector2] = []
 var broadside_sequences_started := 0
+var wayfinder_current_sequences_started := 0
 
 
 func setup(table_ref) -> void:
@@ -235,6 +249,16 @@ func is_event_icon_clickable() -> bool:
 	return enabled and pending_event_available and pending_event_ready and not event_menu_open
 
 
+func debug_trigger_wayfinder_current() -> void:
+	_execute_wayfinder_current()
+	status_changed.emit("Debug Wayfinder Current triggered.")
+
+
+func debug_trigger_broadside_attack() -> void:
+	_execute_broadside_attack()
+	status_changed.emit("Debug Broadside Attack triggered.")
+
+
 func request_purchase_offer(offer_index: int) -> bool:
 	var blocker: String = _get_offer_purchase_blocker(offer_index)
 	if not blocker.is_empty():
@@ -309,12 +333,15 @@ func get_debug_snapshot() -> Dictionary:
 		"powder_cache_ball_count": powder_cache_ball_count,
 		"cannon_warning_cost": cannon_warning_cost,
 		"cannon_warning_ball_count": CANNON_WARNING_BALL_COUNT,
+		"wayfinder_current_cost": wayfinder_current_cost,
+		"wayfinder_current_ball_count": WAYFINDER_CURRENT_BALL_COUNT,
 		"broadside_attack_cost": broadside_attack_cost,
 		"broadside_powder_keg_count": broadside_powder_keg_count,
 		"broadside_cannon_ball_count": broadside_cannon_ball_count,
 		"broadside_warning_delay": broadside_warning_delay,
 		"broadside_stage_delay_remaining": broadside_delay_remaining,
 		"broadside_sequences_started": broadside_sequences_started,
+		"wayfinder_current_sequences_started": wayfinder_current_sequences_started,
 	}
 
 
@@ -367,6 +394,8 @@ func _execute_event(event_id: String) -> void:
 			)
 		EVENT_BROADSIDE_ATTACK:
 			_execute_broadside_attack()
+		EVENT_WAYFINDER_CURRENT:
+			_execute_wayfinder_current()
 
 
 func _get_offer_purchase_blocker(offer_index: int) -> String:
@@ -469,6 +498,8 @@ func _get_event_cost(event_id: String) -> int:
 			return cannon_warning_cost
 		EVENT_BROADSIDE_ATTACK:
 			return broadside_attack_cost
+		EVENT_WAYFINDER_CURRENT:
+			return wayfinder_current_cost
 	return 0
 
 
@@ -503,6 +534,8 @@ func _get_event_purchase_message(event_id: String, cost: int) -> String:
 			return "Cannon Warning sounded! %s Doubloons spent." % cost
 		EVENT_BROADSIDE_ATTACK:
 			return "Cannons on the horizon! %s Doubloons spent." % cost
+		EVENT_WAYFINDER_CURRENT:
+			return "Wayfinder Current released! %s Doubloons spent." % cost
 	return "%s unleashed for %s Doubloons." % [_get_event_name(event_id), cost]
 
 
@@ -520,6 +553,8 @@ func _get_event_description(event_id: String, event_data: Dictionary) -> String:
 			return "Drop one heavy Cannon Ball onto the table."
 		EVENT_BROADSIDE_ATTACK:
 			return "Powder Kegs fall in lanes. Cannon Balls follow."
+		EVENT_WAYFINDER_CURRENT:
+			return "Two Wayfinders drop. Nearby balls are swept into guided motion."
 	return str(event_data.get("description", ""))
 
 
@@ -530,6 +565,23 @@ func _execute_broadside_attack() -> void:
 	broadside_phase = BROADSIDE_PHASE_WARNING
 	broadside_delay_remaining = broadside_warning_delay
 	set_process(true)
+
+
+func _execute_wayfinder_current() -> void:
+	if table == null or table.spawn_system == null or table.wayfinder_system == null:
+		return
+
+	wayfinder_current_sequences_started += 1
+	var current_event_id := "wayfinder_current_%s" % wayfinder_current_sequences_started
+	table.spawn_system.queue_wayfinder_current_drops(
+		WAYFINDER_CURRENT_BALL_COUNT,
+		Callable(table.wayfinder_system, "trigger_wayfinder_current_from_wayfinder"),
+		"Wayfinder Current sweeps the felt.",
+		{
+			"event_id": current_event_id,
+			"expected_sources": WAYFINDER_CURRENT_BALL_COUNT,
+		}
+	)
 
 
 func _queue_broadside_powder_stage() -> void:

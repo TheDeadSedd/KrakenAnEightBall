@@ -41,6 +41,10 @@ func _ready() -> void:
 		pause_menu.resume_requested.connect(_on_pause_resume_requested)
 	if not pause_menu.debug_panel_toggled.is_connected(_on_pause_debug_panel_toggled):
 		pause_menu.debug_panel_toggled.connect(_on_pause_debug_panel_toggled)
+	if not pause_menu.debug_wayfinder_current_test_button_toggled.is_connected(_on_pause_wayfinder_current_test_button_toggled):
+		pause_menu.debug_wayfinder_current_test_button_toggled.connect(_on_pause_wayfinder_current_test_button_toggled)
+	if not pause_menu.debug_broadside_attack_test_button_toggled.is_connected(_on_pause_broadside_attack_test_button_toggled):
+		pause_menu.debug_broadside_attack_test_button_toggled.connect(_on_pause_broadside_attack_test_button_toggled)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 	if not quartermaster_hud.quartermaster_offer_requested.is_connected(_on_quartermaster_hud_offer_requested):
@@ -148,6 +152,14 @@ func _on_pause_resume_requested() -> void:
 
 func _on_pause_debug_panel_toggled(panel_id: String, enabled: bool) -> void:
 	debug_overlay.set_modular_debug_panel_visible(panel_id, enabled)
+
+
+func _on_pause_wayfinder_current_test_button_toggled(enabled: bool) -> void:
+	debug_overlay.set_wayfinder_current_test_button_visible(enabled)
+
+
+func _on_pause_broadside_attack_test_button_toggled(enabled: bool) -> void:
+	debug_overlay.set_broadside_attack_test_button_visible(enabled)
 
 
 func _on_quartermaster_hud_offer_requested(offer_index: int) -> void:

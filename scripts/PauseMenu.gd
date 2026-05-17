@@ -3,6 +3,8 @@ class_name PauseMenu
 
 signal resume_requested
 signal debug_panel_toggled(panel_id: String, enabled: bool)
+signal debug_wayfinder_current_test_button_toggled(enabled: bool)
+signal debug_broadside_attack_test_button_toggled(enabled: bool)
 signal quartermaster_cancel_placement_requested
 
 const PANEL_CORE_PERFORMANCE := "core_performance"
@@ -17,6 +19,9 @@ const PANEL_PHYSICS := "physics"
 const PANEL_EMBEZZLER := "embezzler"
 const NORMAL_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.62)
 const PLACEMENT_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.18)
+const EVENT_TEST_SECTION_TITLE := "Event Test Buttons"
+const EVENT_TEST_WAYFINDER_TEXT := "Show Wayfinder Current Test Button"
+const EVENT_TEST_BROADSIDE_TEXT := "Show Broadside Attack Test Button"
 
 @onready var shade: ColorRect = $Shade
 @onready var menu_panel: PanelContainer = $Shade/MenuPanel
@@ -39,6 +44,10 @@ const PLACEMENT_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.18)
 @onready var visual_effects_check_box: CheckBox = $Shade/MenuPanel/Margin/VBox/DebugSection/VisualEffectsPanelCheckBox
 @onready var physics_check_box: CheckBox = $Shade/MenuPanel/Margin/VBox/DebugSection/PhysicsPerformancePanelCheckBox
 
+var event_test_section_label: Label
+var wayfinder_current_test_check_box: CheckBox
+var broadside_attack_test_check_box: CheckBox
+
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -52,6 +61,7 @@ func _ready() -> void:
 		debug_tab_button.pressed.connect(_show_debug_tab)
 	if not cancel_placement_button.pressed.is_connected(_on_cancel_placement_pressed):
 		cancel_placement_button.pressed.connect(_on_cancel_placement_pressed)
+	_ensure_event_test_controls()
 	_connect_debug_panel_toggles()
 	_show_debug_tab()
 
@@ -65,6 +75,10 @@ func _retire_quartermaster_menu_ui() -> void:
 
 
 func _connect_debug_panel_toggles() -> void:
+	if not wayfinder_current_test_check_box.toggled.is_connected(_on_wayfinder_current_test_button_toggled):
+		wayfinder_current_test_check_box.toggled.connect(_on_wayfinder_current_test_button_toggled)
+	if not broadside_attack_test_check_box.toggled.is_connected(_on_broadside_attack_test_button_toggled):
+		broadside_attack_test_check_box.toggled.connect(_on_broadside_attack_test_button_toggled)
 	if not core_performance_check_box.toggled.is_connected(_on_core_performance_panel_toggled):
 		core_performance_check_box.toggled.connect(_on_core_performance_panel_toggled)
 	if not aim_preview_check_box.toggled.is_connected(_on_aim_preview_panel_toggled):
@@ -119,6 +133,48 @@ func set_debug_panel_states(panel_states: Dictionary) -> void:
 	physics_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_PHYSICS, false)))
 
 
+func _ensure_event_test_controls() -> void:
+	if event_test_section_label == null:
+		event_test_section_label = Label.new()
+		event_test_section_label.text = EVENT_TEST_SECTION_TITLE
+		_apply_debug_section_label_style(event_test_section_label)
+		debug_section.add_child(event_test_section_label)
+		debug_section.move_child(event_test_section_label, 0)
+	if wayfinder_current_test_check_box == null:
+		wayfinder_current_test_check_box = _make_event_test_check_box(EVENT_TEST_WAYFINDER_TEXT)
+		debug_section.add_child(wayfinder_current_test_check_box)
+		debug_section.move_child(wayfinder_current_test_check_box, 1)
+	if broadside_attack_test_check_box == null:
+		broadside_attack_test_check_box = _make_event_test_check_box(EVENT_TEST_BROADSIDE_TEXT)
+		debug_section.add_child(broadside_attack_test_check_box)
+		debug_section.move_child(broadside_attack_test_check_box, 2)
+
+
+func _make_event_test_check_box(text: String) -> CheckBox:
+	var check_box := CheckBox.new()
+	check_box.text = text
+	check_box.mouse_filter = Control.MOUSE_FILTER_STOP
+	check_box.set_pressed_no_signal(false)
+	_apply_debug_check_box_style(check_box)
+	return check_box
+
+
+func _apply_debug_section_label_style(label: Label) -> void:
+	label.add_theme_color_override("font_color", Color(0.76, 0.86, 0.82, 1.0))
+	label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.03, 0.82))
+	label.add_theme_constant_override("outline_size", 1)
+	label.add_theme_font_override("font", core_performance_check_box.get_theme_font("font"))
+	label.add_theme_font_size_override("font_size", 15)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+
+
+func _apply_debug_check_box_style(check_box: CheckBox) -> void:
+	check_box.add_theme_color_override("font_color", Color(0.9, 0.95, 0.97, 1.0))
+	check_box.add_theme_font_override("font", core_performance_check_box.get_theme_font("font"))
+	check_box.add_theme_font_size_override("font_size", 14)
+
+
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton or event is InputEventMouseMotion:
 		accept_event()
@@ -137,6 +193,14 @@ func _on_resume_pressed() -> void:
 
 func _on_cancel_placement_pressed() -> void:
 	quartermaster_cancel_placement_requested.emit()
+
+
+func _on_wayfinder_current_test_button_toggled(enabled: bool) -> void:
+	debug_wayfinder_current_test_button_toggled.emit(enabled)
+
+
+func _on_broadside_attack_test_button_toggled(enabled: bool) -> void:
+	debug_broadside_attack_test_button_toggled.emit(enabled)
 
 
 func _on_core_performance_panel_toggled(enabled: bool) -> void:

@@ -7,9 +7,11 @@ It exists to help future AI/Codex sessions understand Kraken An Eight Ball quick
 Current snapshot:
 
 - Kraken An Eight Ball is a systemic arcade-chaos billiards prototype.
-- The current loop is better play -> more score/Doubloons -> more balls and Reserve choices -> more chaos -> survive the escalating table.
-- Main Menu, pooled collision audio, rotating Quartermaster offers, Reserve slots/deployment, modular debug panels, evolving score stacks, Anchor curse seeds, Embezzler, and expanded shot-event tiers are active modern systems.
-- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, Treasure perception grace/hiding, and Embezzler hide-or-run pressure remain important active systems.
+- The current loop is better shots -> more Doubloons -> Kraken Intervention opportunities -> player-chosen Table Events -> more balls/anomalies/chaos -> survive the escalating table.
+- Kraken Intervention is the active progression spine; automatic score-triggered BallDrop rewards are retired/gated.
+- BallDropSystem is mostly penalty handling, legacy support, and debug plumbing.
+- Main Menu, pooled collision audio, gameplay music, live Quartermaster HUD, Reserve slots/deployment, HudFeed, modular debug panels, evolving score stacks, Pocket Streaks, Anchor curse seeds, Embezzler, Broadside Attack, Wayfinder Current, and expanded shot-event tiers are active modern systems.
+- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, Treasure perception grace/hiding, Embezzler hide-or-run pressure, Pocket Streak whirlpools, and Wayfinder Current readability pulses remain important active systems.
 - Generated reports are a project map only; `AGENTS.md` and the real scripts/scenes remain authoritative.
 
 Important rules:
