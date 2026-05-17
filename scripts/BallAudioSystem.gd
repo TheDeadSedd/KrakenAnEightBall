@@ -27,8 +27,17 @@ var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var players: Array[AudioStreamPlayer] = []
 var next_player_index := 0
 var sounds_played_this_frame := 0
+var requests_this_frame := 0
 var last_global_play_time_msec := -MIN_GLOBAL_INTERVAL_MSEC
 var pair_last_played_msec: Dictionary = {}
+var total_collision_audio_requests := 0
+var total_collision_audio_plays := 0
+var skipped_tiny_impacts := 0
+var skipped_frame_limit := 0
+var skipped_global_cooldown := 0
+var skipped_pair_cooldown := 0
+var pool_steals := 0
+var max_players_playing := 0
 
 
 func setup(table_ref: BilliardsTable) -> void:
@@ -41,27 +50,36 @@ func setup(table_ref: BilliardsTable) -> void:
 
 func reset_frame_stats() -> void:
 	sounds_played_this_frame = 0
+	requests_this_frame = 0
 
 
 func handle_ball_collision(ball_a: Ball, ball_b: Ball, impact_speed: float) -> void:
+	total_collision_audio_requests += 1
+	requests_this_frame += 1
 	if impact_speed < MIN_MEANINGFUL_IMPACT_SPEED:
+		skipped_tiny_impacts += 1
 		return
 	if sounds_played_this_frame >= MAX_SOUNDS_PER_FRAME:
+		skipped_frame_limit += 1
 		return
 
 	var now_msec: int = Time.get_ticks_msec()
 	if now_msec - last_global_play_time_msec < MIN_GLOBAL_INTERVAL_MSEC:
+		skipped_global_cooldown += 1
 		return
 
 	var pair_key: String = _get_ball_pair_key(ball_a, ball_b)
 	var previous_pair_time: int = int(pair_last_played_msec.get(pair_key, -PAIR_COOLDOWN_MSEC))
 	if now_msec - previous_pair_time < PAIR_COOLDOWN_MSEC:
+		skipped_pair_cooldown += 1
 		return
 
 	_play_ball_hit_sound(impact_speed)
 	sounds_played_this_frame += 1
+	total_collision_audio_plays += 1
 	last_global_play_time_msec = now_msec
 	pair_last_played_msec[pair_key] = now_msec
+	max_players_playing = maxi(max_players_playing, get_playing_player_count())
 	if pair_last_played_msec.size() > MAX_TRACKED_PAIR_COOLDOWNS:
 		_prune_pair_cooldowns(now_msec)
 
@@ -97,6 +115,7 @@ func _get_next_player() -> AudioStreamPlayer:
 	var player: AudioStreamPlayer = players[next_player_index]
 	next_player_index = (next_player_index + 1) % players.size()
 	player.stop()
+	pool_steals += 1
 	return player
 
 
@@ -128,3 +147,28 @@ func _prune_pair_cooldowns(now_msec: int) -> void:
 			pair_last_played_msec.erase(pair_key)
 		if pair_last_played_msec.size() <= MAX_TRACKED_PAIR_COOLDOWNS:
 			return
+
+
+func get_playing_player_count() -> int:
+	var playing_count: int = 0
+	for player in players:
+		if player.playing:
+			playing_count += 1
+	return playing_count
+
+
+func get_debug_snapshot() -> Dictionary:
+	return {
+		"pool_size": players.size(),
+		"playing_players": get_playing_player_count(),
+		"max_players_playing": max_players_playing,
+		"requests_this_frame": requests_this_frame,
+		"sounds_played_this_frame": sounds_played_this_frame,
+		"total_requests": total_collision_audio_requests,
+		"total_plays": total_collision_audio_plays,
+		"skipped_tiny_impacts": skipped_tiny_impacts,
+		"skipped_frame_limit": skipped_frame_limit,
+		"skipped_global_cooldown": skipped_global_cooldown,
+		"skipped_pair_cooldown": skipped_pair_cooldown,
+		"pool_steals": pool_steals,
+	}

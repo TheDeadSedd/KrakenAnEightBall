@@ -12,26 +12,9 @@ signal drop_earned(drops_earned: int)
 # index:owner systems_agent
 # index:notes Tracks Doubloon progress toward earned reward ball drops and special-ball sink penalties.
 
-# Owns the working score-tied drop loop. ScoreSystem reports Doubloons gained;
-# this system tracks progress and asks SpawnSystem to perform earned drops.
-const SCORE_DROP_MESSAGES := [
-	"The Kraken provides...",
-	"There's another one here somewhere...",
-	"Austin's got it going on!",
-	"Something surfaces...",
-	"The table demands tribute.",
-	"Fresh cargo!",
-	"Found one in the bilge!",
-	"That can't be regulation.",
-	"Please stop encouraging the Kraken.",
-	"A gift from below.",
-	"The deep pays out.",
-	"Another bauble for the chaos pile.",
-	"The felt grows restless.",
-	"Cargo overboard!",
-	"Someone check the manifest.",
-	"The Kraken likes your style.",
-]
+# Retired automatic score-drop tracking remains here for rollback/debug safety.
+# Table Events are now the player-facing score-to-chaos loop, so this system no
+# longer emits score-drop reward callouts.
 const SPECIAL_BALL_PENALTY_MESSAGES := [
 	"The Kraken collects.",
 	"Payment due.",
@@ -115,18 +98,12 @@ func _queue_earned_drops() -> int:
 	last_score_drops_queued = drops_to_queue
 	total_drops_queued += drops_to_queue
 	for _drop_index in range(drops_to_queue):
-		table.spawn_system.queue_spawn_reward(1, _get_score_drop_message())
+		table.spawn_system.queue_spawn_reward(1)
 	return drops_to_queue
 
 
 func _emit_progress_changed() -> void:
 	progress_changed.emit(drop_progress, doubloons_per_drop, get_progress_percent())
-
-
-func _get_score_drop_message() -> String:
-	if SCORE_DROP_MESSAGES.is_empty():
-		return ""
-	return SCORE_DROP_MESSAGES.pick_random()
 
 
 func _get_special_ball_penalty_message() -> String:

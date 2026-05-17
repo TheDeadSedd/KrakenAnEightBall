@@ -9,7 +9,8 @@ const PAUSE_TOGGLE_KEY := KEY_ESCAPE
 @onready var hud_feed: HudFeed = $CanvasLayer/HUD/HudFeed
 @onready var result_label: Label = $CanvasLayer/HUD/ResultLabel
 @onready var doubloons_label: Label = $CanvasLayer/HUD/DoubloonsLabel
-@onready var ball_drop_meter: BallDropMeter = $CanvasLayer/HUD/BallDropMeter
+@onready var table_event_meter: TableEventMeter = $CanvasLayer/HUD/TableEventMeter
+@onready var table_event_menu: TableEventMenu = $CanvasLayer/HUD/TableEventMenu
 @onready var reserve_slots_ui: ReserveSlotsUI = $CanvasLayer/HUD/ReserveSlotsUI
 @onready var quartermaster_hud: QuartermasterHUD = $CanvasLayer/HUD/QuartermasterHUD
 @onready var reserve_deployment_presenter: ReserveDeploymentPresenter = $CanvasLayer/HUD/ReserveDeploymentPresenter
@@ -25,6 +26,8 @@ func _ready() -> void:
 	table.game_finished.connect(_on_game_finished)
 	table.score_system.doubloons_changed.connect(_on_doubloons_changed)
 	table.score_system.score_feed_message.connect(_on_score_feed_message)
+	table.table_event_system.status_changed.connect(_on_table_event_status_changed)
+	table.table_event_system.event_purchased.connect(_on_table_event_purchased)
 	table.quartermaster_system.shop_state_changed.connect(_on_quartermaster_shop_state_changed)
 	table.quartermaster_system.status_changed.connect(_on_quartermaster_status_changed)
 	table.quartermaster_system.placement_started.connect(_on_quartermaster_placement_started)
@@ -42,9 +45,14 @@ func _ready() -> void:
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 	if not quartermaster_hud.quartermaster_offer_requested.is_connected(_on_quartermaster_hud_offer_requested):
 		quartermaster_hud.quartermaster_offer_requested.connect(_on_quartermaster_hud_offer_requested)
+	if not table_event_meter.event_icon_clicked.is_connected(_on_table_event_icon_clicked):
+		table_event_meter.event_icon_clicked.connect(_on_table_event_icon_clicked)
+	if not table_event_menu.event_offer_selected.is_connected(_on_table_event_offer_selected):
+		table_event_menu.event_offer_selected.connect(_on_table_event_offer_selected)
 	result_label.text = ""
 	_on_doubloons_changed(table.score_system.get_doubloons_total())
-	ball_drop_meter.setup(table.ball_drop_system)
+	table_event_meter.setup(table.table_event_system, table)
+	table_event_menu.setup(table.table_event_system)
 	reserve_slots_ui.setup(table.reserve_system, table)
 	quartermaster_hud.setup(table.quartermaster_system, table)
 	reserve_deployment_presenter.setup(table.reserve_system, reserve_slots_ui)
@@ -63,7 +71,8 @@ func _configure_pause_process_modes() -> void:
 	reserve_slots_ui.process_mode = Node.PROCESS_MODE_ALWAYS
 	quartermaster_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	reserve_deployment_presenter.process_mode = Node.PROCESS_MODE_ALWAYS
-	ball_drop_meter.process_mode = Node.PROCESS_MODE_PAUSABLE
+	table_event_meter.process_mode = Node.PROCESS_MODE_ALWAYS
+	table_event_menu.process_mode = Node.PROCESS_MODE_ALWAYS
 
 
 func _input(event: InputEvent) -> void:
@@ -109,10 +118,28 @@ func _on_doubloons_changed(total: int) -> void:
 	doubloons_label.text = "Doubloons: %s" % total
 	if quartermaster_hud != null and table != null:
 		quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
+	if table_event_menu != null and table_event_menu.visible:
+		table_event_menu.refresh_offers()
 
 
 func _on_score_feed_message(text: String) -> void:
 	hud_feed.add_message(text, "score")
+
+
+func _on_table_event_status_changed(text: String) -> void:
+	hud_feed.add_message(text, "event")
+
+
+func _on_table_event_icon_clicked() -> void:
+	table_event_menu.open_menu()
+
+
+func _on_table_event_offer_selected(offer_index: int) -> void:
+	table.table_event_system.request_purchase_offer(offer_index)
+
+
+func _on_table_event_purchased(_event_id: String, _cost: int) -> void:
+	table_event_menu.close_menu()
 
 
 func _on_pause_resume_requested() -> void:
@@ -185,6 +212,8 @@ func _set_game_paused(paused: bool) -> void:
 		return
 
 	if paused:
+		if table_event_menu.visible:
+			table_event_menu.close_menu()
 		table.cancel_active_cue_drag_for_pause()
 		get_tree().paused = true
 		pause_menu.set_pause_visible(true)

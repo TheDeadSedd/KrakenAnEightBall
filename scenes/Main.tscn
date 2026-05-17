@@ -4,13 +4,16 @@
 [ext_resource type="Script" uid="uid://cpk1835bhdruv" path="res://scripts/Main.gd" id="2_main_script"]
 [ext_resource type="FontFile" uid="uid://b4jk3m14mv2u2" path="res://assets/fonts/NotJamOldStyle11.ttf" id="3_ui_font"]
 [ext_resource type="Script" uid="uid://cg0xx05qehx7o" path="res://scripts/DebugOverlay.gd" id="4_debug_overlay"]
-[ext_resource type="Script" uid="uid://bxpjxcy4cbps4" path="res://scripts/BallDropMeter.gd" id="5_ball_drop_meter"]
+[ext_resource type="Script" path="res://scripts/TableEventMeter.gd" id="5_table_event_meter"]
 [ext_resource type="Script" uid="uid://bg1rdbmkpcn84" path="res://scripts/PauseMenu.gd" id="6_pause_menu"]
 [ext_resource type="Script" uid="uid://dea5qsnybmcuc" path="res://scripts/DebugPanel.gd" id="7_debug_panel"]
 [ext_resource type="Script" uid="uid://c5h88rg15m2pu" path="res://scripts/ReserveSlotsUI.gd" id="8_reserve_slots_ui"]
 [ext_resource type="Script" uid="uid://clp8ek2x13i4q" path="res://scripts/ReserveDeploymentPresenter.gd" id="9_reserve_deploy_presenter"]
 [ext_resource type="Script" uid="uid://d37dyx8pma2f6" path="res://scripts/HudFeed.gd" id="10_hud_feed"]
 [ext_resource type="Script" uid="uid://dy86pgjpqxn3s" path="res://scripts/QuartermasterHUD.gd" id="11_quartermaster_hud"]
+[ext_resource type="Script" path="res://scripts/GameplayMusicSystem.gd" id="12_gameplay_music_system"]
+[ext_resource type="AudioStream" path="res://audio/sfx/ui/background_gameplay.wav" id="13_gameplay_music"]
+[ext_resource type="Script" path="res://scripts/TableEventMenu.gd" id="14_table_event_menu"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -71,6 +74,11 @@ corner_radius_bottom_left = 12
 
 [node name="Main" type="Node2D" unique_id=666290206]
 script = ExtResource("2_main_script")
+
+[node name="GameplayMusic" type="AudioStreamPlayer" parent="."]
+stream = ExtResource("13_gameplay_music")
+volume_db = -21.0
+script = ExtResource("12_gameplay_music_system")
 
 [node name="Table" parent="." unique_id=1446886136 instance=ExtResource("1_table_scene")]
 
@@ -273,14 +281,27 @@ offset_bottom = 1044.0
 mouse_filter = 1
 script = ExtResource("10_hud_feed")
 
-[node name="BallDropMeter" type="Control" parent="CanvasLayer/HUD" unique_id=910658070]
+[node name="TableEventMeter" type="Control" parent="CanvasLayer/HUD" unique_id=910658070]
 anchors_preset = 0
-offset_left = 1648.0
-offset_top = 226.0
-offset_right = 1798.0
-offset_bottom = 806.0
-mouse_filter = 2
-script = ExtResource("5_ball_drop_meter")
+offset_left = 598.0
+offset_top = 870.0
+offset_right = 1438.0
+offset_bottom = 964.0
+mouse_filter = 1
+script = ExtResource("5_table_event_meter")
+
+[node name="TableEventMenu" type="Control" parent="CanvasLayer/HUD"]
+process_mode = 3
+visible = false
+z_index = 32
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 1
+script = ExtResource("14_table_event_menu")
 
 [node name="ReserveSlotsUI" type="Control" parent="CanvasLayer/HUD" unique_id=1606398998]
 process_mode = 3

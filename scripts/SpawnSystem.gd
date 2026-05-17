@@ -12,6 +12,10 @@ class SpawnBallRequest:
 	var is_cannon_ball := false
 	var is_treasure_ball := false
 	var is_embezzler_ball := false
+	var has_preferred_position := false
+	var preferred_position := Vector2.ZERO
+	var has_settle_velocity := false
+	var settle_velocity := Vector2.ZERO
 
 class StartingBallData:
 	var cue_ball: Ball
@@ -43,8 +47,8 @@ const RACK_ORIGIN := Vector2(1150.0, 540.0)
 const RACK_ROWS := 5
 const RACK_SPACING_MULTIPLIER := 2.12
 
-# Legacy sink-count reward cadence. Normal gameplay drop rewards now come from
-# BallDropSystem; this remains for the disabled legacy Table path.
+# Legacy sink-count reward cadence. Normal gameplay table pressure now comes
+# from Table Events; this remains for disabled legacy/debug reward paths.
 const BALLS_PER_REWARD_DROP := 3
 
 # Regular reward anomaly pool. Anchor is intentionally not part of this pool.
@@ -143,18 +147,131 @@ func award_base_spawn_progress() -> void:
 
 
 func queue_spawn_reward(spawn_count: int, callout_message: String = "") -> void:
-	for _spawn_index in range(spawn_count):
+	for spawn_index in range(spawn_count):
 		var request: SpawnBallRequest = _make_reward_spawn_request()
 		pending_spawn_requests.append(request)
-		table.queue_spawn_reward_message(
-			request.is_wayfinder,
-			request.is_powder_keg,
-			request.is_anchor_ball,
-			request.is_cannon_ball,
-			callout_message,
-			request.is_treasure_ball,
-			request.is_embezzler_ball
+		if spawn_index == 0 and not callout_message.is_empty():
+			table.queue_spawn_reward_message(
+				request.is_wayfinder,
+				request.is_powder_keg,
+				request.is_anchor_ball,
+				request.is_cannon_ball,
+				callout_message,
+				request.is_treasure_ball,
+				request.is_embezzler_ball
+			)
+
+
+func queue_plain_object_ball_drops(spawn_count: int, callout_message: String = "") -> void:
+	_queue_specific_ball_drops(spawn_count, false, false, false, callout_message)
+
+
+func queue_wayfinder_ball_drops(spawn_count: int, callout_message: String = "") -> void:
+	_queue_specific_ball_drops(spawn_count, true, false, false, callout_message)
+
+
+func queue_powder_keg_drops(spawn_count: int, callout_message: String = "") -> void:
+	_queue_specific_ball_drops(spawn_count, false, true, false, callout_message)
+
+
+func queue_cannon_ball_drops(spawn_count: int, callout_message: String = "") -> void:
+	_queue_specific_ball_drops(spawn_count, false, false, true, callout_message)
+
+
+func queue_powder_keg_drops_at_positions(spawn_positions: Array, callout_message: String = "") -> void:
+	_queue_specific_ball_drops_at_positions(spawn_positions, false, true, false, callout_message)
+
+
+func queue_cannon_ball_launches(launch_specs: Array, callout_message: String = "") -> void:
+	for spec_index in range(launch_specs.size()):
+		var launch_spec_value: Variant = launch_specs[spec_index]
+		if not (launch_spec_value is Dictionary):
+			continue
+		var launch_spec: Dictionary = launch_spec_value
+		var preferred_position: Vector2 = SPAWN_SEARCH_CENTER
+		var settle_velocity: Vector2 = Vector2.ZERO
+		var position_value: Variant = launch_spec.get("position", SPAWN_SEARCH_CENTER)
+		var velocity_value: Variant = launch_spec.get("velocity", Vector2.ZERO)
+		if position_value is Vector2:
+			preferred_position = position_value
+		if velocity_value is Vector2:
+			settle_velocity = velocity_value
+		var request: SpawnBallRequest = _make_specific_spawn_request(false, false, false, true)
+		request.has_preferred_position = true
+		request.preferred_position = preferred_position
+		request.has_settle_velocity = true
+		request.settle_velocity = settle_velocity
+		pending_spawn_requests.append(request)
+		if spec_index == 0 and not callout_message.is_empty():
+			table.queue_spawn_reward_message(
+				request.is_wayfinder,
+				request.is_powder_keg,
+				request.is_anchor_ball,
+				request.is_cannon_ball,
+				callout_message,
+				request.is_treasure_ball,
+				request.is_embezzler_ball
+			)
+
+
+func _queue_specific_ball_drops(
+	spawn_count: int,
+	is_wayfinder: bool,
+	is_powder_keg: bool,
+	is_cannon_ball: bool,
+	callout_message: String = ""
+) -> void:
+	for spawn_index in range(maxi(spawn_count, 0)):
+		var request: SpawnBallRequest = _make_specific_spawn_request(
+			is_wayfinder,
+			is_powder_keg,
+			false,
+			is_cannon_ball
 		)
+		pending_spawn_requests.append(request)
+		if spawn_index == 0 and not callout_message.is_empty():
+			table.queue_spawn_reward_message(
+				request.is_wayfinder,
+				request.is_powder_keg,
+				request.is_anchor_ball,
+				request.is_cannon_ball,
+				callout_message,
+				request.is_treasure_ball,
+				request.is_embezzler_ball
+			)
+
+
+func _queue_specific_ball_drops_at_positions(
+	spawn_positions: Array,
+	is_wayfinder: bool,
+	is_powder_keg: bool,
+	is_cannon_ball: bool,
+	callout_message: String = ""
+) -> void:
+	for spawn_index in range(spawn_positions.size()):
+		var position_value: Variant = spawn_positions[spawn_index]
+		if not (position_value is Vector2):
+			continue
+		var preferred_position: Vector2 = position_value
+		var request: SpawnBallRequest = _make_specific_spawn_request(
+			is_wayfinder,
+			is_powder_keg,
+			false,
+			is_cannon_ball
+		)
+		request.has_preferred_position = true
+		request.preferred_position = preferred_position
+		pending_spawn_requests.append(request)
+		if spawn_index == 0 and not callout_message.is_empty():
+			table.queue_spawn_reward_message(
+				request.is_wayfinder,
+				request.is_powder_keg,
+				request.is_anchor_ball,
+				request.is_cannon_ball,
+				callout_message,
+				request.is_treasure_ball,
+				request.is_embezzler_ball
+			)
 
 
 func queue_debug_wayfinder_spawn() -> void:
@@ -461,7 +578,7 @@ func _make_specific_spawn_request(
 
 
 func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
-	var spawn_position: Vector2 = _find_safe_spawn_position(table.cue_ball.radius)
+	var spawn_position: Vector2 = _get_spawn_position_for_request(request, table.cue_ball.radius)
 	var ball: Ball
 	if request.is_wayfinder:
 		ball = _create_wayfinder_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
@@ -477,7 +594,10 @@ func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
 		ball = _create_embezzler_ball(request.ball_number, _ball_color(request.ball_number), spawn_position)
 	else:
 		ball = _create_ball(Ball.BallType.OBJECT, request.ball_number, _ball_color(request.ball_number), spawn_position)
-	ball.begin_spawn_drop(spawn_position)
+	if request.has_settle_velocity:
+		ball.begin_spawn_drop_with_settle_velocity(spawn_position, request.settle_velocity)
+	else:
+		ball.begin_spawn_drop(spawn_position)
 
 
 func _can_spawn_anchor_ball() -> bool:
@@ -529,6 +649,30 @@ func _find_safe_spawn_position(ball_radius: float) -> Vector2:
 				return candidate
 
 	return table.playfield_rect.get_center()
+
+
+func _get_spawn_position_for_request(request: SpawnBallRequest, ball_radius: float) -> Vector2:
+	if request.has_preferred_position:
+		return _find_safe_spawn_position_near(request.preferred_position, ball_radius)
+	return _find_safe_spawn_position(ball_radius)
+
+
+func _find_safe_spawn_position_near(preferred_position: Vector2, ball_radius: float) -> Vector2:
+	var safe_rect: Rect2 = table.playfield_rect.grow(-ball_radius)
+	var search_center: Vector2 = preferred_position.clamp(safe_rect.position, safe_rect.end)
+	if _is_safe_ball_position(search_center, ball_radius):
+		return search_center
+
+	for ring in range(1, SPAWN_SEARCH_RINGS + 1):
+		var radius: float = SPAWN_SEARCH_STEP * ring
+		var sample_count: int = maxi(8, ring * 8)
+		for sample_index in range(sample_count):
+			var angle: float = TAU * float(sample_index) / float(sample_count)
+			var candidate: Vector2 = search_center + Vector2.RIGHT.rotated(angle) * radius
+			if _is_safe_ball_position(candidate, ball_radius):
+				return candidate
+
+	return _find_safe_spawn_position(ball_radius)
 
 
 func _get_random_spawn_search_center() -> Vector2:

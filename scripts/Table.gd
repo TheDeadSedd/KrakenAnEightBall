@@ -117,6 +117,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var score_system: ScoreSystem = $ScoreSystem
 @onready var pocket_streak_system: PocketStreakSystem = $PocketStreakSystem
 @onready var ball_drop_system: BallDropSystem = $BallDropSystem
+@onready var table_event_system: TableEventSystem = $TableEventSystem
 @onready var ball_audio_system: BallAudioSystem = $BallAudioSystem
 @onready var aim_preview: AimPreview = $AimPreview
 @onready var spawn_system: SpawnSystem = $SpawnSystem
@@ -194,6 +195,9 @@ func _ready() -> void:
 	score_system.setup(self)
 	pocket_streak_system.setup(self)
 	ball_drop_system.setup(self)
+	table_event_system.setup(self)
+	if table_event_system.should_disable_automatic_ball_drops():
+		ball_drop_system.enabled = false
 	ball_audio_system.setup(self)
 	_connect_score_drop_events()
 	aim_preview.setup(self)
@@ -226,6 +230,8 @@ func _ready() -> void:
 func _connect_score_drop_events() -> void:
 	if not score_system.doubloons_awarded.is_connected(ball_drop_system.handle_doubloons_awarded):
 		score_system.doubloons_awarded.connect(ball_drop_system.handle_doubloons_awarded)
+	if not score_system.doubloons_awarded.is_connected(table_event_system.handle_doubloons_awarded):
+		score_system.doubloons_awarded.connect(table_event_system.handle_doubloons_awarded)
 	if not score_system.doubloons_awarded.is_connected(embezzler_system.handle_doubloons_awarded):
 		score_system.doubloons_awarded.connect(embezzler_system.handle_doubloons_awarded)
 
@@ -1042,6 +1048,7 @@ func _start_shot_tracking() -> void:
 	shot_bank_eligible_ball_ids.clear()
 	shot_event_system.start_shot(cue_ball.global_position)
 	pocket_streak_system.start_shot()
+	table_event_system.start_shot()
 	embezzler_system.handle_shot_started()
 
 
@@ -1206,6 +1213,7 @@ func _try_finish_shot() -> void:
 	aim_preview.stop_actual_path_recording()
 	shot_event_system.finish_shot()
 	pocket_streak_system.finish_shot()
+	table_event_system.finish_shot()
 	if should_advance_anchor_chains:
 		_handle_cue_control_regained_after_shot()
 
@@ -1213,6 +1221,7 @@ func _try_finish_shot() -> void:
 func _handle_cue_control_regained_after_shot() -> void:
 	anchor_ball_system.advance_curse_chains_on_cue_control_regained()
 	embezzler_system.handle_cue_control_regained()
+	table_event_system.handle_cue_control_regained()
 #endregion
 
 
@@ -1251,6 +1260,7 @@ func get_performance_debug_snapshot(requested_sections: Dictionary = {}) -> Dict
 	var needs_physics: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_PHYSICS)
 	var needs_quartermaster: bool = include_all or _is_performance_section_requested(requested_sections, PERFORMANCE_SECTION_QUARTERMASTER)
 	var needs_counts: bool = needs_core or needs_wayfinder or needs_powder_keg_wayfinder or needs_visual_cost
+	var needs_audio_debug: bool = needs_core or needs_ball_drops_score or needs_visual_cost
 
 	var counts: Dictionary = {}
 	if needs_counts:
@@ -1262,6 +1272,8 @@ func get_performance_debug_snapshot(requested_sections: Dictionary = {}) -> Dict
 	if needs_ball_drops_score:
 		snapshot.merge(_get_ball_drop_performance_snapshot(ball_drop_system.get_debug_snapshot()))
 		snapshot.merge(_get_score_popup_performance_snapshot())
+	if needs_audio_debug:
+		snapshot.merge(_get_audio_performance_snapshot())
 	if needs_wayfinder or needs_powder_keg_wayfinder:
 		snapshot.merge(_get_wayfinder_performance_snapshot(counts))
 	if needs_anchor:
@@ -1484,6 +1496,7 @@ func _get_embezzler_performance_snapshot(embezzler_snapshot: Dictionary) -> Dict
 
 
 func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dictionary:
+	var table_event_snapshot: Dictionary = table_event_system.get_debug_snapshot()
 	return {
 		"ball_drop_progress": ball_drop_snapshot["drop_progress"],
 		"ball_drop_threshold": ball_drop_snapshot["doubloons_per_drop"],
@@ -1491,6 +1504,36 @@ func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dict
 		"ball_drop_last_score_queued": ball_drop_snapshot["last_score_drops_queued"],
 		"ball_drop_total_queued": ball_drop_snapshot["total_drops_queued"],
 		"ball_drop_pending_spawns": ball_drop_snapshot["pending_spawn_drops"],
+		"table_event_enabled": table_event_snapshot["enabled"],
+		"table_event_auto_drops_gated": table_event_snapshot["automatic_ball_drops_gated"],
+		"table_event_shot_progress": table_event_snapshot["shot_progress"],
+		"table_event_threshold": table_event_snapshot["shot_threshold"],
+		"table_event_progress_percent": table_event_snapshot["progress_percent"],
+		"table_event_pending": table_event_snapshot["pending_event_available"],
+		"table_event_ready": table_event_snapshot["pending_event_ready"],
+		"table_event_menu_open": table_event_snapshot["event_menu_open"],
+		"table_event_active_offer_ids": table_event_snapshot["active_offer_ids"],
+		"table_event_last_award": table_event_snapshot["last_award_amount"],
+		"table_event_total_tracked": table_event_snapshot["total_tracked_doubloons"],
+		"table_event_pending_earned": table_event_snapshot["pending_events_earned"],
+		"table_event_pending_readied": table_event_snapshot["pending_events_readied"],
+		"table_event_purchased": table_event_snapshot["purchased_events"],
+		"table_event_denied_purchases": table_event_snapshot["denied_purchases"],
+		"table_event_offers_generated": table_event_snapshot["offers_generated"],
+		"table_event_ignored_awards_while_pending": table_event_snapshot["ignored_awards_while_pending"],
+		"table_event_last_purchase_event_id": table_event_snapshot["last_purchase_event_id"],
+		"table_event_last_purchase_cost": table_event_snapshot["last_purchase_cost"],
+		"table_event_last_blocker_reason": table_event_snapshot["last_blocker_reason"],
+		"table_event_cheap_cargo_cost": table_event_snapshot["cheap_cargo_cost"],
+		"table_event_cheap_cargo_ball_count": table_event_snapshot["cheap_cargo_ball_count"],
+		"table_event_loose_cargo_cost": table_event_snapshot["loose_cargo_cost"],
+		"table_event_loose_cargo_ball_count": table_event_snapshot["loose_cargo_ball_count"],
+		"table_event_wayfinders_favor_cost": table_event_snapshot["wayfinders_favor_cost"],
+		"table_event_wayfinders_favor_ball_count": table_event_snapshot["wayfinders_favor_ball_count"],
+		"table_event_powder_cache_cost": table_event_snapshot["powder_cache_cost"],
+		"table_event_powder_cache_ball_count": table_event_snapshot["powder_cache_ball_count"],
+		"table_event_cannon_warning_cost": table_event_snapshot["cannon_warning_cost"],
+		"table_event_cannon_warning_ball_count": table_event_snapshot["cannon_warning_ball_count"],
 	}
 
 
@@ -1526,6 +1569,53 @@ func _get_score_popup_performance_snapshot() -> Dictionary:
 		"score_last_popup_route": score_system.get_last_score_popup_route(),
 		"active_score_glow_labels": score_system.get_active_score_glow_label_count(),
 		"active_score_popup_tweens": score_system.get_active_score_popup_tween_count(),
+	}
+
+
+func _get_audio_performance_snapshot() -> Dictionary:
+	var collision_audio_snapshot: Dictionary = ball_audio_system.get_debug_snapshot()
+	var streak_audio_snapshot: Dictionary = pocket_streak_presenter.get_audio_debug_snapshot()
+	return {
+		"collision_audio_pool_size": collision_audio_snapshot["pool_size"],
+		"collision_audio_playing_players": collision_audio_snapshot["playing_players"],
+		"collision_audio_max_playing_players": collision_audio_snapshot["max_players_playing"],
+		"collision_audio_requests_this_frame": collision_audio_snapshot["requests_this_frame"],
+		"collision_audio_played_this_frame": collision_audio_snapshot["sounds_played_this_frame"],
+		"collision_audio_total_requests": collision_audio_snapshot["total_requests"],
+		"collision_audio_total_plays": collision_audio_snapshot["total_plays"],
+		"collision_audio_skipped_tiny": collision_audio_snapshot["skipped_tiny_impacts"],
+		"collision_audio_skipped_frame_limit": collision_audio_snapshot["skipped_frame_limit"],
+		"collision_audio_skipped_global_cooldown": collision_audio_snapshot["skipped_global_cooldown"],
+		"collision_audio_skipped_pair_cooldown": collision_audio_snapshot["skipped_pair_cooldown"],
+		"collision_audio_pool_steals": collision_audio_snapshot["pool_steals"],
+		"pocket_streak_audio_pool_size": streak_audio_snapshot["pool_size"],
+		"pocket_streak_audio_playing_players": streak_audio_snapshot["playing_players"],
+		"pocket_streak_audio_max_playing_players": streak_audio_snapshot["max_playing_players"],
+		"pocket_streak_triggers": streak_audio_snapshot["streak_triggers"],
+		"pocket_streak_presentations_queued": streak_audio_snapshot["presentations_queued"],
+		"pocket_streak_presentations_started": streak_audio_snapshot["presentations_started"],
+		"pocket_streak_last_multiplier": streak_audio_snapshot["last_presented_multiplier"],
+		"pocket_streak_presentation_queue_size": streak_audio_snapshot["presentation_queue_size"],
+		"pocket_streak_presentation_delay_remaining": streak_audio_snapshot["presentation_delay_remaining"],
+		"pocket_streak_queue_gate_duration": streak_audio_snapshot["queue_gate_duration"],
+		"pocket_streak_audio_requests": streak_audio_snapshot["audio_requests"],
+		"pocket_streak_audio_plays": streak_audio_snapshot["audio_plays"],
+		"pocket_streak_audio_cooldown_skips": streak_audio_snapshot["cooldown_skips"],
+		"pocket_streak_audio_pool_steals": streak_audio_snapshot["pool_steals"],
+		"pocket_streak_audio_last_multiplier": streak_audio_snapshot["last_multiplier"],
+		"pocket_streak_active_whirlpools": streak_audio_snapshot["active_whirlpools"],
+		"pocket_streak_recent_whirlpools": streak_audio_snapshot["recent_whirlpools"],
+		"pocket_streak_last_whirlpool_multiplier": streak_audio_snapshot["last_whirlpool_multiplier"],
+		"pocket_streak_whirlpool_extra_duration_cap": streak_audio_snapshot["whirlpool_extra_duration_cap"],
+		"pocket_streak_whirlpool_intensity_cap_multiplier": streak_audio_snapshot["whirlpool_intensity_cap_multiplier"],
+		"pocket_streak_audio_max_pitch_scale": streak_audio_snapshot["audio_max_pitch_scale"],
+		"pocket_streak_audio_max_volume_db": streak_audio_snapshot["audio_max_volume_db"],
+		"pocket_streak_audio_bus": streak_audio_snapshot["audio_bus"],
+		"pocket_streak_audio_bus_index": streak_audio_snapshot["audio_bus_index"],
+		"pocket_streak_reverb_effect_index": streak_audio_snapshot["reverb_effect_index"],
+		"pocket_streak_reverb_wet_level": streak_audio_snapshot["reverb_wet_level"],
+		"pocket_streak_reverb_wet_cap": streak_audio_snapshot["reverb_wet_cap"],
+		"pocket_streak_reverb_updates": streak_audio_snapshot["reverb_updates"],
 	}
 
 
@@ -1707,7 +1797,7 @@ func get_debug_spawn_hotkey_data() -> Dictionary:
 
 
 #region Callouts / Notifications
-# Center/top callouts are now reserved for spawn/drop-flow messages.
+# Center/top callouts are now reserved for explicit event/debug messages.
 # Future extraction candidate: HUD/CalloutSystem.
 func queue_spawn_reward_message(
 	is_wayfinder: bool,
@@ -1734,8 +1824,6 @@ func queue_spawn_reward_message(
 		_queue_result_message("TREASURE BALL DROPPED")
 	elif is_embezzler_ball:
 		_queue_result_message("EMBEZZLER BALL DROPPED")
-	else:
-		_queue_result_message("+1 BALL DROPPED")
 
 
 func _queue_result_message(message: String) -> void:
@@ -1977,6 +2065,8 @@ func _evaluate_cue_reclaim_eligibility() -> Dictionary:
 func _get_cue_control_base_blocker() -> String:
 	if game_over:
 		return "Game over"
+	if table_event_system != null and table_event_system.is_event_menu_open():
+		return "Table Event menu open"
 	if ball_placement_system.is_placement_active():
 		return "Placement active"
 	if not is_instance_valid(cue_ball) or not cue_ball.visible or not cue_ball.gameplay_enabled:
@@ -2023,7 +2113,7 @@ func _all_balls_stopped() -> bool:
 
 #region Legacy Spawn Reward Rules
 # Disabled pre-BallDrop reward triggers. Keep these wrappers as reference only;
-# the active normal reward path is ScoreSystem -> BallDropSystem -> SpawnSystem.
+# the active score-to-chaos path is ScoreSystem -> TableEventSystem -> SpawnSystem.
 func _award_base_spawn_progress() -> void:
 	if not LEGACY_NON_SCORE_REWARD_DROPS_ENABLED:
 		return

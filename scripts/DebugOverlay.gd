@@ -610,9 +610,42 @@ func _make_performance_summary_lines(snapshot: Dictionary) -> Array:
 
 
 func _make_ball_drop_performance_lines(snapshot: Dictionary) -> Array:
-	return [
-		"BALL DROPS",
-		"Ball drop progress: %s/%s Doubloons" % [
+	var lines: Array = [
+		"TABLE EVENTS / BALL DROPS",
+		"Table Event shot meter: %s/%s Doubloons (%s%%)" % [
+			snapshot["table_event_shot_progress"],
+			snapshot["table_event_threshold"],
+			int(round(float(snapshot["table_event_progress_percent"]) * 100.0)),
+		],
+		"Table Event pending: %s / ready %s / menu %s" % [
+			_debug_bool_text(bool(snapshot["table_event_pending"])),
+			_debug_bool_text(bool(snapshot["table_event_ready"])),
+			_debug_bool_text(bool(snapshot["table_event_menu_open"])),
+		],
+		"Table Event offers: %s" % str(snapshot["table_event_active_offer_ids"]),
+		"Table Event counts: %s earned / %s readied / %s bought / %s denied" % [
+			snapshot["table_event_pending_earned"],
+			snapshot["table_event_pending_readied"],
+			snapshot["table_event_purchased"],
+			snapshot["table_event_denied_purchases"],
+		],
+		"Table Event tuning: Cheap %s/%s, Loose %s/%s, Wayfinder %s/%s, Powder %s/%s, Cannon %s/%s" % [
+			snapshot["table_event_cheap_cargo_ball_count"],
+			snapshot["table_event_cheap_cargo_cost"],
+			snapshot["table_event_loose_cargo_ball_count"],
+			snapshot["table_event_loose_cargo_cost"],
+			snapshot["table_event_wayfinders_favor_ball_count"],
+			snapshot["table_event_wayfinders_favor_cost"],
+			snapshot["table_event_powder_cache_ball_count"],
+			snapshot["table_event_powder_cache_cost"],
+			snapshot["table_event_cannon_warning_ball_count"],
+			snapshot["table_event_cannon_warning_cost"],
+		],
+		"Table Event ignored awards while pending: %s / blocker: %s" % [
+			snapshot["table_event_ignored_awards_while_pending"],
+			snapshot["table_event_last_blocker_reason"],
+		],
+		"Legacy BallDrop progress: %s/%s Doubloons" % [
 			snapshot["ball_drop_progress"],
 			snapshot["ball_drop_threshold"],
 		],
@@ -621,7 +654,73 @@ func _make_ball_drop_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["ball_drop_pending_spawns"],
 			snapshot["ball_drop_last_score_queued"],
 		],
-		"BallDropSystem enabled: %s" % _debug_bool_text(bool(snapshot["ball_drop_enabled"])),
+		"Auto BallDrop score rewards: %s / gated by Table Events: %s" % [
+			_debug_bool_text(bool(snapshot["ball_drop_enabled"])),
+			_debug_bool_text(bool(snapshot["table_event_auto_drops_gated"])),
+		],
+	]
+	lines.append_array(_make_audio_debug_lines(snapshot))
+	return lines
+
+
+func _make_audio_debug_lines(snapshot: Dictionary) -> Array:
+	return [
+		"Collision audio: %s/%s playing / max %s / frame %s req>%s plays / total %s>%s" % [
+			snapshot["collision_audio_playing_players"],
+			snapshot["collision_audio_pool_size"],
+			snapshot["collision_audio_max_playing_players"],
+			snapshot["collision_audio_requests_this_frame"],
+			snapshot["collision_audio_played_this_frame"],
+			snapshot["collision_audio_total_requests"],
+			snapshot["collision_audio_total_plays"],
+		],
+		"Collision audio skips: tiny %s / frame %s / global %s / pair %s / steals %s" % [
+			snapshot["collision_audio_skipped_tiny"],
+			snapshot["collision_audio_skipped_frame_limit"],
+			snapshot["collision_audio_skipped_global_cooldown"],
+			snapshot["collision_audio_skipped_pair_cooldown"],
+			snapshot["collision_audio_pool_steals"],
+		],
+		"Pocket streak queue: last X%s / %s pending / %.2fs gate / %.2fs tune / %s queued / %s shown" % [
+			snapshot["pocket_streak_last_multiplier"],
+			snapshot["pocket_streak_presentation_queue_size"],
+			float(snapshot["pocket_streak_presentation_delay_remaining"]),
+			float(snapshot["pocket_streak_queue_gate_duration"]),
+			snapshot["pocket_streak_presentations_queued"],
+			snapshot["pocket_streak_presentations_started"],
+		],
+		"Pocket streak audio: %s/%s playing / max %s / triggers %s / req %s / plays %s" % [
+			snapshot["pocket_streak_audio_playing_players"],
+			snapshot["pocket_streak_audio_pool_size"],
+			snapshot["pocket_streak_audio_max_playing_players"],
+			snapshot["pocket_streak_triggers"],
+			snapshot["pocket_streak_audio_requests"],
+			snapshot["pocket_streak_audio_plays"],
+		],
+		"Pocket streak audio guard: cooldown %s / steals %s / last X%s" % [
+			snapshot["pocket_streak_audio_cooldown_skips"],
+			snapshot["pocket_streak_audio_pool_steals"],
+			snapshot["pocket_streak_audio_last_multiplier"],
+		],
+		"Pocket streak whirlpool: %s active / %s recent / last X%s / cap X%s" % [
+			snapshot["pocket_streak_active_whirlpools"],
+			snapshot["pocket_streak_recent_whirlpools"],
+			snapshot["pocket_streak_last_whirlpool_multiplier"],
+			snapshot["pocket_streak_whirlpool_intensity_cap_multiplier"],
+		],
+		"Pocket streak reverb: %s bus #%s / effect %s / wet %.2f/%.2f / updates %s" % [
+			snapshot["pocket_streak_audio_bus"],
+			snapshot["pocket_streak_audio_bus_index"],
+			snapshot["pocket_streak_reverb_effect_index"],
+			float(snapshot["pocket_streak_reverb_wet_level"]),
+			float(snapshot["pocket_streak_reverb_wet_cap"]),
+			snapshot["pocket_streak_reverb_updates"],
+		],
+		"Pocket streak tuning: whirl +%.2fs / pitch cap %.2f / vol cap %.1fdB" % [
+			float(snapshot["pocket_streak_whirlpool_extra_duration_cap"]),
+			float(snapshot["pocket_streak_audio_max_pitch_scale"]),
+			float(snapshot["pocket_streak_audio_max_volume_db"]),
+		],
 	]
 
 

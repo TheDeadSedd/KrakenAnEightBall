@@ -28,6 +28,13 @@ const KRAKEN_CURRENT_REWARD := 10
 const TRIPLE_BANK_REWARD := 18
 const CANNON_CHAIN_REWARD := 16
 const TREASURE_SNARE_REWARD := 12
+const POCKET_STREAK_FEED_TEMPLATES: Array[String] = [
+	"The pocket hungers x%s!",
+	"The deep takes interest x%s.",
+	"A mouth in the table opens x%s.",
+	"The Kraken approves this greed x%s.",
+	"The table feeds upon repetition x%s.",
+]
 const SCORE_POPUP_REVEAL_DELAY := 0.5
 const SCORE_POPUP_MIN_HOLD_TIME := 1.0
 const SCORE_POPUP_HOLD_PER_ITEM := 0.35
@@ -257,6 +264,7 @@ var score_stack_replacements := 0
 var score_stack_early_fades := 0
 var score_stack_yields := 0
 var special_popup_path_count := 0
+var pocket_streak_feed_message_index := 0
 var last_score_popup_route := "none"
 
 
@@ -345,17 +353,26 @@ func award_pocket_streak(multiplier: int, streak_context: Dictionary = {}) -> in
 	doubloons_total += streak_reward
 	doubloons_changed.emit(doubloons_total)
 	doubloons_awarded.emit(streak_reward, doubloons_total)
-	score_feed_message.emit("Same pocket streak x%s! +%s Doubloons (%s pocket base)" % [
-		streak_multiplier,
-		streak_reward,
-		same_pocket_subtotal,
-	])
+	score_feed_message.emit(_get_pocket_streak_feed_message(streak_multiplier, streak_reward, same_pocket_subtotal))
 	last_score_popup_route = "pocket_streak x%s subtotal %s +%s" % [
 		streak_multiplier,
 		same_pocket_subtotal,
 		streak_reward,
 	]
 	return streak_reward
+
+
+func _get_pocket_streak_feed_message(multiplier: int, reward: int, pocket_base: int) -> String:
+	var template_index: int = pocket_streak_feed_message_index % POCKET_STREAK_FEED_TEMPLATES.size()
+	var template: String = POCKET_STREAK_FEED_TEMPLATES[template_index]
+	pocket_streak_feed_message_index = (pocket_streak_feed_message_index + 1) % POCKET_STREAK_FEED_TEMPLATES.size()
+	var flavor_text: String = template % multiplier
+
+	return "%s +%s Doubloons from a %s-Doubloon pocket haul" % [
+		flavor_text,
+		reward,
+		pocket_base,
+	]
 
 
 func get_active_popup_label_count() -> int:

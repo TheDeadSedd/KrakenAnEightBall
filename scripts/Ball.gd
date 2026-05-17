@@ -564,6 +564,14 @@ func respawn_at(new_position: Vector2) -> void:
 
 
 func begin_spawn_drop(final_position: Vector2) -> void:
+	_begin_spawn_drop(final_position, _get_random_spawn_settle_velocity())
+
+
+func begin_spawn_drop_with_settle_velocity(final_position: Vector2, settle_velocity: Vector2) -> void:
+	_begin_spawn_drop(final_position, settle_velocity)
+
+
+func _begin_spawn_drop(final_position: Vector2, settle_velocity: Vector2) -> void:
 	visible = true
 	velocity = Vector2.ZERO
 	gameplay_enabled = false
@@ -571,7 +579,7 @@ func begin_spawn_drop(final_position: Vector2) -> void:
 	_spawn_drop_active = true
 	_spawn_drop_elapsed = 0.0
 	_spawn_drop_target = final_position
-	_spawn_drop_settle_velocity = _get_random_spawn_settle_velocity()
+	_spawn_drop_settle_velocity = settle_velocity
 	_spawn_drop_visual_lean_direction = _spawn_drop_settle_velocity.normalized()
 	_spawn_drop_horizontal_offset = _get_drop_horizontal_offset(_spawn_drop_visual_lean_direction)
 	global_position = final_position

@@ -1,0 +1,649 @@
+extends Node
+class_name TableEventSystem
+
+signal meter_changed(progress: int, threshold: int, percent: float, pending: bool, ready: bool)
+signal progress_advanced(amount: int, shot_total: int)
+signal pending_event_changed(pending: bool, ready: bool)
+signal offers_changed(offers: Array)
+signal status_changed(text: String)
+signal event_purchased(event_id: String, cost: int)
+signal event_purchase_blocked(reason: String)
+
+# Owns earned Table Event opportunities and event purchasing.
+# ScoreSystem awards Doubloons; SpawnSystem performs event consequences.
+const EVENT_LOOSE_CARGO := "loose_cargo"
+const EVENT_CHEAP_CARGO := "cheap_cargo"
+const EVENT_POWDER_CACHE := "powder_cache"
+const EVENT_WAYFINDERS_FAVOR := "wayfinders_favor"
+const EVENT_CANNON_WARNING := "cannon_warning"
+const EVENT_BROADSIDE_ATTACK := "broadside_attack"
+const OFFER_SLOT_COUNT := 3
+const OFFER_RNG_SEED := 1742026
+const EMPTY_OFFER_ID := ""
+const CANNON_WARNING_BALL_COUNT := 1
+const BROADSIDE_PHASE_NONE := 0
+const BROADSIDE_PHASE_WARNING := 1
+const BROADSIDE_PHASE_CANNON := 2
+const EVENT_EARNED_MESSAGES := [
+	"The table offers a choice...",
+	"The Kraken opens the ledger.",
+	"Kraken Intervention is ready.",
+	"The Quartermaster smells opportunity.",
+]
+const EVENT_POOL := [
+	EVENT_LOOSE_CARGO,
+	EVENT_CHEAP_CARGO,
+	EVENT_POWDER_CACHE,
+	EVENT_WAYFINDERS_FAVOR,
+	EVENT_CANNON_WARNING,
+	EVENT_BROADSIDE_ATTACK,
+]
+const EVENT_DATA := {
+	"loose_cargo": {
+		"id": EVENT_LOOSE_CARGO,
+		"name": "Loose Cargo",
+		"description": "Drop 10 regular object balls onto the table.",
+		"flavor": "A cargo net snaps. The table gets crowded.",
+		"icon_key": "plain_object_ball",
+		"rarity": "Common",
+		"weight": 8,
+	},
+	"cheap_cargo": {
+		"id": EVENT_CHEAP_CARGO,
+		"name": "Cheap Cargo",
+		"description": "Drop 5 regular object balls onto the table.",
+		"flavor": "A smaller crate splits open.",
+		"icon_key": "plain_object_ball",
+		"rarity": "Common",
+		"weight": 10,
+	},
+	"powder_cache": {
+		"id": EVENT_POWDER_CACHE,
+		"name": "Powder Cache",
+		"description": "Drop 3 Powder Kegs onto the table.",
+		"flavor": "Someone stored the fireworks badly.",
+		"icon_key": "powder_keg_ball",
+		"rarity": "Uncommon",
+		"weight": 4,
+	},
+	"wayfinders_favor": {
+		"id": EVENT_WAYFINDERS_FAVOR,
+		"name": "Wayfinder's Favor",
+		"description": "Drop 2 Wayfinder Balls onto the table.",
+		"flavor": "The compass stones start whispering.",
+		"icon_key": "wayfinder_ball",
+		"rarity": "Uncommon",
+		"weight": 5,
+	},
+	"cannon_warning": {
+		"id": EVENT_CANNON_WARNING,
+		"name": "Cannon Warning",
+		"description": "Drop one heavy Cannon Ball onto the table.",
+		"flavor": "A future problem rolls aboard.",
+		"icon_key": "cannon_ball",
+		"rarity": "Rare",
+		"weight": 2,
+	},
+	"broadside_attack": {
+		"id": EVENT_BROADSIDE_ATTACK,
+		"name": "Broadside Attack",
+		"description": "Powder Kegs fall in lanes. Cannon Balls follow.",
+		"flavor": "A gun deck answers the deep.",
+		"icon_key": "cannon_ball",
+		"rarity": "Rare",
+		"weight": 1,
+	},
+}
+
+@export var enabled := true
+@export var disable_automatic_ball_drops := true
+@export_range(1, 9999, 1) var shot_doubloon_threshold := 30
+@export_range(0, 9999, 1) var cheap_cargo_cost := 20
+@export_range(1, 50, 1) var cheap_cargo_ball_count := 5
+@export_range(0, 9999, 1) var loose_cargo_cost := 40
+@export_range(1, 50, 1) var loose_cargo_ball_count := 10
+@export_range(0, 9999, 1) var wayfinders_favor_cost := 55
+@export_range(1, 8, 1) var wayfinders_favor_ball_count := 2
+@export_range(0, 9999, 1) var powder_cache_cost := 75
+@export_range(1, 12, 1) var powder_cache_ball_count := 3
+@export_range(0, 9999, 1) var cannon_warning_cost := 90
+@export_range(0, 9999, 1) var broadside_attack_cost := 140
+@export_range(3, 5, 1) var broadside_powder_keg_count := 4
+@export_range(2, 4, 1) var broadside_cannon_ball_count := 3
+@export_range(0.1, 1.0, 0.05) var broadside_warning_delay := 0.35
+@export_range(0.1, 2.5, 0.05) var broadside_stage_delay := 0.75
+@export_range(80.0, 900.0, 10.0) var broadside_cannon_launch_speed := 420.0
+
+var table
+var shot_active := false
+var current_shot_doubloons := 0
+var pending_event_available := false
+var pending_event_ready := false
+var event_menu_open := false
+var active_offer_ids: Array = []
+var offer_rng := RandomNumberGenerator.new()
+
+var total_tracked_doubloons := 0
+var pending_events_earned := 0
+var pending_events_readied := 0
+var purchased_events := 0
+var denied_purchases := 0
+var offers_generated := 0
+var ignored_awards_while_pending := 0
+var last_award_amount := 0
+var last_purchase_event_id := ""
+var last_purchase_cost := 0
+var last_blocker_reason := ""
+var event_earned_message_index := 0
+var broadside_delay_remaining := 0.0
+var broadside_phase := BROADSIDE_PHASE_NONE
+var broadside_pending_powder_positions: Array[Vector2] = []
+var broadside_sequences_started := 0
+
+
+func setup(table_ref) -> void:
+	table = table_ref
+	offer_rng.seed = OFFER_RNG_SEED
+	active_offer_ids.clear()
+	set_process(false)
+	_emit_state()
+
+
+func _process(delta: float) -> void:
+	if broadside_phase == BROADSIDE_PHASE_NONE or broadside_delay_remaining <= 0.0:
+		set_process(false)
+		return
+
+	broadside_delay_remaining = maxf(broadside_delay_remaining - delta, 0.0)
+	if broadside_delay_remaining > 0.0:
+		return
+
+	match broadside_phase:
+		BROADSIDE_PHASE_WARNING:
+			_queue_broadside_powder_stage()
+		BROADSIDE_PHASE_CANNON:
+			_queue_broadside_cannon_stage()
+			broadside_phase = BROADSIDE_PHASE_NONE
+			set_process(false)
+
+
+func should_disable_automatic_ball_drops() -> bool:
+	return enabled and disable_automatic_ball_drops
+
+
+func start_shot() -> void:
+	shot_active = true
+	pending_event_ready = false
+	event_menu_open = false
+	if not pending_event_available:
+		current_shot_doubloons = 0
+	_emit_state()
+
+
+func finish_shot() -> void:
+	shot_active = false
+	_emit_state()
+
+
+func handle_cue_control_regained() -> void:
+	if not enabled or not pending_event_available:
+		return
+	if pending_event_ready:
+		_emit_state()
+		return
+
+	pending_event_ready = true
+	pending_events_readied += 1
+	status_changed.emit("Kraken Intervention is ready.")
+	_emit_state()
+
+
+func handle_doubloons_awarded(amount: int, _new_total: int = 0) -> void:
+	if not enabled or amount <= 0 or not shot_active:
+		return
+
+	if pending_event_available:
+		ignored_awards_while_pending += amount
+		return
+
+	last_award_amount = amount
+	current_shot_doubloons += amount
+	total_tracked_doubloons += amount
+	progress_advanced.emit(amount, current_shot_doubloons)
+	if current_shot_doubloons >= shot_doubloon_threshold:
+		current_shot_doubloons = shot_doubloon_threshold
+		pending_event_available = true
+		pending_event_ready = false
+		pending_events_earned += 1
+		_generate_event_offers()
+		status_changed.emit(_get_next_event_earned_message())
+	_emit_state()
+
+
+func set_event_menu_open(is_open: bool) -> void:
+	if event_menu_open == is_open:
+		return
+	event_menu_open = is_open
+	_emit_state()
+
+
+func is_event_menu_open() -> bool:
+	return event_menu_open
+
+
+func is_event_icon_clickable() -> bool:
+	return enabled and pending_event_available and pending_event_ready and not event_menu_open
+
+
+func request_purchase_offer(offer_index: int) -> bool:
+	var blocker: String = _get_offer_purchase_blocker(offer_index)
+	if not blocker.is_empty():
+		denied_purchases += 1
+		last_blocker_reason = blocker
+		status_changed.emit(blocker)
+		event_purchase_blocked.emit(blocker)
+		_emit_state()
+		return false
+
+	var event_id: String = str(active_offer_ids[offer_index])
+	var cost: int = _get_event_cost(event_id)
+	if not table.score_system.try_spend_doubloons(cost):
+		denied_purchases += 1
+		last_blocker_reason = "Not enough Doubloons"
+		status_changed.emit(last_blocker_reason)
+		event_purchase_blocked.emit(last_blocker_reason)
+		_emit_state()
+		return false
+
+	_execute_event(event_id)
+	purchased_events += 1
+	last_purchase_event_id = event_id
+	last_purchase_cost = cost
+	last_blocker_reason = ""
+	_clear_pending_event()
+	status_changed.emit(_get_event_purchase_message(event_id, cost))
+	event_purchased.emit(event_id, cost)
+	_emit_state()
+	return true
+
+
+func get_event_offers_snapshot() -> Array:
+	_ensure_offer_slots()
+	var offers: Array = []
+	for offer_index in range(OFFER_SLOT_COUNT):
+		var event_id: String = str(active_offer_ids[offer_index])
+		offers.append(_make_offer_snapshot(event_id, offer_index))
+	return offers
+
+
+func get_debug_snapshot() -> Dictionary:
+	return {
+		"enabled": enabled,
+		"automatic_ball_drops_gated": should_disable_automatic_ball_drops(),
+		"shot_active": shot_active,
+		"shot_progress": _get_meter_progress(),
+		"shot_threshold": shot_doubloon_threshold,
+		"progress_percent": _get_progress_percent(),
+		"pending_event_available": pending_event_available,
+		"pending_event_ready": pending_event_ready,
+		"event_menu_open": event_menu_open,
+		"active_offer_ids": active_offer_ids.duplicate(),
+		"last_award_amount": last_award_amount,
+		"total_tracked_doubloons": total_tracked_doubloons,
+		"pending_events_earned": pending_events_earned,
+		"pending_events_readied": pending_events_readied,
+		"purchased_events": purchased_events,
+		"denied_purchases": denied_purchases,
+		"offers_generated": offers_generated,
+		"ignored_awards_while_pending": ignored_awards_while_pending,
+		"last_purchase_event_id": last_purchase_event_id,
+		"last_purchase_cost": last_purchase_cost,
+		"last_blocker_reason": last_blocker_reason,
+		"cheap_cargo_cost": cheap_cargo_cost,
+		"cheap_cargo_ball_count": cheap_cargo_ball_count,
+		"loose_cargo_cost": loose_cargo_cost,
+		"loose_cargo_ball_count": loose_cargo_ball_count,
+		"wayfinders_favor_cost": wayfinders_favor_cost,
+		"wayfinders_favor_ball_count": wayfinders_favor_ball_count,
+		"powder_cache_cost": powder_cache_cost,
+		"powder_cache_ball_count": powder_cache_ball_count,
+		"cannon_warning_cost": cannon_warning_cost,
+		"cannon_warning_ball_count": CANNON_WARNING_BALL_COUNT,
+		"broadside_attack_cost": broadside_attack_cost,
+		"broadside_powder_keg_count": broadside_powder_keg_count,
+		"broadside_cannon_ball_count": broadside_cannon_ball_count,
+		"broadside_warning_delay": broadside_warning_delay,
+		"broadside_stage_delay_remaining": broadside_delay_remaining,
+		"broadside_sequences_started": broadside_sequences_started,
+	}
+
+
+func _generate_event_offers() -> void:
+	active_offer_ids.clear()
+	var pool: Array = _get_weighted_unique_event_pool()
+	while active_offer_ids.size() < OFFER_SLOT_COUNT and not pool.is_empty():
+		active_offer_ids.append(str(pool.pop_front()))
+	while active_offer_ids.size() < OFFER_SLOT_COUNT:
+		active_offer_ids.append(EMPTY_OFFER_ID)
+	offers_generated += 1
+	offers_changed.emit(get_event_offers_snapshot())
+
+
+func _clear_pending_event() -> void:
+	pending_event_available = false
+	pending_event_ready = false
+	event_menu_open = false
+	current_shot_doubloons = 0
+	active_offer_ids.clear()
+	offers_changed.emit(get_event_offers_snapshot())
+
+
+func _execute_event(event_id: String) -> void:
+	match event_id:
+		EVENT_CHEAP_CARGO:
+			table.spawn_system.queue_plain_object_ball_drops(
+				cheap_cargo_ball_count,
+				"Cheap Cargo tumbles onto the felt."
+			)
+		EVENT_LOOSE_CARGO:
+			table.spawn_system.queue_plain_object_ball_drops(
+				loose_cargo_ball_count,
+				"Loose Cargo spills across the felt."
+			)
+		EVENT_POWDER_CACHE:
+			table.spawn_system.queue_powder_keg_drops(
+				powder_cache_ball_count,
+				"Powder Cache cracks open."
+			)
+		EVENT_WAYFINDERS_FAVOR:
+			table.spawn_system.queue_wayfinder_ball_drops(
+				wayfinders_favor_ball_count,
+				"Wayfinder's Favor finds the felt."
+			)
+		EVENT_CANNON_WARNING:
+			table.spawn_system.queue_cannon_ball_drops(
+				CANNON_WARNING_BALL_COUNT,
+				"Cannon Warning rolls aboard."
+			)
+		EVENT_BROADSIDE_ATTACK:
+			_execute_broadside_attack()
+
+
+func _get_offer_purchase_blocker(offer_index: int) -> String:
+	if not enabled:
+		return "Table Events disabled"
+	if not pending_event_available:
+		return "No Table Event pending"
+	if not pending_event_ready:
+		return "Wait for cue control"
+	if not _is_valid_offer_index(offer_index):
+		return "Unknown Table Event offer"
+
+	_ensure_offer_slots()
+	var event_id: String = str(active_offer_ids[offer_index])
+	if event_id.is_empty():
+		return "No event in this slot yet"
+	if table == null or table.score_system == null or table.spawn_system == null:
+		return "Table Event system not ready"
+	if not table.score_system.can_afford_doubloons(_get_event_cost(event_id)):
+		return "Not enough Doubloons"
+	return ""
+
+
+func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
+	if event_id.is_empty():
+		return {
+			"id": EMPTY_OFFER_ID,
+			"name": "More Omens Soon",
+			"description": "Future Table Event slot.",
+			"flavor": "The deep is quiet here for now.",
+			"cost": 0,
+			"offer_index": offer_index,
+			"icon_key": "plain_object_ball",
+			"rarity": "",
+			"weight": 0,
+			"available": false,
+			"affordable": false,
+			"blocked_reason": "Coming soon",
+		}
+
+	var event_data: Dictionary = _get_event_data(event_id)
+	var blocker: String = _get_offer_purchase_blocker(offer_index)
+	var description: String = _get_event_description(event_id, event_data)
+	return {
+		"id": event_id,
+		"name": str(event_data.get("name", "Table Event")),
+		"description": description,
+		"flavor": str(event_data.get("flavor", "")),
+		"cost": _get_event_cost(event_id),
+		"offer_index": offer_index,
+		"icon_key": str(event_data.get("icon_key", "plain_object_ball")),
+		"rarity": _get_event_rarity(event_id),
+		"weight": _get_event_weight(event_id),
+		"available": blocker.is_empty(),
+		"affordable": table != null and table.score_system != null and table.score_system.can_afford_doubloons(_get_event_cost(event_id)),
+		"blocked_reason": blocker,
+	}
+
+
+func _emit_state() -> void:
+	var progress: int = _get_meter_progress()
+	meter_changed.emit(progress, shot_doubloon_threshold, _get_progress_percent(), pending_event_available, pending_event_ready)
+	pending_event_changed.emit(pending_event_available, pending_event_ready)
+	offers_changed.emit(get_event_offers_snapshot())
+
+
+func _get_meter_progress() -> int:
+	if pending_event_available:
+		return shot_doubloon_threshold
+	return clampi(current_shot_doubloons, 0, shot_doubloon_threshold)
+
+
+func _get_progress_percent() -> float:
+	if shot_doubloon_threshold <= 0:
+		return 0.0
+	return clampf(float(_get_meter_progress()) / float(shot_doubloon_threshold), 0.0, 1.0)
+
+
+func _get_event_data(event_id: String) -> Dictionary:
+	if not EVENT_DATA.has(event_id):
+		return {}
+	return EVENT_DATA[event_id] as Dictionary
+
+
+func _get_event_name(event_id: String) -> String:
+	return str(_get_event_data(event_id).get("name", "Table Event"))
+
+
+func _get_event_cost(event_id: String) -> int:
+	match event_id:
+		EVENT_CHEAP_CARGO:
+			return cheap_cargo_cost
+		EVENT_LOOSE_CARGO:
+			return loose_cargo_cost
+		EVENT_POWDER_CACHE:
+			return powder_cache_cost
+		EVENT_WAYFINDERS_FAVOR:
+			return wayfinders_favor_cost
+		EVENT_CANNON_WARNING:
+			return cannon_warning_cost
+		EVENT_BROADSIDE_ATTACK:
+			return broadside_attack_cost
+	return 0
+
+
+func _get_event_rarity(event_id: String) -> String:
+	return str(_get_event_data(event_id).get("rarity", "Common"))
+
+
+func _get_event_weight(event_id: String) -> int:
+	return maxi(int(_get_event_data(event_id).get("weight", 1)), 0)
+
+
+func _get_next_event_earned_message() -> String:
+	if EVENT_EARNED_MESSAGES.is_empty():
+		return "Kraken Intervention is ready."
+
+	var message: String = str(EVENT_EARNED_MESSAGES[event_earned_message_index])
+	event_earned_message_index = (event_earned_message_index + 1) % EVENT_EARNED_MESSAGES.size()
+	return message
+
+
+func _get_event_purchase_message(event_id: String, cost: int) -> String:
+	match event_id:
+		EVENT_CHEAP_CARGO:
+			return "Cheap Cargo released! %s Doubloons spent." % cost
+		EVENT_LOOSE_CARGO:
+			return "Loose Cargo released! %s Doubloons spent." % cost
+		EVENT_POWDER_CACHE:
+			return "Powder Cache dropped! %s Doubloons spent." % cost
+		EVENT_WAYFINDERS_FAVOR:
+			return "Wayfinder's Favor accepted! %s Doubloons spent." % cost
+		EVENT_CANNON_WARNING:
+			return "Cannon Warning sounded! %s Doubloons spent." % cost
+		EVENT_BROADSIDE_ATTACK:
+			return "Cannons on the horizon! %s Doubloons spent." % cost
+	return "%s unleashed for %s Doubloons." % [_get_event_name(event_id), cost]
+
+
+func _get_event_description(event_id: String, event_data: Dictionary) -> String:
+	match event_id:
+		EVENT_CHEAP_CARGO:
+			return "Drop %s regular object balls onto the table." % cheap_cargo_ball_count
+		EVENT_LOOSE_CARGO:
+			return "Drop %s regular object balls onto the table." % loose_cargo_ball_count
+		EVENT_POWDER_CACHE:
+			return "Drop %s Powder Kegs onto the table." % powder_cache_ball_count
+		EVENT_WAYFINDERS_FAVOR:
+			return "Drop %s Wayfinder Balls onto the table." % wayfinders_favor_ball_count
+		EVENT_CANNON_WARNING:
+			return "Drop one heavy Cannon Ball onto the table."
+		EVENT_BROADSIDE_ATTACK:
+			return "Powder Kegs fall in lanes. Cannon Balls follow."
+	return str(event_data.get("description", ""))
+
+
+func _execute_broadside_attack() -> void:
+	broadside_pending_powder_positions = _get_broadside_powder_positions()
+	broadside_sequences_started += 1
+	table.queue_spawn_reward_message(false, false, false, false, "BROADSIDE INCOMING!")
+	broadside_phase = BROADSIDE_PHASE_WARNING
+	broadside_delay_remaining = broadside_warning_delay
+	set_process(true)
+
+
+func _queue_broadside_powder_stage() -> void:
+	if table == null or table.spawn_system == null:
+		broadside_phase = BROADSIDE_PHASE_NONE
+		return
+	table.spawn_system.queue_powder_keg_drops_at_positions(
+		broadside_pending_powder_positions,
+		""
+	)
+	broadside_phase = BROADSIDE_PHASE_CANNON
+	broadside_delay_remaining = broadside_stage_delay
+	set_process(true)
+
+
+func _queue_broadside_cannon_stage() -> void:
+	if table == null or table.spawn_system == null:
+		return
+	var launch_specs: Array = _get_broadside_cannon_launch_specs(broadside_pending_powder_positions)
+	broadside_pending_powder_positions.clear()
+	table.spawn_system.queue_cannon_ball_launches(
+		launch_specs,
+		"Cannon Balls follow the broadside."
+	)
+
+
+func _get_broadside_powder_positions() -> Array[Vector2]:
+	var positions: Array[Vector2] = []
+	if table == null:
+		return positions
+
+	var playfield: Rect2 = table.playfield_rect
+	var powder_count: int = clampi(broadside_powder_keg_count, 3, 5)
+	var lane_y_ratios := [0.24, 0.40, 0.56, 0.72, 0.32]
+	for lane_index in range(powder_count):
+		var lane_ratio: float = 0.0 if powder_count <= 1 else float(lane_index) / float(powder_count - 1)
+		var x_position: float = lerpf(playfield.position.x + playfield.size.x * 0.78, playfield.position.x + playfield.size.x * 0.28, lane_ratio)
+		var y_ratio: float = float(lane_y_ratios[lane_index % lane_y_ratios.size()])
+		var y_position: float = playfield.position.y + playfield.size.y * y_ratio
+		positions.append(Vector2(x_position, y_position))
+	return positions
+
+
+func _get_broadside_cannon_launch_specs(powder_positions: Array[Vector2]) -> Array:
+	var launch_specs: Array = []
+	if table == null:
+		return launch_specs
+
+	var playfield: Rect2 = table.playfield_rect
+	var cannon_count: int = clampi(broadside_cannon_ball_count, 2, 4)
+	for cannon_index in range(cannon_count):
+		var target_position: Vector2 = _get_broadside_cannon_target(powder_positions, cannon_index, cannon_count)
+		var launch_position := Vector2(
+			target_position.x,
+			playfield.end.y - 36.0
+		)
+		launch_position.x = clampf(launch_position.x, playfield.position.x + 70.0, playfield.end.x - 70.0)
+		var launch_direction: Vector2 = (target_position - launch_position).normalized()
+		if launch_direction.length_squared() <= 0.001:
+			launch_direction = Vector2.UP
+		launch_specs.append({
+			"position": launch_position,
+			"velocity": launch_direction * broadside_cannon_launch_speed,
+		})
+	return launch_specs
+
+
+func _get_broadside_cannon_target(powder_positions: Array[Vector2], cannon_index: int, cannon_count: int) -> Vector2:
+	if powder_positions.is_empty():
+		return table.playfield_rect.get_center()
+
+	var target_ratio: float = 0.0 if cannon_count <= 1 else float(cannon_index) / float(cannon_count - 1)
+	var powder_index: int = clampi(roundi(target_ratio * float(powder_positions.size() - 1)), 0, powder_positions.size() - 1)
+	return powder_positions[powder_index]
+
+
+func _ensure_offer_slots() -> void:
+	while active_offer_ids.size() < OFFER_SLOT_COUNT:
+		active_offer_ids.append(EMPTY_OFFER_ID)
+	if active_offer_ids.size() > OFFER_SLOT_COUNT:
+		active_offer_ids.resize(OFFER_SLOT_COUNT)
+
+
+func _is_valid_offer_index(offer_index: int) -> bool:
+	return offer_index >= 0 and offer_index < OFFER_SLOT_COUNT
+
+
+func _get_weighted_unique_event_pool() -> Array:
+	var remaining_events: Array = EVENT_POOL.duplicate()
+	var selected_events: Array = []
+	while not remaining_events.is_empty():
+		var picked_index: int = _pick_weighted_event_index(remaining_events)
+		if picked_index < 0:
+			break
+		selected_events.append(str(remaining_events[picked_index]))
+		remaining_events.remove_at(picked_index)
+	return selected_events
+
+
+func _pick_weighted_event_index(events: Array) -> int:
+	var total_weight: int = 0
+	for event_value in events:
+		var weighted_event_id: String = str(event_value)
+		total_weight += _get_event_weight(weighted_event_id)
+
+	if total_weight <= 0:
+		return 0 if not events.is_empty() else -1
+
+	var roll: int = offer_rng.randi_range(1, total_weight)
+	var running_weight: int = 0
+	for event_index in range(events.size()):
+		var candidate_event_id: String = str(events[event_index])
+		running_weight += _get_event_weight(candidate_event_id)
+		if roll <= running_weight:
+			return event_index
+
+	return events.size() - 1
