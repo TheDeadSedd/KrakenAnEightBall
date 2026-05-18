@@ -9,7 +9,10 @@ signal status_changed(text: String)
 signal event_purchased(event_id: String, cost: int)
 signal event_purchase_blocked(reason: String)
 
-# Owns earned Table Event opportunities and event purchasing.
+# Naming model:
+# - Table Event is the internal architecture/system name.
+# - Kraken Intervention is the player-facing meter/menu name.
+# - Omen is the player-facing offer/rarity flavor.
 # ScoreSystem awards Doubloons; SpawnSystem performs event consequences.
 const EVENT_LOOSE_CARGO := "loose_cargo"
 const EVENT_CHEAP_CARGO := "cheap_cargo"

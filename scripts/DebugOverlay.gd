@@ -694,7 +694,7 @@ func _make_performance_summary_lines(snapshot: Dictionary) -> Array:
 
 func _make_ball_drop_performance_lines(snapshot: Dictionary) -> Array:
 	var lines: Array = [
-		"TABLE EVENTS / BALL DROPS",
+		"TABLE EVENTS / LEGACY BALL DROPS",
 		"Table Event shot meter: %s/%s Doubloons (%s%%)" % [
 			snapshot["table_event_shot_progress"],
 			snapshot["table_event_threshold"],
@@ -850,6 +850,17 @@ func _make_wayfinder_performance_lines(snapshot: Dictionary) -> Array:
 
 
 func _make_anchor_performance_lines(snapshot: Dictionary) -> Array:
+	var lines: Array = []
+	lines.append_array(_make_anchor_seed_state_lines(snapshot))
+	lines.append_array(_make_anchor_chain_state_lines(snapshot))
+	lines.append_array(_make_anchor_tighten_state_lines(snapshot))
+	lines.append_array(_make_anchor_warning_state_lines(snapshot))
+	lines.append_array(_make_anchor_collapse_state_lines(snapshot))
+	lines.append_array(_make_anchor_spread_state_lines(snapshot))
+	return lines
+
+
+func _make_anchor_seed_state_lines(snapshot: Dictionary) -> Array:
 	return [
 		"Anchor curse seeds: %s active / %s created / %s candidates" % [
 			snapshot["anchor_curse_seeds_active"],
@@ -863,6 +874,11 @@ func _make_anchor_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["anchor_curse_seed_penalty_replacements"],
 			snapshot["anchor_curse_seed_penalty_attempts"],
 		],
+	]
+
+
+func _make_anchor_chain_state_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Anchor chains: %s links / per seed %s / last %s" % [
 			snapshot["anchor_curse_chain_links"],
 			snapshot["anchor_curse_chain_links_per_seed"],
@@ -873,6 +889,11 @@ func _make_anchor_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["anchor_curse_chain_failed_acquisitions"],
 			snapshot["anchor_curse_chain_invalidated_links"],
 		],
+	]
+
+
+func _make_anchor_tighten_state_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Anchor tighten: %s applied / %s skipped / touching %s" % [
 			snapshot["anchor_curse_chain_tighten_steps_applied"],
 			snapshot["anchor_curse_chain_tighten_steps_skipped"],
@@ -899,6 +920,11 @@ func _make_anchor_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["anchor_curse_chain_tighten_last_skip_reason"],
 			snapshot["anchor_curse_chain_tighten_skip_reasons"],
 		],
+	]
+
+
+func _make_anchor_warning_state_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Anchor warning: %s warning / %s ready / %.1fs / %s" % [
 			snapshot["anchor_curse_warning_seeds"],
 			snapshot["anchor_curse_spread_ready"],
@@ -909,6 +935,11 @@ func _make_anchor_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["anchor_curse_warning_started"],
 			snapshot["anchor_curse_warning_resets"],
 		],
+	]
+
+
+func _make_anchor_collapse_state_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Anchor collapses: %s total / cue %s / powder %s / cannon %s" % [
 			snapshot["anchor_curse_collapsed_total"],
 			snapshot["anchor_curse_collapsed_by_cue"],
@@ -920,6 +951,11 @@ func _make_anchor_performance_lines(snapshot: Dictionary) -> Array:
 			_debug_id_text(int(snapshot["anchor_curse_last_collapsed_chained_ball"])),
 		],
 		"Anchor collapse chains released: %s" % snapshot["anchor_curse_chains_released_by_collapse"],
+	]
+
+
+func _make_anchor_spread_state_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Anchor spread: %s events / %s seeds / %s skipped" % [
 			snapshot["anchor_curse_spread_events_total"],
 			snapshot["anchor_curse_seeds_created_by_spread"],
@@ -1000,6 +1036,15 @@ func _make_treasure_performance_lines(snapshot: Dictionary) -> Array:
 
 
 func _make_embezzler_performance_lines(snapshot: Dictionary) -> Array:
+	var lines: Array = []
+	lines.append_array(_make_embezzler_value_state_lines(snapshot))
+	lines.append_array(_make_embezzler_movement_state_lines(snapshot))
+	lines.append_array(_make_embezzler_escape_state_lines(snapshot))
+	lines.append_array(_make_embezzler_capture_state_lines(snapshot))
+	return lines
+
+
+func _make_embezzler_value_state_lines(snapshot: Dictionary) -> Array:
 	return [
 		"Embezzler: %s active / %s state" % [
 			snapshot["embezzler_balls"],
@@ -1019,6 +1064,11 @@ func _make_embezzler_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["embezzler_pressure_events"],
 			float(snapshot["embezzler_calm_decay_rate"]),
 		],
+	]
+
+
+func _make_embezzler_movement_state_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Embezzler target: %s @ %s / bias %.2f" % [
 			snapshot["embezzler_move_target_mode"],
 			_debug_vector_text(snapshot["embezzler_move_target"]),
@@ -1033,6 +1083,11 @@ func _make_embezzler_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["embezzler_target_switch_reason"],
 			snapshot["embezzler_last_blocked_target_reason"],
 		],
+	]
+
+
+func _make_embezzler_escape_state_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Embezzler escape: %s committed / %s pending / %s pending count / %s total" % [
 			snapshot["embezzler_escape_committed_active"],
 			snapshot["embezzler_pocket_test_pending_active"],
@@ -1063,6 +1118,11 @@ func _make_embezzler_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["embezzler_last_escaped_stored_value"],
 			snapshot["embezzler_escaped_stored_value_total"],
 		],
+	]
+
+
+func _make_embezzler_capture_state_lines(snapshot: Dictionary) -> Array:
+	return [
 		"Embezzler captures: %s caught / %s recovered / %s last" % [
 			snapshot["embezzler_captures_total"],
 			snapshot["embezzler_recovered_value_total"],

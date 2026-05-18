@@ -4,6 +4,7 @@ class_name TableEventMeter
 signal event_icon_clicked
 
 # Player-facing meter for shot-earned Kraken Intervention opportunities.
+# Internally, those opportunities are Table Events.
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const BORDER_COLOR := Color(0.74, 0.55, 0.22, 0.72)
 const BORDER_READY_COLOR := Color(1.0, 0.84, 0.36, 1.0)

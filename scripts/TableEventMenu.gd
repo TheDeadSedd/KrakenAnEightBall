@@ -4,7 +4,8 @@ class_name TableEventMenu
 signal event_offer_selected(offer_index: int)
 signal menu_closed
 
-# Compact player-choice menu for pending Table Events. It owns UI only.
+# Compact Kraken Intervention choice menu. It presents Omens, while Table Event
+# remains the internal architecture name.
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const OFFER_SLOT_COUNT := 3
 const TABLE_CENTER := Vector2(960.0, 540.0)
@@ -79,20 +80,42 @@ func refresh_offers() -> void:
 
 
 func _build_menu() -> void:
+	add_child(_build_shade())
+
+	panel = _build_panel()
+	add_child(panel)
+
+	var margin := _build_panel_margin()
+	panel.add_child(margin)
+
+	var root := _build_root_stack()
+	margin.add_child(root)
+
+	root.add_child(_build_header())
+	status_label = _build_status_label()
+	root.add_child(status_label)
+	root.add_child(_build_offer_row())
+
+
+func _build_shade() -> ColorRect:
 	var shade := ColorRect.new()
 	shade.mouse_filter = Control.MOUSE_FILTER_STOP
 	shade.color = Color(0.0, 0.0, 0.0, 0.06)
 	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	add_child(shade)
+	return shade
 
-	panel = Panel.new()
-	panel.mouse_filter = Control.MOUSE_FILTER_STOP
-	panel.clip_contents = true
-	panel.custom_minimum_size = Vector2.ZERO
-	panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
-	panel.add_theme_stylebox_override("panel", _make_panel_style(PANEL_COLOR, PANEL_BORDER, 2, 14))
-	add_child(panel)
 
+func _build_panel() -> Panel:
+	var menu_panel := Panel.new()
+	menu_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	menu_panel.clip_contents = true
+	menu_panel.custom_minimum_size = Vector2.ZERO
+	menu_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	_style_panel(menu_panel)
+	return menu_panel
+
+
+func _build_panel_margin() -> MarginContainer:
 	var margin := MarginContainer.new()
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
@@ -100,16 +123,24 @@ func _build_menu() -> void:
 	margin.add_theme_constant_override("margin_top", 12)
 	margin.add_theme_constant_override("margin_right", 20)
 	margin.add_theme_constant_override("margin_bottom", 12)
-	panel.add_child(margin)
+	return margin
 
+
+func _build_root_stack() -> VBoxContainer:
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 5)
-	margin.add_child(root)
+	return root
 
+
+func _build_header() -> HBoxContainer:
 	var header := HBoxContainer.new()
 	header.add_theme_constant_override("separation", 10)
-	root.add_child(header)
+	header.add_child(_build_title_label())
+	header.add_child(_build_close_button())
+	return header
 
+
+func _build_title_label() -> Label:
 	title_label = Label.new()
 	title_label.text = "Request Kraken Intervention..."
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -118,45 +149,63 @@ func _build_menu() -> void:
 	title_label.add_theme_color_override("font_color", Color(1.0, 0.84, 0.46, 1.0))
 	title_label.add_theme_color_override("font_outline_color", Color(0.08, 0.04, 0.02, 0.95))
 	title_label.add_theme_constant_override("outline_size", 3)
-	header.add_child(title_label)
+	return title_label
 
+
+func _build_close_button() -> Button:
 	close_button = Button.new()
 	close_button.text = "Close"
 	close_button.custom_minimum_size = Vector2(76.0, 30.0)
 	close_button.add_theme_font_override("font", UI_FONT)
 	close_button.add_theme_font_size_override("font_size", 14)
 	close_button.pressed.connect(close_menu)
-	header.add_child(close_button)
+	return close_button
 
-	status_label = Label.new()
-	status_label.text = "Spend Doubloons to unleash one table event, or close and keep the choice."
-	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	status_label.add_theme_font_override("font", UI_FONT)
-	status_label.add_theme_font_size_override("font_size", 13)
-	status_label.add_theme_color_override("font_color", STATUS_COLOR)
-	status_label.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.02, 0.86))
-	status_label.add_theme_constant_override("outline_size", 1)
-	root.add_child(status_label)
 
+func _build_status_label() -> Label:
+	var label := Label.new()
+	label.text = "Spend Doubloons to unleash one table event, or close and keep the choice."
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", 13)
+	label.add_theme_color_override("font_color", STATUS_COLOR)
+	label.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.02, 0.86))
+	label.add_theme_constant_override("outline_size", 1)
+	return label
+
+
+func _build_offer_row() -> HBoxContainer:
 	var cards := HBoxContainer.new()
 	cards.alignment = BoxContainer.ALIGNMENT_CENTER
 	cards.custom_minimum_size = Vector2(0.0, CARD_SIZE.y)
 	cards.add_theme_constant_override("separation", CARD_GAP)
-	root.add_child(cards)
 	for offer_index in range(OFFER_SLOT_COUNT):
-		var button := Button.new()
-		button.text = ""
-		button.custom_minimum_size = CARD_SIZE
-		button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-		button.add_theme_stylebox_override("normal", _make_panel_style(CARD_COLOR, CARD_BORDER, 1, 10))
-		button.add_theme_stylebox_override("hover", _make_panel_style(CARD_COLOR.lightened(0.08), CARD_HOVER_BORDER, 2, 10))
-		button.add_theme_stylebox_override("pressed", _make_panel_style(CARD_PRESSED_COLOR, CARD_HOVER_BORDER, 2, 10))
-		button.add_theme_stylebox_override("disabled", _make_panel_style(CARD_DISABLED_COLOR, CARD_BORDER.darkened(0.25), 1, 10))
-		button.pressed.connect(_on_offer_button_pressed.bind(offer_index))
-		_add_offer_card_content(button)
-		offer_buttons.append(button)
-		cards.add_child(button)
+		cards.add_child(_build_offer_card(offer_index))
+	return cards
+
+
+func _build_offer_card(offer_index: int) -> Button:
+	var button := Button.new()
+	button.text = ""
+	button.custom_minimum_size = CARD_SIZE
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	_style_offer_card(button)
+	button.pressed.connect(_on_offer_button_pressed.bind(offer_index))
+	_add_offer_card_content(button)
+	offer_buttons.append(button)
+	return button
+
+
+func _style_panel(menu_panel: Panel) -> void:
+	menu_panel.add_theme_stylebox_override("panel", _make_panel_style(PANEL_COLOR, PANEL_BORDER, 2, 14))
+
+
+func _style_offer_card(button: Button) -> void:
+	button.add_theme_stylebox_override("normal", _make_panel_style(CARD_COLOR, CARD_BORDER, 1, 10))
+	button.add_theme_stylebox_override("hover", _make_panel_style(CARD_COLOR.lightened(0.08), CARD_HOVER_BORDER, 2, 10))
+	button.add_theme_stylebox_override("pressed", _make_panel_style(CARD_PRESSED_COLOR, CARD_HOVER_BORDER, 2, 10))
+	button.add_theme_stylebox_override("disabled", _make_panel_style(CARD_DISABLED_COLOR, CARD_BORDER.darkened(0.25), 1, 10))
 
 
 func _notification(what: int) -> void:
