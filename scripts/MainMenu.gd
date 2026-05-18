@@ -13,6 +13,9 @@ const BACKGROUND_TEXTURE := preload("res://assets/ui/mainmenu_bg.png")
 const FOREGROUND_TEXTURE := preload("res://assets/ui/mainmenu_fg.png")
 const PRESENTATION_OVERLAY_SCRIPT := preload("res://scripts/MainMenuPresentationOverlay.gd")
 const OPTIONS_MENU_SCRIPT := preload("res://scripts/OptionsMenu.gd")
+const RUN_HISTORY_SCRIPT := preload("res://scripts/RunHistorySystem.gd")
+const HISTORY_PANEL_SIZE := Vector2(780.0, 610.0)
+const HISTORY_EMPTY_TEXT := "No voyages logged yet."
 
 var background_layer: TextureRect
 var behind_foreground_overlay: MainMenuPresentationOverlay
@@ -24,8 +27,14 @@ var subtitle_label: Label
 var status_label: Label
 var start_button: Button
 var options_button: Button
+var run_history_button: Button
 var quit_button: Button
 var options_panel: OptionsMenu
+var run_history_system: RunHistorySystem
+var run_history_panel: PanelContainer
+var run_history_list: VBoxContainer
+var run_history_empty_label: Label
+var run_history_back_button: Button
 
 
 func _ready() -> void:
@@ -33,6 +42,9 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	AudioSettings.load_and_apply()
+	run_history_system = RUN_HISTORY_SCRIPT.new()
+	run_history_system.name = "RunHistorySystem"
+	add_child(run_history_system)
 	_build_scene_layers()
 	_build_interface()
 	_update_menu_layout()
@@ -125,9 +137,11 @@ func _build_interface() -> void:
 	stack.add_child(_make_gap(10.0))
 	start_button = _make_menu_button("Start Run")
 	options_button = _make_menu_button("Options")
+	run_history_button = _make_menu_button("Run History")
 	quit_button = _make_menu_button("Quit")
 	stack.add_child(start_button)
 	stack.add_child(options_button)
+	stack.add_child(run_history_button)
 	stack.add_child(quit_button)
 
 	status_label = Label.new()
@@ -144,6 +158,7 @@ func _build_interface() -> void:
 
 	start_button.pressed.connect(_on_start_pressed)
 	options_button.pressed.connect(_on_options_pressed)
+	run_history_button.pressed.connect(_on_run_history_pressed)
 	quit_button.pressed.connect(_on_quit_pressed)
 
 	options_panel = OPTIONS_MENU_SCRIPT.new()
@@ -151,6 +166,8 @@ func _build_interface() -> void:
 	options_panel.visible = false
 	options_panel.back_requested.connect(_on_options_back_requested)
 	add_child(options_panel)
+
+	_build_run_history_panel()
 
 
 func _set_full_rect(control: Control) -> void:
@@ -225,13 +242,96 @@ func _make_button_style(background_color: Color, border_color: Color) -> StyleBo
 	return style
 
 
+func _make_history_row_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.035, 0.026, 0.018, 0.82)
+	style.border_color = Color(0.96, 0.78, 0.34, 0.28)
+	style.border_width_left = 1
+	style.border_width_top = 1
+	style.border_width_right = 1
+	style.border_width_bottom = 1
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	return style
+
+
+func _build_run_history_panel() -> void:
+	run_history_panel = PanelContainer.new()
+	run_history_panel.name = "RunHistoryPanel"
+	run_history_panel.visible = false
+	run_history_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	run_history_panel.add_theme_stylebox_override("panel", _make_panel_style())
+	add_child(run_history_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 30)
+	margin.add_theme_constant_override("margin_top", 26)
+	margin.add_theme_constant_override("margin_right", 30)
+	margin.add_theme_constant_override("margin_bottom", 24)
+	run_history_panel.add_child(margin)
+
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 12)
+	margin.add_child(stack)
+
+	var title_label := Label.new()
+	title_label.text = "Run History"
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_label.add_theme_font_override("font", UI_FONT)
+	title_label.add_theme_font_size_override("font_size", 38)
+	title_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.48, 1.0))
+	title_label.add_theme_color_override("font_outline_color", Color(0.03, 0.018, 0.012, 0.95))
+	title_label.add_theme_constant_override("outline_size", 4)
+	stack.add_child(title_label)
+
+	var subtitle_label := Label.new()
+	subtitle_label.text = "Most recent voyages"
+	subtitle_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	subtitle_label.add_theme_font_override("font", UI_FONT)
+	subtitle_label.add_theme_font_size_override("font_size", 18)
+	subtitle_label.add_theme_color_override("font_color", Color(0.78, 0.92, 0.90, 0.92))
+	subtitle_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.72))
+	subtitle_label.add_theme_constant_override("outline_size", 2)
+	stack.add_child(subtitle_label)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(690.0, 410.0)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	stack.add_child(scroll)
+
+	run_history_list = VBoxContainer.new()
+	run_history_list.add_theme_constant_override("separation", 8)
+	run_history_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(run_history_list)
+
+	run_history_empty_label = Label.new()
+	run_history_empty_label.text = HISTORY_EMPTY_TEXT
+	run_history_empty_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	run_history_empty_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	run_history_empty_label.custom_minimum_size = Vector2(680.0, 180.0)
+	run_history_empty_label.add_theme_font_override("font", UI_FONT)
+	run_history_empty_label.add_theme_font_size_override("font_size", 24)
+	run_history_empty_label.add_theme_color_override("font_color", Color(0.82, 0.86, 0.78, 0.9))
+	run_history_empty_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.72))
+	run_history_empty_label.add_theme_constant_override("outline_size", 2)
+
+	run_history_back_button = _make_menu_button("Back")
+	run_history_back_button.custom_minimum_size = Vector2(230.0, 48.0)
+	run_history_back_button.add_theme_font_size_override("font_size", 24)
+	stack.add_child(run_history_back_button)
+	run_history_back_button.pressed.connect(_on_run_history_back_pressed)
+
+
 func _update_menu_layout() -> void:
 	if menu_panel == null:
 		return
 
 	var viewport_size: Vector2 = size
 	var panel_width: float = clampf(viewport_size.x * 0.28, 390.0, 520.0)
-	var panel_height: float = clampf(viewport_size.y * 0.55, 500.0, 630.0)
+	var panel_height: float = clampf(viewport_size.y * 0.60, 560.0, 700.0)
 	menu_panel.anchor_left = 0.5
 	menu_panel.anchor_right = 0.5
 	menu_panel.anchor_top = 0.5
@@ -253,6 +353,113 @@ func _update_menu_layout() -> void:
 		options_panel.offset_top = -options_height * 0.5
 		options_panel.offset_bottom = options_height * 0.5
 
+	if run_history_panel != null:
+		var history_width: float = clampf(viewport_size.x * 0.48, HISTORY_PANEL_SIZE.x, 920.0)
+		var history_height: float = clampf(viewport_size.y * 0.66, HISTORY_PANEL_SIZE.y, 720.0)
+		run_history_panel.anchor_left = 0.5
+		run_history_panel.anchor_right = 0.5
+		run_history_panel.anchor_top = 0.5
+		run_history_panel.anchor_bottom = 0.5
+		run_history_panel.offset_left = -history_width * 0.5
+		run_history_panel.offset_right = history_width * 0.5
+		run_history_panel.offset_top = -history_height * 0.5
+		run_history_panel.offset_bottom = history_height * 0.5
+
+
+func _rebuild_run_history_list() -> void:
+	if run_history_system == null or run_history_list == null:
+		return
+
+	run_history_system.load_history()
+	_clear_run_history_list()
+	var records: Array = run_history_system.get_records_snapshot()
+	if records.is_empty():
+		run_history_list.add_child(run_history_empty_label)
+		return
+
+	for record_value in records:
+		if record_value is Dictionary:
+			run_history_list.add_child(_make_run_history_row(record_value as Dictionary))
+
+
+func _clear_run_history_list() -> void:
+	for child in run_history_list.get_children():
+		run_history_list.remove_child(child)
+		if child != run_history_empty_label:
+			child.queue_free()
+
+
+func _make_run_history_row(record: Dictionary) -> Control:
+	var row_panel := PanelContainer.new()
+	row_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row_panel.add_theme_stylebox_override("panel", _make_history_row_style())
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	row_panel.add_child(margin)
+
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+
+	var timestamp_label := _make_history_label(str(record.get("timestamp", "Unknown voyage")), 19, Color(1.0, 0.88, 0.48, 1.0))
+	stack.add_child(timestamp_label)
+	stack.add_child(_make_history_label(
+		"Time %s    Final %s Doubloons    Earned %s" % [
+			_format_run_duration(float(record.get("run_duration", 0.0))),
+			maxi(int(record.get("final_doubloons", 0)), 0),
+			maxi(int(record.get("doubloons_earned", 0)), 0),
+		],
+		16,
+		Color(0.88, 0.86, 0.76, 0.96)
+	))
+	stack.add_child(_make_history_label(
+		"Sunk %s    Best Streak X%s    Interventions %s" % [
+			maxi(int(record.get("balls_sunk", 0)), 0),
+			maxi(int(record.get("highest_pocket_streak", 1)), 1),
+			maxi(int(record.get("interventions_triggered", 0)), 0),
+		],
+		16,
+		Color(0.78, 0.92, 0.90, 0.92)
+	))
+	stack.add_child(_make_history_label(
+		"Contraband %s    Treasure %s    Final Balls %s" % [
+			maxi(int(record.get("contraband_found", 0)), 0),
+			maxi(int(record.get("treasure_claimed", 0)), 0),
+			maxi(int(record.get("final_ball_count", 0)), 0),
+		],
+		16,
+		Color(1.0, 0.84, 0.36, 0.94)
+	))
+	return row_panel
+
+
+func _make_history_label(text: String, font_size: int, font_color: Color) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", font_color)
+	label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.72))
+	label.add_theme_constant_override("outline_size", 2)
+	return label
+
+
+func _format_run_duration(seconds_value: float) -> String:
+	var total_seconds := maxi(int(floor(seconds_value)), 0)
+	var hours := int(total_seconds / 3600)
+	var minutes := int((total_seconds % 3600) / 60)
+	var seconds := total_seconds % 60
+	if hours > 0:
+		return "%d:%02d:%02d" % [hours, minutes, seconds]
+	return "%02d:%02d" % [minutes, seconds]
+
 
 func _on_start_pressed() -> void:
 	start_button.disabled = true
@@ -265,6 +472,8 @@ func _on_start_pressed() -> void:
 
 func _on_options_pressed() -> void:
 	menu_panel.visible = false
+	if run_history_panel != null:
+		run_history_panel.visible = false
 	options_panel.visible = true
 	options_panel.refresh_from_audio_settings()
 	options_panel.grab_default_focus()
@@ -275,6 +484,22 @@ func _on_options_back_requested() -> void:
 	menu_panel.visible = true
 	status_label.text = "The moon is high. The table waits."
 	options_button.grab_focus()
+
+
+func _on_run_history_pressed() -> void:
+	menu_panel.visible = false
+	if options_panel != null:
+		options_panel.visible = false
+	_rebuild_run_history_list()
+	run_history_panel.visible = true
+	run_history_back_button.grab_focus()
+
+
+func _on_run_history_back_pressed() -> void:
+	run_history_panel.visible = false
+	menu_panel.visible = true
+	status_label.text = "The moon is high. The ledger waits."
+	run_history_button.grab_focus()
 
 
 func _on_quit_pressed() -> void:
