@@ -14,6 +14,7 @@ var music_bus_index := -1
 
 
 func _ready() -> void:
+	AudioSettings.load_and_apply()
 	_ensure_music_bus()
 	bus = music_bus_name
 	volume_db = gameplay_music_volume_db

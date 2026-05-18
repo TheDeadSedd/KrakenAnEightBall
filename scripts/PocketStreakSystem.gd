@@ -1,6 +1,8 @@
 extends Node
 class_name PocketStreakSystem
 
+signal streak_multiplier_reached(multiplier: int)
+
 # Tracks same-pocket object-ball counts and score subtotals for the current shot only.
 # It does not award score or draw effects; ScoreSystem and
 # PocketStreakPresenter own those responsibilities.
@@ -65,6 +67,7 @@ func record_object_ball_sink(sink_context: Dictionary, scored_amount: int) -> Di
 	last_streak_multiplier = pocket_count
 	last_streak_pocket_key = pocket_key
 	last_streak_score_subtotal = score_subtotal
+	streak_multiplier_reached.emit(pocket_count)
 	return {
 		"triggered": true,
 		"multiplier": pocket_count,

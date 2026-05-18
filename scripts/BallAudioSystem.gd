@@ -19,8 +19,9 @@ const PAIR_COOLDOWN_MSEC := 90
 const PAIR_COOLDOWN_MEMORY_MSEC := 1000
 const MAX_SOUNDS_PER_FRAME := 3
 const MAX_TRACKED_PAIR_COOLDOWNS := 384
+const DEFAULT_SFX_BUS_NAME := "SFX"
 
-@export var audio_bus_name := "Master"
+@export var audio_bus_name := DEFAULT_SFX_BUS_NAME
 
 var table: BilliardsTable
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -44,6 +45,9 @@ func setup(table_ref: BilliardsTable) -> void:
 	table = table_ref
 	if Engine.is_editor_hint():
 		return
+	AudioSettings.load_and_apply()
+	if audio_bus_name == AudioSettings.MASTER_BUS_NAME:
+		audio_bus_name = DEFAULT_SFX_BUS_NAME
 	rng.randomize()
 	_ensure_player_pool()
 

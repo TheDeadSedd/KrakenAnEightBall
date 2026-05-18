@@ -2,13 +2,17 @@ extends Node2D
 
 const FULLSCREEN_TOGGLE_KEY := KEY_F11
 const PAUSE_TOGGLE_KEY := KEY_ESCAPE
+const MAIN_MENU_SCENE_PATH := "res://scenes/MainMenu.tscn"
 
 @onready var table: BilliardsTable = $Table
+@onready var run_history_system: RunHistorySystem = $RunHistorySystem
 @onready var debug_overlay: DebugOverlay = $CanvasLayer/HUD
 @onready var pause_menu: PauseMenu = $CanvasLayer/HUD/PauseMenu
 @onready var hud_feed: HudFeed = $CanvasLayer/HUD/HudFeed
 @onready var result_label: Label = $CanvasLayer/HUD/ResultLabel
 @onready var doubloons_label: Label = $CanvasLayer/HUD/DoubloonsLabel
+@onready var run_ledger_hud: RunLedgerHUD = $CanvasLayer/HUD/RunLedgerHUD
+@onready var run_stats_hud: RunStatsHUD = $CanvasLayer/HUD/RunStatsHUD
 @onready var table_event_meter: TableEventMeter = $CanvasLayer/HUD/TableEventMeter
 @onready var table_event_menu: TableEventMenu = $CanvasLayer/HUD/TableEventMenu
 @onready var reserve_slots_ui: ReserveSlotsUI = $CanvasLayer/HUD/ReserveSlotsUI
@@ -17,6 +21,7 @@ const PAUSE_TOGGLE_KEY := KEY_ESCAPE
 
 var reserve_deployment_active := false
 var reserve_deployment_previous_pause_state := false
+var end_run_in_progress := false
 
 
 func _ready() -> void:
@@ -28,6 +33,7 @@ func _ready() -> void:
 	table.score_system.score_feed_message.connect(_on_score_feed_message)
 	table.table_event_system.status_changed.connect(_on_table_event_status_changed)
 	table.table_event_system.event_purchased.connect(_on_table_event_purchased)
+	table.run_stats_system.run_stats_changed.connect(_on_run_stats_changed)
 	table.quartermaster_system.shop_state_changed.connect(_on_quartermaster_shop_state_changed)
 	table.quartermaster_system.status_changed.connect(_on_quartermaster_status_changed)
 	table.quartermaster_system.placement_started.connect(_on_quartermaster_placement_started)
@@ -39,12 +45,18 @@ func _ready() -> void:
 		reserve_slots_ui.reserve_slot_clicked.connect(_on_reserve_slot_clicked)
 	if not pause_menu.resume_requested.is_connected(_on_pause_resume_requested):
 		pause_menu.resume_requested.connect(_on_pause_resume_requested)
+	if not pause_menu.end_run_requested.is_connected(_on_pause_end_run_requested):
+		pause_menu.end_run_requested.connect(_on_pause_end_run_requested)
 	if not pause_menu.debug_panel_toggled.is_connected(_on_pause_debug_panel_toggled):
 		pause_menu.debug_panel_toggled.connect(_on_pause_debug_panel_toggled)
 	if not pause_menu.debug_wayfinder_current_test_button_toggled.is_connected(_on_pause_wayfinder_current_test_button_toggled):
 		pause_menu.debug_wayfinder_current_test_button_toggled.connect(_on_pause_wayfinder_current_test_button_toggled)
 	if not pause_menu.debug_broadside_attack_test_button_toggled.is_connected(_on_pause_broadside_attack_test_button_toggled):
 		pause_menu.debug_broadside_attack_test_button_toggled.connect(_on_pause_broadside_attack_test_button_toggled)
+	if not pause_menu.debug_force_loose_cargo_contraband_toggled.is_connected(_on_pause_force_loose_cargo_contraband_toggled):
+		pause_menu.debug_force_loose_cargo_contraband_toggled.connect(_on_pause_force_loose_cargo_contraband_toggled)
+	if not pause_menu.debug_loose_cargo_contraband_kind_selected.is_connected(_on_pause_loose_cargo_contraband_kind_selected):
+		pause_menu.debug_loose_cargo_contraband_kind_selected.connect(_on_pause_loose_cargo_contraband_kind_selected)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 	if not quartermaster_hud.quartermaster_offer_requested.is_connected(_on_quartermaster_hud_offer_requested):
@@ -57,6 +69,9 @@ func _ready() -> void:
 	_on_doubloons_changed(table.score_system.get_doubloons_total())
 	table_event_meter.setup(table.table_event_system, table)
 	table_event_menu.setup(table.table_event_system)
+	run_ledger_hud.setup(table)
+	run_stats_hud.setup(table.run_stats_system)
+	_on_run_stats_changed(table.run_stats_system.get_run_stats_snapshot())
 	reserve_slots_ui.setup(table.reserve_system, table)
 	quartermaster_hud.setup(table.quartermaster_system, table)
 	reserve_deployment_presenter.setup(table.reserve_system, reserve_slots_ui)
@@ -75,6 +90,8 @@ func _configure_pause_process_modes() -> void:
 	reserve_slots_ui.process_mode = Node.PROCESS_MODE_ALWAYS
 	quartermaster_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	reserve_deployment_presenter.process_mode = Node.PROCESS_MODE_ALWAYS
+	run_ledger_hud.process_mode = Node.PROCESS_MODE_ALWAYS
+	run_stats_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	table_event_meter.process_mode = Node.PROCESS_MODE_ALWAYS
 	table_event_menu.process_mode = Node.PROCESS_MODE_ALWAYS
 
@@ -146,8 +163,34 @@ func _on_table_event_purchased(_event_id: String, _cost: int) -> void:
 	table_event_menu.close_menu()
 
 
+func _on_run_stats_changed(snapshot: Dictionary) -> void:
+	if pause_menu != null:
+		pause_menu.set_run_stats_snapshot(snapshot)
+
+
 func _on_pause_resume_requested() -> void:
 	_set_game_paused(false)
+
+
+func _on_pause_end_run_requested() -> void:
+	if end_run_in_progress:
+		return
+
+	end_run_in_progress = true
+	if table_event_menu != null and table_event_menu.visible:
+		table_event_menu.close_menu()
+	if table != null and table.is_ball_placement_active():
+		table.cancel_active_ball_placement()
+	if pause_menu != null:
+		pause_menu.set_pause_visible(false)
+
+	_save_final_run_history()
+	get_tree().paused = false
+	var error_code: int = get_tree().change_scene_to_file(MAIN_MENU_SCENE_PATH)
+	if error_code != OK:
+		end_run_in_progress = false
+		get_tree().paused = true
+		pause_menu.set_pause_visible(true)
 
 
 func _on_pause_debug_panel_toggled(panel_id: String, enabled: bool) -> void:
@@ -160,6 +203,14 @@ func _on_pause_wayfinder_current_test_button_toggled(enabled: bool) -> void:
 
 func _on_pause_broadside_attack_test_button_toggled(enabled: bool) -> void:
 	debug_overlay.set_broadside_attack_test_button_visible(enabled)
+
+
+func _on_pause_force_loose_cargo_contraband_toggled(enabled: bool) -> void:
+	table.table_event_system.set_debug_force_loose_cargo_contraband(enabled)
+
+
+func _on_pause_loose_cargo_contraband_kind_selected(kind: String) -> void:
+	table.table_event_system.set_debug_loose_cargo_contraband_kind(kind)
 
 
 func _on_quartermaster_hud_offer_requested(offer_index: int) -> void:
@@ -226,8 +277,11 @@ func _set_game_paused(paused: bool) -> void:
 	if paused:
 		if table_event_menu.visible:
 			table_event_menu.close_menu()
+		if run_stats_hud != null:
+			run_stats_hud.close_panel()
 		table.cancel_active_cue_drag_for_pause()
 		get_tree().paused = true
+		_refresh_pause_run_stats()
 		pause_menu.set_pause_visible(true)
 		quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 	else:
@@ -235,6 +289,22 @@ func _set_game_paused(paused: bool) -> void:
 			table.cancel_active_ball_placement()
 		pause_menu.set_pause_visible(false)
 		get_tree().paused = false
+
+
+func _refresh_pause_run_stats() -> void:
+	if pause_menu == null or table == null or table.run_stats_system == null:
+		return
+
+	pause_menu.set_run_stats_snapshot(table.run_stats_system.get_run_stats_snapshot())
+
+
+func _save_final_run_history() -> void:
+	if run_history_system == null or table == null or table.run_stats_system == null or table.score_system == null:
+		return
+
+	var stats_snapshot: Dictionary = table.run_stats_system.get_run_stats_snapshot()
+	var final_doubloons: int = table.score_system.get_doubloons_total()
+	run_history_system.save_finalized_run(stats_snapshot, final_doubloons)
 
 
 func _toggle_fullscreen() -> void:

@@ -14,6 +14,9 @@
 [ext_resource type="Script" path="res://scripts/GameplayMusicSystem.gd" id="12_gameplay_music_system"]
 [ext_resource type="AudioStream" path="res://audio/sfx/ui/background_gameplay.wav" id="13_gameplay_music"]
 [ext_resource type="Script" path="res://scripts/TableEventMenu.gd" id="14_table_event_menu"]
+[ext_resource type="Script" path="res://scripts/RunLedgerHUD.gd" id="15_run_ledger_hud"]
+[ext_resource type="Script" path="res://scripts/RunStatsHUD.gd" id="16_run_stats_hud"]
+[ext_resource type="Script" path="res://scripts/RunHistorySystem.gd" id="17_run_history_system"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -79,6 +82,9 @@ script = ExtResource("2_main_script")
 stream = ExtResource("13_gameplay_music")
 volume_db = -21.0
 script = ExtResource("12_gameplay_music_system")
+
+[node name="RunHistorySystem" type="Node" parent="."]
+script = ExtResource("17_run_history_system")
 
 [node name="Table" parent="." unique_id=1446886136 instance=ExtResource("1_table_scene")]
 
@@ -270,6 +276,28 @@ theme_override_font_sizes/font_size = 28
 text = "Doubloons: 0"
 horizontal_alignment = 2
 
+[node name="RunLedgerHUD" type="Control" parent="CanvasLayer/HUD"]
+process_mode = 3
+z_index = 17
+layout_mode = 0
+offset_left = 1138.0
+offset_top = 842.0
+offset_right = 1302.0
+offset_bottom = 896.0
+mouse_filter = 2
+script = ExtResource("15_run_ledger_hud")
+
+[node name="RunStatsHUD" type="Control" parent="CanvasLayer/HUD"]
+process_mode = 3
+z_index = 20
+layout_mode = 0
+offset_left = 28.0
+offset_top = 28.0
+offset_right = 384.0
+offset_bottom = 402.0
+mouse_filter = 2
+script = ExtResource("16_run_stats_hud")
+
 [node name="HudFeed" type="Control" parent="CanvasLayer/HUD" unique_id=634428339]
 process_mode = 3
 z_index = 18
@@ -317,10 +345,10 @@ script = ExtResource("8_reserve_slots_ui")
 process_mode = 3
 z_index = 22
 anchors_preset = 0
-offset_left = 1512.0
+offset_left = 1660.0
 offset_top = 326.0
-offset_right = 1640.0
-offset_bottom = 516.0
+offset_right = 1844.0
+offset_bottom = 432.0
 mouse_filter = 1
 script = ExtResource("11_quartermaster_hud")
 

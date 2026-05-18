@@ -12,6 +12,7 @@ const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const BACKGROUND_TEXTURE := preload("res://assets/ui/mainmenu_bg.png")
 const FOREGROUND_TEXTURE := preload("res://assets/ui/mainmenu_fg.png")
 const PRESENTATION_OVERLAY_SCRIPT := preload("res://scripts/MainMenuPresentationOverlay.gd")
+const OPTIONS_MENU_SCRIPT := preload("res://scripts/OptionsMenu.gd")
 
 var background_layer: TextureRect
 var behind_foreground_overlay: MainMenuPresentationOverlay
@@ -24,12 +25,14 @@ var status_label: Label
 var start_button: Button
 var options_button: Button
 var quit_button: Button
+var options_panel: OptionsMenu
 
 
 func _ready() -> void:
 	get_tree().paused = false
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	mouse_filter = Control.MOUSE_FILTER_STOP
+	AudioSettings.load_and_apply()
 	_build_scene_layers()
 	_build_interface()
 	_update_menu_layout()
@@ -143,6 +146,12 @@ func _build_interface() -> void:
 	options_button.pressed.connect(_on_options_pressed)
 	quit_button.pressed.connect(_on_quit_pressed)
 
+	options_panel = OPTIONS_MENU_SCRIPT.new()
+	options_panel.name = "OptionsPanel"
+	options_panel.visible = false
+	options_panel.back_requested.connect(_on_options_back_requested)
+	add_child(options_panel)
+
 
 func _set_full_rect(control: Control) -> void:
 	control.anchor_left = 0.0
@@ -232,6 +241,18 @@ func _update_menu_layout() -> void:
 	menu_panel.offset_top = -panel_height * 0.5
 	menu_panel.offset_bottom = panel_height * 0.5
 
+	if options_panel != null:
+		var options_width: float = clampf(viewport_size.x * 0.34, 560.0, 700.0)
+		var options_height: float = clampf(viewport_size.y * 0.48, 430.0, 560.0)
+		options_panel.anchor_left = 0.5
+		options_panel.anchor_right = 0.5
+		options_panel.anchor_top = 0.5
+		options_panel.anchor_bottom = 0.5
+		options_panel.offset_left = -options_width * 0.5
+		options_panel.offset_right = options_width * 0.5
+		options_panel.offset_top = -options_height * 0.5
+		options_panel.offset_bottom = options_height * 0.5
+
 
 func _on_start_pressed() -> void:
 	start_button.disabled = true
@@ -243,7 +264,17 @@ func _on_start_pressed() -> void:
 
 
 func _on_options_pressed() -> void:
-	status_label.text = "Options are coming soon."
+	menu_panel.visible = false
+	options_panel.visible = true
+	options_panel.refresh_from_audio_settings()
+	options_panel.grab_default_focus()
+
+
+func _on_options_back_requested() -> void:
+	options_panel.visible = false
+	menu_panel.visible = true
+	status_label.text = "The moon is high. The table waits."
+	options_button.grab_focus()
 
 
 func _on_quit_pressed() -> void:

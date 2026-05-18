@@ -5,10 +5,15 @@ signal quartermaster_offer_requested(offer_index: int)
 
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const OFFER_SLOT_COUNT := 3
+const TITLE_TEXT := "Quartermaster"
+const TITLE_FONT_SIZE := 18
+const TITLE_HEIGHT := 28.0
 const SLOT_SIZE := Vector2(44, 44)
 const SLOT_PADDING := 8.0
-const COST_LEFT := 58.0
-const ROW_HEIGHT := 58.0
+const SLOT_GAP := 18.0
+const SLOT_ROW_Y := 30.0
+const COST_Y_OFFSET := 94.0
+const COST_DRAW_WIDTH := 58.0
 const COST_FONT_SIZE := 17
 const TOOLTIP_FONT_SIZE := 15
 const TOOLTIP_WIDTH := 310.0
@@ -26,7 +31,9 @@ const REFRESH_SWEEP := Color(1.0, 0.94, 0.58, 0.42)
 const COST_AVAILABLE := Color(1.0, 0.84, 0.36, 1.0)
 const COST_UNAVAILABLE := Color(0.62, 0.55, 0.44, 0.76)
 const COST_SHADOW := Color(0.04, 0.02, 0.0, 0.78)
-const SHOP_X_OFFSET_FROM_TABLE := -8.0
+const TITLE_COLOR := Color(0.96, 0.88, 0.66, 0.96)
+const TITLE_SHADOW := Color(0.08, 0.04, 0.01, 0.82)
+const SHOP_X_OFFSET_FROM_TABLE := 140.0
 const SHOP_Y_OFFSET_FROM_TABLE := 106.0
 const CORNER_RADIUS := 9
 const GLOW_OUTSET := 5.0
@@ -52,6 +59,9 @@ var filled_slot_style := StyleBoxFlat.new()
 var hover_glow_style := StyleBoxFlat.new()
 var tooltip_panel: PanelContainer
 var tooltip_label: Label
+var preview_rng := RandomNumberGenerator.new()
+var preview_colors_by_offer_index: Dictionary = {}
+var preview_signatures_by_offer_index: Dictionary = {}
 
 
 func _ready() -> void:
@@ -59,6 +69,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	focus_mode = Control.FOCUS_NONE
 	z_index = 22
+	preview_rng.randomize()
 	_configure_styles()
 	_build_tooltip()
 	if not mouse_exited.is_connected(_on_mouse_exited):
@@ -78,6 +89,7 @@ func setup(quartermaster_system_ref: QuartermasterSystem, table_ref) -> void:
 
 func set_quartermaster_items(items: Array) -> void:
 	offer_snapshots = items.duplicate(true)
+	_update_preview_colors()
 	_note_refresh_state(offer_snapshots)
 	_update_tooltip()
 	queue_redraw()
@@ -116,6 +128,7 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _draw() -> void:
+	_draw_title()
 	for offer_index in range(OFFER_SLOT_COUNT):
 		var slot_rect: Rect2 = _get_slot_rect(offer_index)
 		var item: Dictionary = _get_offer_snapshot(offer_index)
@@ -132,7 +145,7 @@ func _draw() -> void:
 			draw_style_box(empty_slot_style, slot_rect)
 
 		if has_item:
-			ITEM_ICON_DRAW.draw_icon(self, slot_rect, str(item.get("icon_key", item.get("id", ""))))
+			_draw_offer_preview(offer_index, item, slot_rect)
 			if not available or not affordable:
 				draw_rect(slot_rect.grow(-1.0), UNAFFORDABLE_TINT, true)
 			_draw_offer_cost(offer_index, item, available and affordable)
@@ -206,8 +219,8 @@ func _make_tooltip_style() -> StyleBoxFlat:
 
 func _position_on_table_rail() -> void:
 	var shop_size := Vector2(
-		COST_LEFT + 70.0,
-		SLOT_PADDING * 2.0 + ROW_HEIGHT * OFFER_SLOT_COUNT
+		SLOT_PADDING * 2.0 + SLOT_SIZE.x * OFFER_SLOT_COUNT + SLOT_GAP * (OFFER_SLOT_COUNT - 1),
+		SLOT_ROW_Y + SLOT_SIZE.y + 32.0
 	)
 	size = shop_size
 	custom_minimum_size = shop_size
@@ -245,10 +258,22 @@ func _note_refresh_state(items: Array) -> void:
 func _draw_offer_cost(offer_index: int, item: Dictionary, is_available: bool) -> void:
 	var slot_rect: Rect2 = _get_slot_rect(offer_index)
 	var cost_text := "%s" % int(item.get("price", 0))
-	var text_position := Vector2(COST_LEFT, slot_rect.position.y + 29.0)
+	var text_position := Vector2(slot_rect.get_center().x - COST_DRAW_WIDTH * 0.5, COST_Y_OFFSET)
 	var color: Color = COST_AVAILABLE if is_available else COST_UNAVAILABLE
-	draw_string(UI_FONT, text_position + Vector2(1.5, 1.5), cost_text, HORIZONTAL_ALIGNMENT_LEFT, 64.0, COST_FONT_SIZE, COST_SHADOW)
-	draw_string(UI_FONT, text_position, cost_text, HORIZONTAL_ALIGNMENT_LEFT, 64.0, COST_FONT_SIZE, color)
+	draw_string(UI_FONT, text_position + Vector2(1.5, 1.5), cost_text, HORIZONTAL_ALIGNMENT_CENTER, COST_DRAW_WIDTH, COST_FONT_SIZE, COST_SHADOW)
+	draw_string(UI_FONT, text_position, cost_text, HORIZONTAL_ALIGNMENT_CENTER, COST_DRAW_WIDTH, COST_FONT_SIZE, color)
+
+
+func _draw_title() -> void:
+	var title_position := Vector2(0.0, TITLE_HEIGHT - 8.0)
+	draw_string(UI_FONT, title_position + Vector2(1.5, 1.5), TITLE_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x, TITLE_FONT_SIZE, TITLE_SHADOW)
+	draw_string(UI_FONT, title_position, TITLE_TEXT, HORIZONTAL_ALIGNMENT_CENTER, size.x, TITLE_FONT_SIZE, TITLE_COLOR)
+
+
+func _draw_offer_preview(offer_index: int, item: Dictionary, slot_rect: Rect2) -> void:
+	var item_id := str(item.get("icon_key", item.get("id", "")))
+	var preview_color := _get_preview_color(offer_index)
+	ITEM_ICON_DRAW.draw_icon(self, slot_rect, item_id, preview_color)
 
 
 func _draw_refresh_cue(slot_rect: Rect2) -> void:
@@ -274,6 +299,30 @@ func _update_hovered_offer(local_position: Vector2) -> void:
 	hovered_offer_index = next_hovered_offer
 	_update_tooltip()
 	queue_redraw()
+
+
+func _update_preview_colors() -> void:
+	for offer_index in range(OFFER_SLOT_COUNT):
+		var item: Dictionary = _get_offer_snapshot(offer_index)
+		var item_id := str(item.get("id", ""))
+		if item_id != QuartermasterSystem.ITEM_PLAIN_OBJECT_BALL:
+			preview_colors_by_offer_index.erase(offer_index)
+			preview_signatures_by_offer_index.erase(offer_index)
+			continue
+
+		var signature := "%s:%s" % [offer_index, item_id]
+		if str(preview_signatures_by_offer_index.get(offer_index, "")) == signature:
+			continue
+
+		preview_signatures_by_offer_index[offer_index] = signature
+		preview_colors_by_offer_index[offer_index] = ITEM_ICON_DRAW.get_random_object_ball_color(preview_rng)
+
+
+func _get_preview_color(offer_index: int) -> Color:
+	var color_value: Variant = preview_colors_by_offer_index.get(offer_index, ITEM_ICON_DRAW.DEFAULT_OBJECT_BALL_COLOR)
+	if color_value is Color:
+		return color_value
+	return ITEM_ICON_DRAW.DEFAULT_OBJECT_BALL_COLOR
 
 
 func _update_tooltip() -> void:
@@ -330,15 +379,13 @@ func _get_offer_index_at_position(local_position: Vector2) -> int:
 
 
 func _get_offer_interaction_rect(offer_index: int) -> Rect2:
-	return Rect2(
-		Vector2(SLOT_PADDING, SLOT_PADDING + offer_index * ROW_HEIGHT),
-		Vector2(size.x - SLOT_PADDING * 2.0, SLOT_SIZE.y)
-	)
+	return _get_slot_rect(offer_index).grow_individual(5.0, 5.0, 5.0, 27.0)
 
 
 func _get_slot_rect(offer_index: int) -> Rect2:
+	var slot_step := SLOT_SIZE.x + SLOT_GAP
 	return Rect2(
-		Vector2(SLOT_PADDING, SLOT_PADDING + offer_index * ROW_HEIGHT),
+		Vector2(SLOT_PADDING + offer_index * slot_step, SLOT_ROW_Y),
 		SLOT_SIZE
 	)
 

@@ -2,6 +2,8 @@
 extends Node
 class_name TreasureBallSystem
 
+signal treasure_claimed(amount: int)
+
 # index:title Treasure Ball System
 # index:category Mechanics / Anomaly Balls / Systems / Performance Concerns / In Progress
 # index:status In Progress
@@ -44,6 +46,7 @@ const DEBUG_COVER_LINE_COLOR := Color(1.0, 0.92, 0.48, 0.56)
 @export var minimum_cover_distance_from_cue_origin := 80.0
 @export var prefer_away_from_cue_weight := 2.35
 @export var perception_grace_time := 0.28
+@export_range(0, 9999, 1) var treasure_claim_payout := 100
 
 var table
 var treasure_balls: Array[Ball] = []
@@ -69,6 +72,11 @@ var perception_lost_events := 0
 var perception_reacquired_events := 0
 var perception_linger_activations := 0
 var perception_lingered_this_frame := 0
+var claimed_treasure_ball_ids: Dictionary = {}
+var treasure_claims_total := 0
+var treasure_claimed_doubloons_total := 0
+var last_treasure_claim_payout := 0
+var double_award_preventions := 0
 
 
 func setup(table_ref) -> void:
@@ -92,6 +100,35 @@ func register_treasure_ball(ball: Ball) -> void:
 		return
 
 	treasure_balls.append(ball)
+
+
+func handle_treasure_claimed(ball: Ball, sink_context: Dictionary) -> int:
+	if ball == null:
+		return 0
+
+	var ball_id: int = ball.get_instance_id()
+	if claimed_treasure_ball_ids.has(ball_id):
+		double_award_preventions += 1
+		return 0
+	if not ball.is_treasure_ball:
+		return 0
+
+	claimed_treasure_ball_ids[ball_id] = true
+	treasure_claims_total += 1
+	_clear_treasure_tracking_for_id(ball_id)
+	ball.is_treasure_ball = false
+
+	if table == null or table.score_system == null:
+		last_treasure_claim_payout = 0
+		return 0
+
+	var claim_context: Dictionary = sink_context.duplicate()
+	claim_context["ball_id"] = ball_id
+	var awarded_amount: int = table.score_system.award_treasure_claim(treasure_claim_payout, claim_context)
+	last_treasure_claim_payout = awarded_amount
+	treasure_claimed_doubloons_total += awarded_amount
+	treasure_claimed.emit(awarded_amount)
+	return awarded_amount
 
 
 func try_apply_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2, impulse: Vector2) -> bool:
@@ -202,6 +239,11 @@ func get_debug_snapshot() -> Dictionary:
 		"perception_lingered": perception_lingered_this_frame,
 		"perception_grace_active": _get_perception_grace_active_count(),
 		"perception_grace_max_remaining": _get_max_perception_grace_remaining(),
+		"claim_payout": treasure_claim_payout,
+		"claims_total": treasure_claims_total,
+		"claimed_doubloons_total": treasure_claimed_doubloons_total,
+		"last_claim_payout": last_treasure_claim_payout,
+		"double_award_preventions": double_award_preventions,
 	}
 
 
@@ -413,6 +455,19 @@ func _clear_perception_grace_for_id(ball_id: int) -> void:
 	hide_targets_by_treasure_id.erase(ball_id)
 	recent_seen_entries_by_treasure_id.erase(ball_id)
 	perception_lost_pending_by_treasure_id.erase(ball_id)
+
+
+func _clear_treasure_tracking_for_id(ball_id: int) -> void:
+	_clear_perception_grace_for_id(ball_id)
+	self_steering_until_by_ball_id.erase(ball_id)
+	self_scuttle_velocity_by_ball_id.erase(ball_id)
+	for index in range(treasure_balls.size() - 1, -1, -1):
+		var tracked_ball: Ball = treasure_balls[index]
+		if tracked_ball == null or not is_instance_valid(tracked_ball):
+			treasure_balls.remove_at(index)
+			continue
+		if tracked_ball.get_instance_id() == ball_id:
+			treasure_balls.remove_at(index)
 
 
 func _get_perception_grace_remaining(ball_id: int) -> float:

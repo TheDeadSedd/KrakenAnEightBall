@@ -30,6 +30,13 @@ class StartingBallData:
 	var eight_ball: Ball
 	var eight_start := Vector2.ZERO
 
+const CARGO_REPLACEMENT_NONE := ""
+const CARGO_REPLACEMENT_WAYFINDER := "wayfinder"
+const CARGO_REPLACEMENT_POWDER_KEG := "powder_keg"
+const CARGO_REPLACEMENT_TREASURE := "treasure"
+const CARGO_REPLACEMENT_CANNON := "cannon"
+const CARGO_REPLACEMENT_EMBEZZLER := "embezzler"
+
 # Debug-only spawn shortcuts.
 const DEBUG_SPAWN_WAYFINDER_ENABLED := true
 const DEBUG_SPAWN_WAYFINDER_KEY := KEY_F
@@ -174,6 +181,48 @@ func queue_spawn_reward(spawn_count: int, callout_message: String = "") -> void:
 
 func queue_plain_object_ball_drops(spawn_count: int, callout_message: String = "") -> void:
 	_queue_specific_ball_drops(spawn_count, false, false, false, callout_message)
+
+
+func queue_cargo_object_ball_drops(
+	spawn_count: int,
+	replacement_index: int = -1,
+	replacement_kind: String = CARGO_REPLACEMENT_NONE,
+	callout_message: String = ""
+) -> void:
+	var safe_spawn_count := maxi(spawn_count, 0)
+	var safe_replacement_index := -1
+	var safe_replacement_kind := _sanitize_cargo_replacement_kind(replacement_kind)
+	if not can_queue_cargo_replacement_kind(safe_replacement_kind):
+		safe_replacement_kind = CARGO_REPLACEMENT_NONE
+	if replacement_index >= 0 and replacement_index < safe_spawn_count and not safe_replacement_kind.is_empty():
+		safe_replacement_index = replacement_index
+
+	for spawn_index in range(safe_spawn_count):
+		var request: SpawnBallRequest = _make_cargo_spawn_request(
+			safe_replacement_kind if spawn_index == safe_replacement_index else CARGO_REPLACEMENT_NONE
+		)
+		pending_spawn_requests.append(request)
+		if spawn_index == 0 and not callout_message.is_empty():
+			table.queue_spawn_reward_message(
+				request.is_wayfinder,
+				request.is_powder_keg,
+				request.is_anchor_ball,
+				request.is_cannon_ball,
+				callout_message,
+				request.is_treasure_ball,
+				request.is_embezzler_ball
+			)
+
+
+func can_queue_cargo_replacement_kind(replacement_kind: String) -> bool:
+	match _sanitize_cargo_replacement_kind(replacement_kind):
+		CARGO_REPLACEMENT_WAYFINDER, CARGO_REPLACEMENT_POWDER_KEG, CARGO_REPLACEMENT_TREASURE, CARGO_REPLACEMENT_CANNON:
+			return true
+		CARGO_REPLACEMENT_EMBEZZLER:
+			if table == null or table.embezzler_system == null:
+				return false
+			return not _has_pending_embezzler_spawn() and table.embezzler_system.can_spawn_embezzler()
+	return false
 
 
 func queue_wayfinder_ball_drops(spawn_count: int, callout_message: String = "") -> void:
@@ -587,6 +636,29 @@ func _apply_regular_anomaly_pool_roll(request: SpawnBallRequest) -> void:
 	var powder_keg_threshold: float = WAYFINDER_SPAWN_CHANCE + POWDER_KEG_SPAWN_CHANCE
 	request.is_wayfinder = anomaly_roll <= WAYFINDER_SPAWN_CHANCE
 	request.is_powder_keg = anomaly_roll > WAYFINDER_SPAWN_CHANCE and anomaly_roll <= powder_keg_threshold
+
+
+func _make_cargo_spawn_request(replacement_kind: String = CARGO_REPLACEMENT_NONE) -> SpawnBallRequest:
+	match _sanitize_cargo_replacement_kind(replacement_kind):
+		CARGO_REPLACEMENT_WAYFINDER:
+			return _make_specific_spawn_request(true, false, false, false)
+		CARGO_REPLACEMENT_POWDER_KEG:
+			return _make_specific_spawn_request(false, true, false, false)
+		CARGO_REPLACEMENT_TREASURE:
+			return _make_specific_spawn_request(false, false, false, false, true)
+		CARGO_REPLACEMENT_CANNON:
+			return _make_specific_spawn_request(false, false, false, true)
+		CARGO_REPLACEMENT_EMBEZZLER:
+			if can_queue_cargo_replacement_kind(CARGO_REPLACEMENT_EMBEZZLER):
+				return _make_specific_spawn_request(false, false, false, false, false, true)
+	return _make_specific_spawn_request(false, false, false, false)
+
+
+func _sanitize_cargo_replacement_kind(replacement_kind: String) -> String:
+	match replacement_kind:
+		CARGO_REPLACEMENT_WAYFINDER, CARGO_REPLACEMENT_POWDER_KEG, CARGO_REPLACEMENT_TREASURE, CARGO_REPLACEMENT_CANNON, CARGO_REPLACEMENT_EMBEZZLER:
+			return replacement_kind
+	return CARGO_REPLACEMENT_NONE
 
 
 func _make_specific_spawn_request(

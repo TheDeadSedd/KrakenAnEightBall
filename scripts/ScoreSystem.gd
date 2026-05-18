@@ -28,6 +28,7 @@ const KRAKEN_CURRENT_REWARD := 10
 const TRIPLE_BANK_REWARD := 18
 const CANNON_CHAIN_REWARD := 16
 const TREASURE_SNARE_REWARD := 12
+const EVENT_TREASURE_CLAIM := "treasure_claim"
 const POCKET_STREAK_FEED_TEMPLATES: Array[String] = [
 	"The pocket hungers x%s!",
 	"The deep takes interest x%s.",
@@ -171,6 +172,7 @@ const LEGENDARY_EVENT_TYPES := {
 	ShotEventSystem.EVENT_TRIPLE_BANK: true,
 	ShotEventSystem.EVENT_CANNON_CHAIN: true,
 	ShotEventSystem.EVENT_TREASURE_SNARE: true,
+	EVENT_TREASURE_CLAIM: true,
 }
 const EVENT_REWARDS := {
 	ShotEventSystem.EVENT_BANK: BANK_REWARD,
@@ -336,6 +338,29 @@ func award_embezzler_recovery(amount: int, sink_context: Dictionary = {}) -> int
 	if ball_id != 0:
 		_add_line_items_to_score_popup(ball_id, "Embezzler", recovery_items)
 	return recovery_amount
+
+
+func award_treasure_claim(amount: int, sink_context: Dictionary = {}) -> int:
+	var treasure_amount: int = max(amount, 0)
+	if treasure_amount <= 0:
+		return 0
+
+	_store_sink_context(sink_context)
+	doubloons_total += treasure_amount
+	doubloons_changed.emit(doubloons_total)
+	doubloons_awarded.emit(treasure_amount, doubloons_total)
+	var ball_id: int = int(sink_context.get("ball_id", 0))
+	var treasure_items: Array[Dictionary] = [
+		{
+			"label": "Treasure Claimed",
+			"amount": treasure_amount,
+			"event_type": EVENT_TREASURE_CLAIM,
+		},
+	]
+	score_feed_message.emit("Treasure claimed! +%s Doubloons" % treasure_amount)
+	if ball_id != 0:
+		_add_line_items_to_score_popup(ball_id, "Treasure Ball", treasure_items)
+	return treasure_amount
 
 
 func award_pocket_streak(multiplier: int, streak_context: Dictionary = {}) -> int:
@@ -1793,6 +1818,8 @@ func _get_event_reward_label(event_type: String) -> String:
 		return "Cannon Chain"
 	if event_type == ShotEventSystem.EVENT_TREASURE_SNARE:
 		return "Treasure Snare"
+	if event_type == EVENT_TREASURE_CLAIM:
+		return "Treasure Claimed"
 	return event_type.capitalize()
 
 

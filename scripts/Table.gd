@@ -4,6 +4,7 @@ class_name BilliardsTable
 
 signal status_text_changed(text: String)
 signal game_finished(text: String)
+signal run_ball_counts_changed(active_ball_count: int, balls_sunk_count: int)
 
 #region Data Containers
 class ResultCallout:
@@ -118,6 +119,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var pocket_streak_system: PocketStreakSystem = $PocketStreakSystem
 @onready var ball_drop_system: BallDropSystem = $BallDropSystem
 @onready var table_event_system: TableEventSystem = $TableEventSystem
+@onready var run_stats_system: RunStatsSystem = $RunStatsSystem
 @onready var ball_audio_system: BallAudioSystem = $BallAudioSystem
 @onready var aim_preview: AimPreview = $AimPreview
 @onready var spawn_system: SpawnSystem = $SpawnSystem
@@ -159,6 +161,8 @@ var shot_multi_pocket_bonus_awarded := false
 var shot_bank_bonus_awarded := false
 var shot_bank_eligible_ball_ids: Dictionary = {}
 var shot_elapsed_time := 0.0
+var balls_sunk_count := 0
+var run_ball_count_update_queued := false
 var cue_control_reclaimed := false
 var cue_reclaim_eligible := false
 var cue_reclaim_blocker_reason := "No active shot"
@@ -189,6 +193,7 @@ var perf_pocket_check_ms := 0.0
 # Owns startup, per-frame orchestration, and update order.
 # Future extraction: this can become a thin coordinator after systems split.
 func _ready() -> void:
+	_connect_run_ball_count_events()
 	pocket_system.setup(self)
 	boundary_system.setup(self)
 	shot_event_system.setup(self)
@@ -212,6 +217,7 @@ func _ready() -> void:
 	table_impact_shake_system.setup(self)
 	quartermaster_system.setup(self)
 	reserve_system.setup(self)
+	run_stats_system.setup(self)
 	_cache_table_geometry()
 	cue_controller.setup()
 	if Engine.is_editor_hint():
@@ -223,8 +229,58 @@ func _ready() -> void:
 	cue_ball = starting_balls.cue_ball
 	eight_ball = starting_balls.eight_ball
 	eight_start = starting_balls.eight_start
+	_queue_run_ball_count_update()
 	status_text_changed.emit(READY_STATUS_TEXT)
 	queue_redraw()
+
+
+func _connect_run_ball_count_events() -> void:
+	if not balls.child_entered_tree.is_connected(_on_balls_child_tree_changed):
+		balls.child_entered_tree.connect(_on_balls_child_tree_changed)
+	if not balls.child_exiting_tree.is_connected(_on_balls_child_tree_changed):
+		balls.child_exiting_tree.connect(_on_balls_child_tree_changed)
+
+
+func get_run_ball_counts_snapshot() -> Dictionary:
+	return {
+		"active_ball_count": _count_active_run_balls(),
+		"balls_sunk_count": balls_sunk_count,
+	}
+
+
+func _on_balls_child_tree_changed(_node: Node) -> void:
+	_queue_run_ball_count_update()
+
+
+func _queue_run_ball_count_update() -> void:
+	if run_ball_count_update_queued:
+		return
+
+	run_ball_count_update_queued = true
+	call_deferred("_emit_run_ball_count_update")
+
+
+func _emit_run_ball_count_update() -> void:
+	run_ball_count_update_queued = false
+	run_ball_counts_changed.emit(_count_active_run_balls(), balls_sunk_count)
+
+
+func _count_active_run_balls() -> int:
+	var active_ball_count := 0
+	for child in balls.get_children():
+		var ball := child as Ball
+		if _is_active_run_ball(ball):
+			active_ball_count += 1
+	return active_ball_count
+
+
+func _is_active_run_ball(ball: Ball) -> bool:
+	return (
+		ball != null
+		and ball != cue_ball
+		and not ball.is_queued_for_deletion()
+		and ball.is_gameplay_active()
+	)
 
 
 func _connect_score_drop_events() -> void:
@@ -908,10 +964,12 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 		return
 
 	if ball == eight_ball:
+		_note_run_ball_sunk(ball)
 		_handle_special_ball_pocketed(ball, eight_start, "8 ball")
 		return
 
 	var score_context: Dictionary = _make_sink_score_context(ball)
+	_note_run_ball_sunk(ball)
 	anchor_ball_system.handle_ball_pocketed(ball)
 	if embezzler_system.handle_ball_captured(ball, score_context):
 		status_text_changed.emit("Embezzler caught.")
@@ -924,6 +982,7 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 	var scored_amount: int = score_system.score_sunk_ball_snapshot(score_snapshot, score_context)
 	if scored_amount > 0:
 		wayfinder_system.note_wayfinder_current_sink_scored(ball)
+	treasure_ball_system.handle_treasure_claimed(ball, score_context)
 	var pocket_streak_result: Dictionary = {}
 	if shot_sink_recorded:
 		pocket_streak_result = pocket_streak_system.record_object_ball_sink(score_context, scored_amount)
@@ -1167,6 +1226,16 @@ func _make_sink_score_context(ball: Ball) -> Dictionary:
 
 func _is_scoring_object_ball(ball: Ball) -> bool:
 	return ball != null and ball.ball_type == Ball.BallType.OBJECT
+
+
+func _note_run_ball_sunk(ball: Ball) -> void:
+	if ball == null or ball == cue_ball:
+		return
+	if ball.ball_type != Ball.BallType.OBJECT and ball.ball_type != Ball.BallType.EIGHT:
+		return
+
+	balls_sunk_count += 1
+	_queue_run_ball_count_update()
 
 
 func _note_object_ball_pocketed(ball: Ball, score_context: Dictionary) -> bool:

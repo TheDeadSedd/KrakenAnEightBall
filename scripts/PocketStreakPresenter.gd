@@ -93,6 +93,7 @@ var last_whirlpool_multiplier := 0
 
 
 func _ready() -> void:
+	AudioSettings.load_and_apply()
 	_ensure_pocket_streak_audio_bus()
 	_ensure_audio_pool()
 	pocket_streak_audio_stream = _load_streak_audio_stream()
@@ -515,12 +516,13 @@ func _ensure_pocket_streak_audio_bus() -> void:
 	if audio_bus_name == "Master":
 		audio_bus_name = POCKET_STREAK_AUDIO_BUS_NAME
 
+	AudioSettings.ensure_audio_buses()
 	pocket_streak_audio_bus_index = AudioServer.get_bus_index(audio_bus_name)
 	if pocket_streak_audio_bus_index < 0:
 		pocket_streak_audio_bus_index = AudioServer.get_bus_count()
 		AudioServer.add_bus(pocket_streak_audio_bus_index)
 		AudioServer.set_bus_name(pocket_streak_audio_bus_index, audio_bus_name)
-		AudioServer.set_bus_send(pocket_streak_audio_bus_index, "Master")
+	AudioServer.set_bus_send(pocket_streak_audio_bus_index, AudioSettings.SFX_BUS_NAME)
 
 	_ensure_pocket_streak_reverb_effect()
 
