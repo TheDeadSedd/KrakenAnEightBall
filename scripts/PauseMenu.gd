@@ -8,6 +8,10 @@ signal debug_wayfinder_current_test_button_toggled(enabled: bool)
 signal debug_broadside_attack_test_button_toggled(enabled: bool)
 signal debug_force_loose_cargo_contraband_toggled(enabled: bool)
 signal debug_loose_cargo_contraband_kind_selected(kind: String)
+signal debug_spawn_wood_debris_requested
+signal debug_clear_debris_requested
+signal debug_obstacle_collision_toggled(enabled: bool)
+signal debug_obstacle_collision_draw_toggled(enabled: bool)
 signal quartermaster_cancel_placement_requested
 
 const PANEL_CORE_PERFORMANCE := "core_performance"
@@ -26,6 +30,10 @@ const EVENT_TEST_SECTION_TITLE := "Event Test Buttons"
 const EVENT_TEST_WAYFINDER_TEXT := "Show Wayfinder Current Test Button"
 const EVENT_TEST_BROADSIDE_TEXT := "Show Broadside Attack Test Button"
 const EVENT_TEST_FORCE_LOOSE_CARGO_CONTRABAND_TEXT := "Force Loose Cargo Contraband"
+const EVENT_TEST_SPAWN_WOOD_DEBRIS_TEXT := "Spawn Wood Debris"
+const EVENT_TEST_CLEAR_DEBRIS_TEXT := "Clear Debris"
+const EVENT_TEST_OBSTACLE_COLLISION_TEXT := "Enable Debris Collision"
+const EVENT_TEST_OBSTACLE_COLLISION_DRAW_TEXT := "Show Debris Collision Shape"
 const DEV_OPTIONS_TITLE_TEXT := "Dev Options"
 const RUN_STATS_TITLE_TEXT := "Run Stats"
 const RUN_STATS_SUBTITLE_TEXT := "Current Run Ledger"
@@ -40,12 +48,23 @@ const DEBUG_CONTRABAND_SELECTOR_ITEMS := [
 ]
 const OPTIONS_MENU_SCRIPT := preload("res://scripts/OptionsMenu.gd")
 const CONFIRM_PANEL_SIZE := Vector2(430.0, 220.0)
-const RUN_STATS_PANEL_SIZE := Vector2(520.0, 430.0)
+const RUN_STATS_PANEL_SIZE := Vector2(590.0, 860.0)
 const RUN_STATS_ROWS := [
 	{"label": "Doubloons Earned", "key": "doubloons_earned"},
+	{"label": "Doubloons Lost", "key": "doubloons_lost"},
+	{"label": "Passage Remaining", "key": "remaining_passage"},
+	{"label": "Kraken Wants", "key": "current_kraken_request"},
+	{"label": "Active Oaths", "key": "active_oaths_summary"},
+	{"label": "Shots Taken", "key": "shots_taken"},
 	{"label": "Balls Sunk", "key": "balls_sunk"},
 	{"label": "Highest Pocket Streak", "key": "highest_pocket_streak"},
 	{"label": "Interventions Triggered", "key": "interventions_triggered"},
+	{"label": "Shop Refreshes", "key": "quartermaster_refreshes_used"},
+	{"label": "Refresh Doubloons", "key": "quartermaster_refresh_doubloons_spent"},
+	{"label": "Back Room Deals", "key": "back_room_deals_made"},
+	{"label": "Back Room Doubloons", "key": "back_room_deal_doubloons_spent"},
+	{"label": "Request Rerolls", "key": "kraken_request_rerolls_used"},
+	{"label": "Reroll Passage Added", "key": "passage_added_by_request_rerolls"},
 	{"label": "Contraband Found", "key": "contraband_found"},
 	{"label": "Treasure Claimed", "key": "treasure_claimed"},
 	{"label": "Current Ball Count", "key": "current_ball_count"},
@@ -80,11 +99,16 @@ var wayfinder_current_test_check_box: CheckBox
 var broadside_attack_test_check_box: CheckBox
 var force_loose_cargo_contraband_check_box: CheckBox
 var loose_cargo_contraband_selector: OptionButton
+var spawn_wood_debris_button: Button
+var clear_debris_button: Button
+var obstacle_collision_check_box: CheckBox
+var obstacle_collision_debug_check_box: CheckBox
 var run_stats_button: Button
 var run_stats_panel: PanelContainer
 var run_stats_back_button: Button
 var run_stats_value_labels: Dictionary = {}
 var latest_run_stats_snapshot: Dictionary = {}
+var run_stats_purchase_history_label: Label
 var dev_options_button: Button
 var dev_options_title_label: Label
 var dev_options_back_button: Button
@@ -143,6 +167,14 @@ func _connect_debug_panel_toggles() -> void:
 		force_loose_cargo_contraband_check_box.toggled.connect(_on_force_loose_cargo_contraband_toggled)
 	if not loose_cargo_contraband_selector.item_selected.is_connected(_on_loose_cargo_contraband_kind_selected):
 		loose_cargo_contraband_selector.item_selected.connect(_on_loose_cargo_contraband_kind_selected)
+	if not spawn_wood_debris_button.pressed.is_connected(_on_spawn_wood_debris_pressed):
+		spawn_wood_debris_button.pressed.connect(_on_spawn_wood_debris_pressed)
+	if not clear_debris_button.pressed.is_connected(_on_clear_debris_pressed):
+		clear_debris_button.pressed.connect(_on_clear_debris_pressed)
+	if not obstacle_collision_check_box.toggled.is_connected(_on_obstacle_collision_toggled):
+		obstacle_collision_check_box.toggled.connect(_on_obstacle_collision_toggled)
+	if not obstacle_collision_debug_check_box.toggled.is_connected(_on_obstacle_collision_draw_toggled):
+		obstacle_collision_debug_check_box.toggled.connect(_on_obstacle_collision_draw_toggled)
 	if not core_performance_check_box.toggled.is_connected(_on_core_performance_panel_toggled):
 		core_performance_check_box.toggled.connect(_on_core_performance_panel_toggled)
 	if not aim_preview_check_box.toggled.is_connected(_on_aim_preview_panel_toggled):
@@ -214,6 +246,16 @@ func set_debug_panel_states(panel_states: Dictionary) -> void:
 func set_run_stats_snapshot(snapshot: Dictionary) -> void:
 	latest_run_stats_snapshot = snapshot.duplicate(true)
 	_update_run_stats_values()
+
+
+func set_debris_collision_debug_state(enabled: bool) -> void:
+	if obstacle_collision_check_box != null:
+		obstacle_collision_check_box.set_pressed_no_signal(enabled)
+
+
+func set_debris_collision_draw_debug_state(enabled: bool) -> void:
+	if obstacle_collision_debug_check_box != null:
+		obstacle_collision_debug_check_box.set_pressed_no_signal(enabled)
 
 
 func _ensure_options_controls() -> void:
@@ -303,6 +345,21 @@ func _build_run_stats_panel() -> void:
 		run_stats_value_labels[stat_key] = value_label
 		stats_grid.add_child(name_label)
 		stats_grid.add_child(value_label)
+
+	var history_title_label := _make_run_stats_name_label("Interventions Purchased")
+	history_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	history_title_label.custom_minimum_size = Vector2(0.0, 24.0)
+	stack.add_child(history_title_label)
+
+	run_stats_purchase_history_label = Label.new()
+	run_stats_purchase_history_label.custom_minimum_size = Vector2(440.0, 86.0)
+	run_stats_purchase_history_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	run_stats_purchase_history_label.add_theme_font_override("font", resume_button.get_theme_font("font"))
+	run_stats_purchase_history_label.add_theme_font_size_override("font_size", 17)
+	run_stats_purchase_history_label.add_theme_color_override("font_color", Color(0.88, 0.86, 0.76, 0.96))
+	run_stats_purchase_history_label.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.02, 0.82))
+	run_stats_purchase_history_label.add_theme_constant_override("outline_size", 1)
+	stack.add_child(run_stats_purchase_history_label)
 
 	run_stats_back_button = _make_pause_button("Back", "RunStatsBackButton")
 	run_stats_back_button.custom_minimum_size = Vector2(0.0, 44.0)
@@ -466,6 +523,24 @@ func _ensure_event_test_controls() -> void:
 		loose_cargo_contraband_selector = _make_loose_cargo_contraband_selector()
 		debug_section.add_child(loose_cargo_contraband_selector)
 		debug_section.move_child(loose_cargo_contraband_selector, 6)
+	if spawn_wood_debris_button == null:
+		spawn_wood_debris_button = _make_event_test_button(EVENT_TEST_SPAWN_WOOD_DEBRIS_TEXT, "SpawnWoodDebrisButton")
+		debug_section.add_child(spawn_wood_debris_button)
+		debug_section.move_child(spawn_wood_debris_button, 7)
+	if clear_debris_button == null:
+		clear_debris_button = _make_event_test_button(EVENT_TEST_CLEAR_DEBRIS_TEXT, "ClearDebrisButton")
+		debug_section.add_child(clear_debris_button)
+		debug_section.move_child(clear_debris_button, 8)
+	if obstacle_collision_check_box == null:
+		obstacle_collision_check_box = _make_event_test_check_box(EVENT_TEST_OBSTACLE_COLLISION_TEXT)
+		obstacle_collision_check_box.set_pressed_no_signal(true)
+		debug_section.add_child(obstacle_collision_check_box)
+		debug_section.move_child(obstacle_collision_check_box, 9)
+	if obstacle_collision_debug_check_box == null:
+		obstacle_collision_debug_check_box = _make_event_test_check_box(EVENT_TEST_OBSTACLE_COLLISION_DRAW_TEXT)
+		obstacle_collision_debug_check_box.set_pressed_no_signal(false)
+		debug_section.add_child(obstacle_collision_debug_check_box)
+		debug_section.move_child(obstacle_collision_debug_check_box, 10)
 
 
 func _make_event_test_check_box(text: String) -> CheckBox:
@@ -490,6 +565,19 @@ func _make_loose_cargo_contraband_selector() -> OptionButton:
 	selector.add_theme_font_size_override("font_size", 14)
 	_populate_loose_cargo_contraband_selector(selector)
 	return selector
+
+
+func _make_event_test_button(text: String, button_name: String) -> Button:
+	var button := Button.new()
+	button.name = button_name
+	button.text = text
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	button.focus_mode = Control.FOCUS_ALL
+	button.custom_minimum_size = Vector2(260.0, 34.0)
+	button.add_theme_color_override("font_color", Color(0.95, 0.88, 0.62, 1.0))
+	button.add_theme_font_override("font", core_performance_check_box.get_theme_font("font"))
+	button.add_theme_font_size_override("font_size", 14)
+	return button
 
 
 func _populate_loose_cargo_contraband_selector(selector: OptionButton) -> void:
@@ -644,6 +732,10 @@ func _update_run_stats_values() -> void:
 		if value_label == null:
 			continue
 		value_label.text = _format_run_stats_value(stat_key, latest_run_stats_snapshot.get(stat_key, 0))
+	if run_stats_purchase_history_label != null:
+		run_stats_purchase_history_label.text = _format_intervention_purchase_history(
+			latest_run_stats_snapshot.get("intervention_purchase_history", [])
+		)
 
 
 func _format_run_stats_value(stat_key: String, value: Variant) -> String:
@@ -652,6 +744,12 @@ func _format_run_stats_value(stat_key: String, value: Variant) -> String:
 			return "X%s" % maxi(int(value), 1)
 		"run_time_seconds":
 			return _format_run_time(float(value))
+		"current_kraken_request":
+			var request_text := str(value)
+			return "None" if request_text.is_empty() else request_text
+		"active_oaths_summary":
+			var oath_text := str(value)
+			return "None sworn." if oath_text.is_empty() else oath_text
 	return str(maxi(int(value), 0))
 
 
@@ -663,6 +761,30 @@ func _format_run_time(seconds_value: float) -> String:
 	if hours > 0:
 		return "%d:%02d:%02d" % [hours, minutes, seconds]
 	return "%02d:%02d" % [minutes, seconds]
+
+
+func _format_intervention_purchase_history(value: Variant) -> String:
+	if not value is Array:
+		return "None purchased yet."
+
+	var lines: Array = []
+	for record_value in value:
+		if not record_value is Dictionary:
+			continue
+		var record: Dictionary = record_value
+		var name := str(record.get("name", "Intervention"))
+		var count := maxi(int(record.get("count", 0)), 0)
+		var total_cost := maxi(int(record.get("total_cost", 0)), 0)
+		if count <= 0:
+			continue
+		if count > 1:
+			lines.append("%s x%s - %s total" % [name, count, total_cost])
+		else:
+			lines.append("%s - %s" % [name, total_cost])
+
+	if lines.is_empty():
+		return "None purchased yet."
+	return "\n".join(lines)
 
 
 func _on_resume_pressed() -> void:
@@ -759,6 +881,22 @@ func _on_force_loose_cargo_contraband_toggled(enabled: bool) -> void:
 
 func _on_loose_cargo_contraband_kind_selected(_index: int) -> void:
 	debug_loose_cargo_contraband_kind_selected.emit(_get_selected_loose_cargo_contraband_kind())
+
+
+func _on_spawn_wood_debris_pressed() -> void:
+	debug_spawn_wood_debris_requested.emit()
+
+
+func _on_clear_debris_pressed() -> void:
+	debug_clear_debris_requested.emit()
+
+
+func _on_obstacle_collision_toggled(enabled: bool) -> void:
+	debug_obstacle_collision_toggled.emit(enabled)
+
+
+func _on_obstacle_collision_draw_toggled(enabled: bool) -> void:
+	debug_obstacle_collision_draw_toggled.emit(enabled)
 
 
 func _on_core_performance_panel_toggled(enabled: bool) -> void:

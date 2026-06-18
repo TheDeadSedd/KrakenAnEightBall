@@ -470,6 +470,30 @@ func spawn_manual_powder_keg_ball(position: Vector2) -> Ball:
 	return ball
 
 
+func spawn_manual_treasure_ball(position: Vector2) -> Ball:
+	var ball_number: int = _get_next_spawn_ball_number()
+	var ball := _create_treasure_ball(ball_number, _ball_color(ball_number), position)
+	ball.velocity = Vector2.ZERO
+	return ball
+
+
+func spawn_manual_cannon_ball(position: Vector2) -> Ball:
+	var ball_number: int = _get_next_spawn_ball_number()
+	var ball := _create_cannon_ball(ball_number, _ball_color(ball_number), position)
+	ball.velocity = Vector2.ZERO
+	return ball
+
+
+func spawn_manual_embezzler_ball(position: Vector2) -> Ball:
+	if table == null or table.embezzler_system == null or not table.embezzler_system.can_spawn_embezzler():
+		return null
+
+	var ball_number: int = _get_next_spawn_ball_number()
+	var ball := _create_embezzler_ball(ball_number, _ball_color(ball_number), position)
+	ball.velocity = Vector2.ZERO
+	return ball
+
+
 func has_pending_spawns() -> bool:
 	return not pending_spawn_requests.is_empty()
 

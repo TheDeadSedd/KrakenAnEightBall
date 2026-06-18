@@ -2,6 +2,7 @@ extends Control
 class_name TableEventMenu
 
 signal event_offer_selected(offer_index: int)
+signal event_offer_replace_requested(offer_index: int)
 signal menu_closed
 
 # Compact Kraken Intervention choice menu. It presents Omens, while Table Event
@@ -9,8 +10,8 @@ signal menu_closed
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const OFFER_SLOT_COUNT := 3
 const TABLE_CENTER := Vector2(960.0, 540.0)
-const PANEL_SIZE := Vector2(860.0, 241.0)
-const CARD_SIZE := Vector2(250.0, 142.0)
+const PANEL_SIZE := Vector2(860.0, 268.0)
+const CARD_SIZE := Vector2(250.0, 160.0)
 const CARD_GAP := 12
 const CARD_HORIZONTAL_PADDING := 11
 const CARD_VERTICAL_PADDING := 7
@@ -22,6 +23,7 @@ const CARD_DISABLED_COLOR := Color(0.035, 0.032, 0.030, 0.72)
 const CARD_BORDER := Color(0.78, 0.62, 0.30, 0.54)
 const CARD_HOVER_BORDER := Color(1.0, 0.82, 0.34, 0.96)
 const CARD_PRESSED_COLOR := Color(0.12, 0.082, 0.035, 0.98)
+const REPLACE_BUTTON_SIZE := Vector2(108.0, 23.0)
 const TEXT_COLOR := Color(0.94, 0.88, 0.68, 1.0)
 const COST_COLOR := Color(1.0, 0.78, 0.32, 1.0)
 const DISABLED_TEXT_COLOR := Color(0.53, 0.48, 0.39, 0.82)
@@ -33,10 +35,12 @@ var offer_name_labels: Array[Label] = []
 var offer_meta_labels: Array[Label] = []
 var offer_description_labels: Array[Label] = []
 var offer_status_labels: Array[Label] = []
+var offer_replace_buttons: Array[Button] = []
 var status_label: Label
 var title_label: Label
 var close_button: Button
 var panel: Panel
+var replace_press_guard_offer_index := -1
 
 
 func _ready() -> void:
@@ -63,7 +67,7 @@ func open_menu() -> void:
 	visible = true
 	table_event_system.set_event_menu_open(true)
 	refresh_offers()
-	status_label.text = "Choose one event to unleash, or close and keep the opportunity."
+	status_label.text = "Choose one event to unleash, or swear an oath to replace one omen."
 
 
 func close_menu() -> void:
@@ -227,8 +231,10 @@ func _refresh_offers(offers: Array) -> void:
 	for offer_index in range(OFFER_SLOT_COUNT):
 		var button: Button = offer_buttons[offer_index]
 		var offer: Dictionary = _get_offer(offers, offer_index)
-		button.disabled = not bool(offer.get("available", false))
-		_refresh_offer_card_content(offer_index, offer, button.disabled)
+		var has_offer := not offer.is_empty() and str(offer.get("id", TableEventSystem.EMPTY_OFFER_ID)) != TableEventSystem.EMPTY_OFFER_ID
+		var purchase_blocked := not bool(offer.get("available", false))
+		button.disabled = not has_offer
+		_refresh_offer_card_content(offer_index, offer, purchase_blocked)
 
 
 func _refresh_offer_card_content(offer_index: int, offer: Dictionary, disabled: bool) -> void:
@@ -237,6 +243,10 @@ func _refresh_offer_card_content(offer_index: int, offer: Dictionary, disabled: 
 		offer_meta_labels[offer_index].text = ""
 		offer_description_labels[offer_index].text = "The deep says nothing."
 		offer_status_labels[offer_index].text = "Unavailable"
+		if offer_index >= 0 and offer_index < offer_replace_buttons.size():
+			var empty_replace_button: Button = offer_replace_buttons[offer_index]
+			empty_replace_button.disabled = true
+			empty_replace_button.tooltip_text = "This omen cannot be replaced."
 		_set_offer_card_colors(offer_index, true)
 		return
 
@@ -251,11 +261,20 @@ func _refresh_offer_card_content(offer_index: int, offer: Dictionary, disabled: 
 	var availability_text: String = "Ready to unleash"
 	if not blocker.is_empty():
 		availability_text = blocker
+	var reroll_blocker := str(offer.get("reroll_blocked_reason", ""))
+	var can_reroll := bool(offer.get("reroll_available", false))
 
 	offer_name_labels[offer_index].text = str(offer.get("name", "Table Event"))
 	offer_meta_labels[offer_index].text = cost_line
 	offer_description_labels[offer_index].text = str(offer.get("description", ""))
 	offer_status_labels[offer_index].text = availability_text
+	if offer_index >= 0 and offer_index < offer_replace_buttons.size():
+		var replace_button: Button = offer_replace_buttons[offer_index]
+		replace_button.disabled = not can_reroll
+		if can_reroll:
+			replace_button.tooltip_text = "Swear Oath of Urgency to replace this omen."
+		else:
+			replace_button.tooltip_text = reroll_blocker if not reroll_blocker.is_empty() else "This omen cannot be replaced."
 	_set_offer_card_colors(offer_index, disabled)
 
 
@@ -291,9 +310,13 @@ func _add_offer_card_content(button: Button) -> void:
 	offer_description_labels.append(description_label)
 
 	var status_line := _make_offer_card_label(13, STATUS_COLOR)
-	status_line.custom_minimum_size = Vector2(0.0, 19.0)
+	status_line.custom_minimum_size = Vector2(0.0, 17.0)
 	stack.add_child(status_line)
 	offer_status_labels.append(status_line)
+
+	var replace_button := _make_replace_button(offer_replace_buttons.size())
+	stack.add_child(replace_button)
+	offer_replace_buttons.append(replace_button)
 
 
 func _make_offer_card_label(font_size: int, font_color: Color) -> Label:
@@ -308,6 +331,29 @@ func _make_offer_card_label(font_size: int, font_color: Color) -> Label:
 	label.add_theme_color_override("font_outline_color", Color(0.04, 0.025, 0.01, 0.92))
 	label.add_theme_constant_override("outline_size", 2)
 	return label
+
+
+func _make_replace_button(offer_index: int) -> Button:
+	var button := Button.new()
+	button.text = "Replace"
+	button.tooltip_text = "Swear an Oath to replace this omen."
+	button.custom_minimum_size = REPLACE_BUTTON_SIZE
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	button.focus_mode = Control.FOCUS_NONE
+	button.add_theme_font_override("font", UI_FONT)
+	button.add_theme_font_size_override("font_size", 12)
+	button.add_theme_color_override("font_color", Color(1.0, 0.86, 0.54, 0.96))
+	button.add_theme_color_override("font_hover_color", Color(1.0, 0.96, 0.72, 1.0))
+	button.add_theme_color_override("font_disabled_color", DISABLED_TEXT_COLOR)
+	button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.055, 0.043, 0.028, 0.72), Color(0.96, 0.78, 0.34, 0.42), 1, 6))
+	button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.09, 0.065, 0.034, 0.90), CARD_HOVER_BORDER, 1, 6))
+	button.add_theme_stylebox_override("pressed", _make_panel_style(Color(0.05, 0.11, 0.10, 0.92), Color(0.45, 0.94, 0.86, 0.78), 1, 6))
+	button.add_theme_stylebox_override("disabled", _make_panel_style(Color(0.035, 0.032, 0.030, 0.52), Color(0.48, 0.42, 0.32, 0.32), 1, 6))
+	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	button.button_down.connect(_on_offer_replace_button_down.bind(offer_index))
+	button.pressed.connect(_on_offer_replace_button_pressed.bind(offer_index))
+	return button
 
 
 func _set_offer_card_colors(offer_index: int, disabled: bool) -> void:
@@ -330,7 +376,22 @@ func _get_offer(offers: Array, offer_index: int) -> Dictionary:
 
 
 func _on_offer_button_pressed(offer_index: int) -> void:
+	if replace_press_guard_offer_index == offer_index:
+		return
 	event_offer_selected.emit(offer_index)
+
+
+func _on_offer_replace_button_down(offer_index: int) -> void:
+	replace_press_guard_offer_index = offer_index
+
+
+func _on_offer_replace_button_pressed(offer_index: int) -> void:
+	event_offer_replace_requested.emit(offer_index)
+	call_deferred("_clear_replace_press_guard")
+
+
+func _clear_replace_press_guard() -> void:
+	replace_press_guard_offer_index = -1
 
 
 func _on_offers_changed(offers: Array) -> void:

@@ -2,6 +2,8 @@ extends Control
 class_name QuartermasterHUD
 
 signal quartermaster_offer_requested(offer_index: int)
+signal quartermaster_refresh_requested
+signal back_room_deal_option_requested(item_id: String)
 
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const OFFER_SLOT_COUNT := 3
@@ -15,6 +17,14 @@ const SLOT_ROW_Y := 30.0
 const COST_Y_OFFSET := 94.0
 const COST_DRAW_WIDTH := 58.0
 const COST_FONT_SIZE := 17
+const REFRESH_BUTTON_SIZE := Vector2(126.0, 27.0)
+const REFRESH_BUTTON_Y := 118.0
+const REFRESH_BUTTON_FONT_SIZE := 14
+const BACK_ROOM_BUTTON_SIZE := Vector2(146.0, 27.0)
+const BACK_ROOM_BUTTON_Y := 151.0
+const BACK_ROOM_BUTTON_FONT_SIZE := 14
+const BACK_ROOM_PANEL_SIZE := Vector2(344.0, 470.0)
+const BACK_ROOM_OPTION_HEIGHT := 58.0
 const TOOLTIP_FONT_SIZE := 15
 const TOOLTIP_WIDTH := 310.0
 const REFRESH_CUE_SECONDS := 0.46
@@ -26,6 +36,12 @@ const HOVER_GLOW := Color(1.0, 0.72, 0.24, 0.18)
 const FILLED_SLOT_FILL := Color(0.08, 0.11, 0.11, 0.78)
 const FILLED_SLOT_BORDER := Color(0.72, 0.96, 0.84, 0.58)
 const UNAFFORDABLE_TINT := Color(0.06, 0.05, 0.045, 0.48)
+const REFRESH_BUTTON_FILL := Color(0.065, 0.052, 0.035, 0.78)
+const REFRESH_BUTTON_BORDER := Color(0.96, 0.78, 0.34, 0.48)
+const REFRESH_BUTTON_HOVER_FILL := Color(0.10, 0.075, 0.035, 0.88)
+const REFRESH_BUTTON_HOVER_BORDER := Color(1.0, 0.86, 0.42, 0.86)
+const REFRESH_BUTTON_UNAVAILABLE_FILL := Color(0.04, 0.038, 0.034, 0.52)
+const REFRESH_BUTTON_UNAVAILABLE_BORDER := Color(0.52, 0.45, 0.34, 0.38)
 const REFRESH_GLOW := Color(1.0, 0.76, 0.22, 0.26)
 const REFRESH_SWEEP := Color(1.0, 0.94, 0.58, 0.42)
 const COST_AVAILABLE := Color(1.0, 0.84, 0.36, 1.0)
@@ -49,16 +65,27 @@ var quartermaster_system: QuartermasterSystem
 var table
 var offer_snapshots: Array = []
 var hovered_offer_index := -1
+var refresh_button_hovered := false
+var back_room_button_hovered := false
 var refresh_offer_index := -1
 var refresh_timer := 0.0
 var last_seen_stock_refresh_serial := 0
+var refresh_snapshot: Dictionary = {}
+var back_room_snapshot: Dictionary = {}
 
 var empty_slot_style := StyleBoxFlat.new()
 var hover_slot_style := StyleBoxFlat.new()
 var filled_slot_style := StyleBoxFlat.new()
 var hover_glow_style := StyleBoxFlat.new()
+var refresh_button_style := StyleBoxFlat.new()
+var refresh_button_hover_style := StyleBoxFlat.new()
+var refresh_button_unavailable_style := StyleBoxFlat.new()
 var tooltip_panel: PanelContainer
 var tooltip_label: Label
+var back_room_panel: PanelContainer
+var back_room_status_label: Label
+var back_room_options_stack: VBoxContainer
+var back_room_close_button: Button
 var preview_rng := RandomNumberGenerator.new()
 var preview_colors_by_offer_index: Dictionary = {}
 var preview_signatures_by_offer_index: Dictionary = {}
@@ -72,6 +99,7 @@ func _ready() -> void:
 	preview_rng.randomize()
 	_configure_styles()
 	_build_tooltip()
+	_build_back_room_panel()
 	if not mouse_exited.is_connected(_on_mouse_exited):
 		mouse_exited.connect(_on_mouse_exited)
 	set_process(false)
@@ -89,8 +117,18 @@ func setup(quartermaster_system_ref: QuartermasterSystem, table_ref) -> void:
 
 func set_quartermaster_items(items: Array) -> void:
 	offer_snapshots = items.duplicate(true)
+	_update_refresh_snapshot()
 	_update_preview_colors()
 	_note_refresh_state(offer_snapshots)
+	_update_tooltip()
+	queue_redraw()
+
+
+func set_back_room_deal_snapshot(snapshot: Dictionary) -> void:
+	back_room_snapshot = snapshot.duplicate(true)
+	if not _is_back_room_unlocked():
+		back_room_button_hovered = false
+	_refresh_back_room_panel()
 	_update_tooltip()
 	queue_redraw()
 
@@ -109,17 +147,30 @@ func _process(delta: float) -> void:
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
-		_update_hovered_offer(event.position)
+		_update_hover_state(event.position)
 		return
 
 	if event is InputEventMouseButton:
 		var mouse_event: InputEventMouseButton = event as InputEventMouseButton
-		_update_hovered_offer(mouse_event.position)
+		_update_hover_state(mouse_event.position)
 		if not mouse_event.pressed or mouse_event.button_index != MOUSE_BUTTON_LEFT:
 			return
-		if hovered_offer_index == -1:
-			return
 		if _is_cue_drag_active():
+			return
+
+		if refresh_button_hovered:
+			accept_event()
+			if _is_refresh_available():
+				quartermaster_refresh_requested.emit()
+			return
+
+		if back_room_button_hovered:
+			accept_event()
+			if _is_back_room_unlocked():
+				_toggle_back_room_panel()
+			return
+
+		if hovered_offer_index == -1:
 			return
 
 		accept_event()
@@ -152,6 +203,8 @@ func _draw() -> void:
 
 		if offer_index == refresh_offer_index and refresh_timer > 0.0:
 			_draw_refresh_cue(slot_rect)
+	_draw_refresh_button()
+	_draw_back_room_button()
 
 
 func _configure_styles() -> void:
@@ -159,6 +212,9 @@ func _configure_styles() -> void:
 	_configure_slot_style(hover_slot_style, HOVER_SLOT_FILL, HOVER_SLOT_BORDER, 2)
 	_configure_slot_style(filled_slot_style, FILLED_SLOT_FILL, FILLED_SLOT_BORDER, 1)
 	_configure_slot_style(hover_glow_style, HOVER_GLOW, Color(1.0, 0.72, 0.24, 0.0), 0)
+	_configure_slot_style(refresh_button_style, REFRESH_BUTTON_FILL, REFRESH_BUTTON_BORDER, 1)
+	_configure_slot_style(refresh_button_hover_style, REFRESH_BUTTON_HOVER_FILL, REFRESH_BUTTON_HOVER_BORDER, 1)
+	_configure_slot_style(refresh_button_unavailable_style, REFRESH_BUTTON_UNAVAILABLE_FILL, REFRESH_BUTTON_UNAVAILABLE_BORDER, 1)
 
 
 func _configure_slot_style(style: StyleBoxFlat, fill: Color, border: Color, border_width: int) -> void:
@@ -202,6 +258,81 @@ func _build_tooltip() -> void:
 	margin.add_child(tooltip_label)
 
 
+func _build_back_room_panel() -> void:
+	back_room_panel = PanelContainer.new()
+	back_room_panel.name = "BackRoomDealPanel"
+	back_room_panel.visible = false
+	back_room_panel.size = BACK_ROOM_PANEL_SIZE
+	back_room_panel.custom_minimum_size = BACK_ROOM_PANEL_SIZE
+	back_room_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	back_room_panel.z_index = 10
+	back_room_panel.add_theme_stylebox_override("panel", _make_tooltip_style())
+	add_child(back_room_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	back_room_panel.add_child(margin)
+
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 8)
+	margin.add_child(stack)
+
+	var title_row := HBoxContainer.new()
+	title_row.add_theme_constant_override("separation", 8)
+	stack.add_child(title_row)
+
+	var title_label := Label.new()
+	title_label.text = "Back Room Deal"
+	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_label.add_theme_font_override("font", UI_FONT)
+	title_label.add_theme_font_size_override("font_size", 22)
+	title_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.54, 1.0))
+	title_label.add_theme_color_override("font_outline_color", Color(0.08, 0.04, 0.02, 0.95))
+	title_label.add_theme_constant_override("outline_size", 2)
+	title_row.add_child(title_label)
+
+	back_room_close_button = Button.new()
+	back_room_close_button.text = "X"
+	back_room_close_button.tooltip_text = "Close"
+	back_room_close_button.custom_minimum_size = Vector2(32.0, 28.0)
+	back_room_close_button.focus_mode = Control.FOCUS_NONE
+	back_room_close_button.add_theme_font_override("font", UI_FONT)
+	back_room_close_button.add_theme_font_size_override("font_size", 14)
+	back_room_close_button.add_theme_stylebox_override("normal", refresh_button_style)
+	back_room_close_button.add_theme_stylebox_override("hover", refresh_button_hover_style)
+	back_room_close_button.add_theme_stylebox_override("pressed", refresh_button_hover_style)
+	back_room_close_button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	title_row.add_child(back_room_close_button)
+	back_room_close_button.pressed.connect(_close_back_room_panel)
+
+	var flavor_label := Label.new()
+	flavor_label.text = "The Quartermaster can get what the manifest omits."
+	flavor_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	flavor_label.add_theme_font_override("font", UI_FONT)
+	flavor_label.add_theme_font_size_override("font_size", 14)
+	flavor_label.add_theme_color_override("font_color", Color(0.76, 0.86, 0.74, 0.94))
+	flavor_label.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.02, 0.82))
+	flavor_label.add_theme_constant_override("outline_size", 1)
+	stack.add_child(flavor_label)
+
+	back_room_status_label = Label.new()
+	back_room_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	back_room_status_label.add_theme_font_override("font", UI_FONT)
+	back_room_status_label.add_theme_font_size_override("font_size", 13)
+	back_room_status_label.add_theme_color_override("font_color", Color(1.0, 0.84, 0.36, 0.96))
+	back_room_status_label.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.02, 0.82))
+	back_room_status_label.add_theme_constant_override("outline_size", 1)
+	stack.add_child(back_room_status_label)
+
+	back_room_options_stack = VBoxContainer.new()
+	back_room_options_stack.add_theme_constant_override("separation", 7)
+	stack.add_child(back_room_options_stack)
+	_refresh_back_room_panel()
+
+
 func _make_tooltip_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.035, 0.026, 0.018, 0.94)
@@ -220,7 +351,7 @@ func _make_tooltip_style() -> StyleBoxFlat:
 func _position_on_table_rail() -> void:
 	var shop_size := Vector2(
 		SLOT_PADDING * 2.0 + SLOT_SIZE.x * OFFER_SLOT_COUNT + SLOT_GAP * (OFFER_SLOT_COUNT - 1),
-		SLOT_ROW_Y + SLOT_SIZE.y + 32.0
+		BACK_ROOM_BUTTON_Y + BACK_ROOM_BUTTON_SIZE.y + 4.0
 	)
 	size = shop_size
 	custom_minimum_size = shop_size
@@ -229,6 +360,8 @@ func _position_on_table_rail() -> void:
 		table_rect.end.x + SHOP_X_OFFSET_FROM_TABLE,
 		table_rect.position.y + SHOP_Y_OFFSET_FROM_TABLE
 	)
+	if back_room_panel != null:
+		back_room_panel.position = _get_back_room_panel_position()
 
 
 func _get_table_outer_rect() -> Rect2:
@@ -253,6 +386,76 @@ func _note_refresh_state(items: Array) -> void:
 		refresh_timer = REFRESH_CUE_SECONDS
 		set_process(true)
 	last_seen_stock_refresh_serial = max(last_seen_stock_refresh_serial, refresh_serial)
+
+
+func _draw_refresh_button() -> void:
+	var button_rect := _get_refresh_button_rect()
+	var is_available := _is_refresh_available()
+	var style := refresh_button_style
+	if not is_available:
+		style = refresh_button_unavailable_style
+	elif refresh_button_hovered:
+		style = refresh_button_hover_style
+		draw_style_box(hover_glow_style, button_rect.grow(3.0))
+
+	draw_style_box(style, button_rect)
+	var cost := _get_refresh_cost()
+	var text := "Refresh: %s" % cost
+	var color := COST_AVAILABLE if is_available else COST_UNAVAILABLE
+	draw_string(
+		UI_FONT,
+		button_rect.position + Vector2(1.0, 19.0),
+		text,
+		HORIZONTAL_ALIGNMENT_CENTER,
+		button_rect.size.x,
+		REFRESH_BUTTON_FONT_SIZE,
+		COST_SHADOW
+	)
+	draw_string(
+		UI_FONT,
+		button_rect.position + Vector2(0.0, 18.0),
+		text,
+		HORIZONTAL_ALIGNMENT_CENTER,
+		button_rect.size.x,
+		REFRESH_BUTTON_FONT_SIZE,
+		color
+	)
+
+
+func _draw_back_room_button() -> void:
+	if not _is_back_room_unlocked():
+		return
+
+	var button_rect := _get_back_room_button_rect()
+	var is_available := _is_back_room_available()
+	var style := refresh_button_style
+	if not is_available:
+		style = refresh_button_unavailable_style
+	elif back_room_button_hovered:
+		style = refresh_button_hover_style
+		draw_style_box(hover_glow_style, button_rect.grow(3.0))
+
+	draw_style_box(style, button_rect)
+	var text := "Back Room: %s" % _get_back_room_cost()
+	var color := COST_AVAILABLE if is_available else COST_UNAVAILABLE
+	draw_string(
+		UI_FONT,
+		button_rect.position + Vector2(1.0, 19.0),
+		text,
+		HORIZONTAL_ALIGNMENT_CENTER,
+		button_rect.size.x,
+		BACK_ROOM_BUTTON_FONT_SIZE,
+		COST_SHADOW
+	)
+	draw_string(
+		UI_FONT,
+		button_rect.position + Vector2(0.0, 18.0),
+		text,
+		HORIZONTAL_ALIGNMENT_CENTER,
+		button_rect.size.x,
+		BACK_ROOM_BUTTON_FONT_SIZE,
+		color
+	)
 
 
 func _draw_offer_cost(offer_index: int, item: Dictionary, is_available: bool) -> void:
@@ -291,12 +494,26 @@ func _draw_refresh_cue(slot_rect: Rect2) -> void:
 	)
 
 
-func _update_hovered_offer(local_position: Vector2) -> void:
+func _update_hover_state(local_position: Vector2) -> void:
+	var next_refresh_hovered := _get_refresh_button_rect().has_point(local_position)
+	var next_back_room_hovered := _is_back_room_unlocked() and _get_back_room_button_rect().has_point(local_position)
 	var next_hovered_offer := _get_offer_index_at_position(local_position)
-	if next_hovered_offer == hovered_offer_index:
+	if next_refresh_hovered:
+		next_hovered_offer = -1
+	if next_back_room_hovered:
+		next_refresh_hovered = false
+		next_hovered_offer = -1
+
+	if (
+		next_hovered_offer == hovered_offer_index
+		and next_refresh_hovered == refresh_button_hovered
+		and next_back_room_hovered == back_room_button_hovered
+	):
 		return
 
 	hovered_offer_index = next_hovered_offer
+	refresh_button_hovered = next_refresh_hovered
+	back_room_button_hovered = next_back_room_hovered
 	_update_tooltip()
 	queue_redraw()
 
@@ -328,6 +545,16 @@ func _get_preview_color(offer_index: int) -> Color:
 func _update_tooltip() -> void:
 	if tooltip_panel == null or tooltip_label == null:
 		return
+	if refresh_button_hovered:
+		tooltip_label.text = _make_refresh_tooltip_text()
+		tooltip_panel.position = _get_refresh_tooltip_position()
+		tooltip_panel.visible = true
+		return
+	if back_room_button_hovered:
+		tooltip_label.text = _make_back_room_tooltip_text()
+		tooltip_panel.position = _get_back_room_tooltip_position()
+		tooltip_panel.visible = true
+		return
 	if hovered_offer_index == -1:
 		tooltip_panel.visible = false
 		return
@@ -357,16 +584,58 @@ func _make_tooltip_text(item: Dictionary) -> String:
 	]
 
 
+func _make_refresh_tooltip_text() -> String:
+	var cost := _get_refresh_cost()
+	var base_cost := maxi(int(refresh_snapshot.get("base_cost", cost)), 0)
+	var shot_decay := maxi(int(refresh_snapshot.get("shot_decay_amount", 0)), 0)
+	var blocker := str(refresh_snapshot.get("blocked_reason", ""))
+	var status_line := "Cost: %s Doubloons" % cost
+	if not blocker.is_empty():
+		status_line = "%s - %s" % [status_line, blocker]
+	return "Refresh Stock\nRerolls the current Quartermaster offers.\n%s\nCost rises after refreshes and cools by %s after each shot, down to %s." % [
+		status_line,
+		shot_decay,
+		base_cost,
+	]
+
+
+func _make_back_room_tooltip_text() -> String:
+	var cost := _get_back_room_cost()
+	var unlock_cost := maxi(int(back_room_snapshot.get("unlock_refresh_cost", 0)), 0)
+	var blocker := str(back_room_snapshot.get("blocked_reason", ""))
+	var status_line := "Cost: %s Doubloons" % cost
+	if not blocker.is_empty():
+		status_line = "%s - %s" % [status_line, blocker]
+	return "Back Room Deal\nBuy one chosen special ball into Reserve.\n%s\nUnlocks while refresh cost is %s or higher." % [
+		status_line,
+		unlock_cost,
+	]
+
+
 func _get_tooltip_position(offer_index: int) -> Vector2:
 	var slot_rect: Rect2 = _get_slot_rect(offer_index)
 	var tooltip_y: float = clampf(slot_rect.position.y - 10.0, 0.0, maxf(size.y - 118.0, 0.0))
 	return Vector2(-TOOLTIP_WIDTH - 26.0, tooltip_y)
 
 
+func _get_refresh_tooltip_position() -> Vector2:
+	var button_rect := _get_refresh_button_rect()
+	var tooltip_y: float = clampf(button_rect.position.y - 36.0, 0.0, maxf(size.y - 118.0, 0.0))
+	return Vector2(-TOOLTIP_WIDTH - 26.0, tooltip_y)
+
+
+func _get_back_room_tooltip_position() -> Vector2:
+	var button_rect := _get_back_room_button_rect()
+	var tooltip_y: float = clampf(button_rect.position.y - 36.0, 0.0, maxf(size.y - 118.0, 0.0))
+	return Vector2(-TOOLTIP_WIDTH - 26.0, tooltip_y)
+
+
 func _on_mouse_exited() -> void:
-	if hovered_offer_index == -1:
+	if hovered_offer_index == -1 and not refresh_button_hovered and not back_room_button_hovered:
 		return
 	hovered_offer_index = -1
+	refresh_button_hovered = false
+	back_room_button_hovered = false
 	_update_tooltip()
 	queue_redraw()
 
@@ -380,6 +649,24 @@ func _get_offer_index_at_position(local_position: Vector2) -> int:
 
 func _get_offer_interaction_rect(offer_index: int) -> Rect2:
 	return _get_slot_rect(offer_index).grow_individual(5.0, 5.0, 5.0, 27.0)
+
+
+func _get_refresh_button_rect() -> Rect2:
+	return Rect2(
+		Vector2((size.x - REFRESH_BUTTON_SIZE.x) * 0.5, REFRESH_BUTTON_Y),
+		REFRESH_BUTTON_SIZE
+	)
+
+
+func _get_back_room_button_rect() -> Rect2:
+	return Rect2(
+		Vector2((size.x - BACK_ROOM_BUTTON_SIZE.x) * 0.5, BACK_ROOM_BUTTON_Y),
+		BACK_ROOM_BUTTON_SIZE
+	)
+
+
+func _get_back_room_panel_position() -> Vector2:
+	return Vector2(-BACK_ROOM_PANEL_SIZE.x - 26.0, -38.0)
 
 
 func _get_slot_rect(offer_index: int) -> Rect2:
@@ -403,9 +690,129 @@ func _is_offer_available(offer_index: int) -> bool:
 	return bool(_get_offer_snapshot(offer_index).get("available", false))
 
 
+func _is_refresh_available() -> bool:
+	return bool(refresh_snapshot.get("affordable", false))
+
+
+func _is_back_room_unlocked() -> bool:
+	return bool(back_room_snapshot.get("unlocked", false))
+
+
+func _is_back_room_available() -> bool:
+	return bool(back_room_snapshot.get("available", false))
+
+
+func _get_refresh_cost() -> int:
+	return maxi(int(refresh_snapshot.get("cost", 0)), 0)
+
+
+func _get_back_room_cost() -> int:
+	return maxi(int(back_room_snapshot.get("cost", 0)), 0)
+
+
+func _update_refresh_snapshot() -> void:
+	refresh_snapshot = {}
+	if offer_snapshots.is_empty():
+		if quartermaster_system != null:
+			refresh_snapshot = quartermaster_system.get_refresh_snapshot()
+		return
+
+	var first_snapshot_value: Variant = offer_snapshots[0]
+	if first_snapshot_value is Dictionary:
+		var first_snapshot: Dictionary = first_snapshot_value
+		var refresh_value: Variant = first_snapshot.get("refresh", {})
+		if refresh_value is Dictionary:
+			refresh_snapshot = (refresh_value as Dictionary).duplicate(true)
+	if refresh_snapshot.is_empty() and quartermaster_system != null:
+		refresh_snapshot = quartermaster_system.get_refresh_snapshot()
+
+
 func _is_valid_offer_index(offer_index: int) -> bool:
 	return offer_index >= 0 and offer_index < OFFER_SLOT_COUNT
 
 
 func _is_cue_drag_active() -> bool:
 	return table != null and table.is_cue_drag_active()
+
+
+func _toggle_back_room_panel() -> void:
+	if back_room_panel == null:
+		return
+	if not _is_back_room_unlocked():
+		back_room_panel.visible = false
+		return
+	back_room_panel.position = _get_back_room_panel_position()
+	back_room_panel.visible = not back_room_panel.visible
+	if back_room_panel.visible:
+		_refresh_back_room_panel()
+
+
+func _close_back_room_panel() -> void:
+	if back_room_panel != null:
+		back_room_panel.visible = false
+
+
+func _refresh_back_room_panel() -> void:
+	if back_room_panel == null or back_room_options_stack == null:
+		return
+	if not _is_back_room_unlocked():
+		back_room_panel.visible = false
+
+	if back_room_status_label != null:
+		var blocker := str(back_room_snapshot.get("blocked_reason", ""))
+		if blocker.is_empty():
+			back_room_status_label.text = "Choose one item. Cost: %s Doubloons." % _get_back_room_cost()
+		else:
+			back_room_status_label.text = blocker
+
+	for child in back_room_options_stack.get_children():
+		child.queue_free()
+
+	var options_value: Variant = back_room_snapshot.get("options", [])
+	if not options_value is Array:
+		return
+
+	for option_value in options_value:
+		if not option_value is Dictionary:
+			continue
+		back_room_options_stack.add_child(_make_back_room_option_button(option_value))
+
+
+func _make_back_room_option_button(option: Dictionary) -> Button:
+	var button := Button.new()
+	var item_id := str(option.get("id", ""))
+	var available := bool(option.get("available", false))
+	button.text = _make_back_room_option_text(option)
+	button.disabled = not available
+	button.tooltip_text = str(option.get("blocked_reason", ""))
+	button.custom_minimum_size = Vector2(0.0, BACK_ROOM_OPTION_HEIGHT)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	button.focus_mode = Control.FOCUS_NONE
+	button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	button.add_theme_font_override("font", UI_FONT)
+	button.add_theme_font_size_override("font_size", 14)
+	button.add_theme_color_override("font_color", Color(1.0, 0.88, 0.54, 1.0))
+	button.add_theme_color_override("font_disabled_color", Color(0.58, 0.52, 0.42, 0.78))
+	button.add_theme_stylebox_override("normal", refresh_button_style)
+	button.add_theme_stylebox_override("hover", refresh_button_hover_style)
+	button.add_theme_stylebox_override("pressed", refresh_button_hover_style)
+	button.add_theme_stylebox_override("disabled", refresh_button_unavailable_style)
+	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	button.pressed.connect(_on_back_room_option_pressed.bind(item_id))
+	return button
+
+
+func _make_back_room_option_text(option: Dictionary) -> String:
+	var label := str(option.get("name", "Back Room Item"))
+	var cost := maxi(int(option.get("cost", _get_back_room_cost())), 0)
+	var description := str(option.get("description", ""))
+	var blocker := str(option.get("blocked_reason", ""))
+	if not blocker.is_empty():
+		return "%s - %s\n%s" % [label, blocker, description]
+	return "%s - %s Doubloons\n%s" % [label, cost, description]
+
+
+func _on_back_room_option_pressed(item_id: String) -> void:
+	_close_back_room_panel()
+	back_room_deal_option_requested.emit(item_id)

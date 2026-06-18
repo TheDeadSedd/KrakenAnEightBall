@@ -58,18 +58,33 @@ func get_history_path() -> String:
 	return HISTORY_FILE_PATH
 
 
+func clear_history() -> bool:
+	records.clear()
+	var write_succeeded := _write_history()
+	if not write_succeeded:
+		load_history()
+	return write_succeeded
+
+
 func _make_run_record(stats_snapshot: Dictionary, final_doubloons: int) -> Dictionary:
 	return {
 		"timestamp": Time.get_datetime_string_from_system(false, false),
 		"run_duration": maxf(float(stats_snapshot.get("run_time_seconds", 0.0)), 0.0),
 		"final_doubloons": maxi(final_doubloons, 0),
 		"doubloons_earned": maxi(int(stats_snapshot.get("doubloons_earned", 0)), 0),
+		"doubloons_lost": maxi(int(stats_snapshot.get("doubloons_lost", 0)), 0),
+		"shots_taken": maxi(int(stats_snapshot.get("shots_taken", 0)), 0),
 		"balls_sunk": maxi(int(stats_snapshot.get("balls_sunk", 0)), 0),
 		"highest_pocket_streak": maxi(int(stats_snapshot.get("highest_pocket_streak", 1)), 1),
 		"interventions_triggered": maxi(int(stats_snapshot.get("interventions_triggered", 0)), 0),
 		"contraband_found": maxi(int(stats_snapshot.get("contraband_found", 0)), 0),
 		"treasure_claimed": maxi(int(stats_snapshot.get("treasure_claimed", 0)), 0),
 		"final_ball_count": maxi(int(stats_snapshot.get("current_ball_count", 0)), 0),
+		"passage_completed": bool(stats_snapshot.get("passage_completed", false)),
+		"remaining_passage": maxi(int(stats_snapshot.get("remaining_passage", 0)), 0),
+		"voyage_marks_awarded": maxi(int(stats_snapshot.get("voyage_marks_awarded", 0)), 0),
+		"kraken_favor_earned": maxi(int(stats_snapshot.get("kraken_favor_earned", 0)), 0),
+		"total_kraken_favor_after_run": maxi(int(stats_snapshot.get("total_kraken_favor_after_run", 0)), 0),
 	}
 
 

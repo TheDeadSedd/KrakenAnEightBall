@@ -1273,7 +1273,7 @@ func _make_hit_ball_prediction_lines(snapshot: Dictionary) -> Array:
 
 
 func _make_physics_performance_lines(snapshot: Dictionary) -> Array:
-	return [
+	var lines := [
 		"PHYSICS",
 		"Substeps: %s" % snapshot["physics_substeps"],
 		"Grid cells: %s / max cell: %s" % [
@@ -1294,6 +1294,19 @@ func _make_physics_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["pocket_captures"],
 		],
 	]
+
+	lines.append(
+		"Debris: %s active / %s broad / %s detail / %s skipped / %s hits / %.2f ms" % [
+			snapshot.get("active_debris_count", 0),
+			snapshot.get("obstacle_broadphase_checks", 0),
+			snapshot.get("obstacle_detailed_polygon_checks", 0),
+			snapshot.get("obstacle_broadphase_skips", 0),
+			snapshot.get("obstacle_collision_hits", 0),
+			float(snapshot.get("obstacle_collision_ms", 0.0)),
+		]
+	)
+	lines.append("Debris cache rebuilds: %s" % snapshot.get("obstacle_cache_rebuilds", 0))
+	return lines
 
 
 func _make_timing_performance_lines(snapshot: Dictionary) -> Array:

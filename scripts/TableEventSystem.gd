@@ -8,6 +8,7 @@ signal offers_changed(offers: Array)
 signal status_changed(text: String)
 signal event_purchased(event_id: String, cost: int)
 signal event_purchase_blocked(reason: String)
+signal offer_rerolled(offer_index: int, previous_event_id: String, new_event_id: String, oath_id: String)
 signal intervention_executed(event_id: String, debug_trigger: bool)
 signal contraband_found(kind: String)
 
@@ -178,6 +179,8 @@ var pending_events_earned := 0
 var pending_events_readied := 0
 var purchased_events := 0
 var denied_purchases := 0
+var offer_oath_rerolls := 0
+var denied_offer_oath_rerolls := 0
 var offers_generated := 0
 var ignored_awards_while_pending := 0
 var last_award_amount := 0
@@ -357,6 +360,48 @@ func request_purchase_offer(offer_index: int) -> bool:
 	return true
 
 
+func request_reroll_offer_with_oath(offer_index: int, oath_id: String = OathSystem.OATH_OF_URGENCY) -> bool:
+	var blocker := _get_offer_reroll_blocker(offer_index, oath_id)
+	if not blocker.is_empty():
+		denied_offer_oath_rerolls += 1
+		last_blocker_reason = blocker
+		status_changed.emit(blocker)
+		event_purchase_blocked.emit(blocker)
+		_emit_state()
+		return false
+
+	_ensure_offer_slots()
+	var previous_event_id := str(active_offer_ids[offer_index])
+	var replacement_event_id := _pick_reroll_replacement_event_id(offer_index)
+	if replacement_event_id.is_empty():
+		denied_offer_oath_rerolls += 1
+		last_blocker_reason = "No replacement omen available"
+		status_changed.emit(last_blocker_reason)
+		event_purchase_blocked.emit(last_blocker_reason)
+		_emit_state()
+		return false
+
+	if not table.oath_system.activate_oath(oath_id):
+		denied_offer_oath_rerolls += 1
+		last_blocker_reason = table.oath_system.get_oath_activation_blocker(oath_id)
+		status_changed.emit(last_blocker_reason)
+		event_purchase_blocked.emit(last_blocker_reason)
+		_emit_state()
+		return false
+
+	active_offer_ids[offer_index] = replacement_event_id
+	offer_oath_rerolls += 1
+	offers_generated += 1
+	last_blocker_reason = ""
+	offer_rerolled.emit(offer_index, previous_event_id, replacement_event_id, oath_id)
+	status_changed.emit("One omen is cast aside. %s replaces %s." % [
+		_get_event_name(replacement_event_id),
+		_get_event_name(previous_event_id),
+	])
+	_emit_state()
+	return true
+
+
 func get_event_offers_snapshot() -> Array:
 	_ensure_offer_slots()
 	var offers: Array = []
@@ -364,6 +409,10 @@ func get_event_offers_snapshot() -> Array:
 		var event_id: String = str(active_offer_ids[offer_index])
 		offers.append(_make_offer_snapshot(event_id, offer_index))
 	return offers
+
+
+func get_event_display_name(event_id: String) -> String:
+	return _get_event_name(event_id)
 
 
 func get_debug_snapshot() -> Dictionary:
@@ -384,6 +433,8 @@ func get_debug_snapshot() -> Dictionary:
 		"pending_events_readied": pending_events_readied,
 		"purchased_events": purchased_events,
 		"denied_purchases": denied_purchases,
+		"offer_oath_rerolls": offer_oath_rerolls,
+		"denied_offer_oath_rerolls": denied_offer_oath_rerolls,
 		"offers_generated": offers_generated,
 		"ignored_awards_while_pending": ignored_awards_while_pending,
 		"last_purchase_event_id": last_purchase_event_id,
@@ -739,7 +790,32 @@ func _get_offer_purchase_blocker(offer_index: int) -> String:
 	return ""
 
 
+func _get_offer_reroll_blocker(offer_index: int, oath_id: String = OathSystem.OATH_OF_URGENCY) -> String:
+	if not enabled:
+		return "Table Events disabled"
+	if not pending_event_available:
+		return "No Table Event pending"
+	if not pending_event_ready:
+		return "Wait for cue control"
+	if not _is_valid_offer_index(offer_index):
+		return "Unknown Table Event offer"
+
+	_ensure_offer_slots()
+	var event_id := str(active_offer_ids[offer_index])
+	if event_id.is_empty():
+		return "No event in this slot yet"
+	if table == null or table.oath_system == null:
+		return "Oath system not ready"
+	var oath_blocker: String = table.oath_system.get_oath_activation_blocker(oath_id)
+	if not oath_blocker.is_empty():
+		return oath_blocker
+	if not _has_reroll_replacement_candidate(offer_index):
+		return "No replacement omen available"
+	return ""
+
+
 func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
+	var reroll_blocker := _get_offer_reroll_blocker(offer_index)
 	if event_id.is_empty():
 		return {
 			"id": EMPTY_OFFER_ID,
@@ -754,6 +830,9 @@ func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
 			"available": false,
 			"affordable": false,
 			"blocked_reason": "Coming soon",
+			"reroll_available": false,
+			"reroll_blocked_reason": reroll_blocker,
+			"reroll_oath_id": OathSystem.OATH_OF_URGENCY,
 		}
 
 	var event_data: Dictionary = _get_event_data(event_id)
@@ -772,6 +851,9 @@ func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
 		"available": blocker.is_empty(),
 		"affordable": table != null and table.score_system != null and table.score_system.can_afford_doubloons(_get_event_cost(event_id)),
 		"blocked_reason": blocker,
+		"reroll_available": reroll_blocker.is_empty(),
+		"reroll_blocked_reason": reroll_blocker,
+		"reroll_oath_id": OathSystem.OATH_OF_URGENCY,
 	}
 
 
@@ -999,6 +1081,65 @@ func _get_weighted_unique_event_pool() -> Array:
 		selected_events.append(str(remaining_events[picked_index]))
 		remaining_events.remove_at(picked_index)
 	return selected_events
+
+
+func _pick_reroll_replacement_event_id(offer_index: int) -> String:
+	_ensure_offer_slots()
+	if not _is_valid_offer_index(offer_index):
+		return EMPTY_OFFER_ID
+
+	var current_event_id := str(active_offer_ids[offer_index])
+	var preferred_candidates := _get_reroll_replacement_candidates(offer_index, true)
+	if not preferred_candidates.is_empty():
+		return _pick_weighted_event_from_candidates(preferred_candidates)
+
+	var fallback_candidates := _get_reroll_replacement_candidates(offer_index, false)
+	if not fallback_candidates.is_empty():
+		return _pick_weighted_event_from_candidates(fallback_candidates)
+	if not current_event_id.is_empty():
+		return current_event_id
+	return EMPTY_OFFER_ID
+
+
+func _has_reroll_replacement_candidate(offer_index: int) -> bool:
+	_ensure_offer_slots()
+	if not _is_valid_offer_index(offer_index):
+		return false
+	var current_event_id := str(active_offer_ids[offer_index])
+	if current_event_id.is_empty():
+		return false
+	return not _get_reroll_replacement_candidates(offer_index, false).is_empty()
+
+
+func _get_reroll_replacement_candidates(offer_index: int, avoid_other_active_offers: bool) -> Array:
+	var current_event_id := str(active_offer_ids[offer_index])
+	var candidates: Array = []
+	for event_value in EVENT_POOL:
+		var event_id := str(event_value)
+		if event_id.is_empty() or event_id == current_event_id:
+			continue
+		if avoid_other_active_offers and _is_event_active_in_other_offer(event_id, offer_index):
+			continue
+		candidates.append(event_id)
+	return candidates
+
+
+func _is_event_active_in_other_offer(event_id: String, offer_index: int) -> bool:
+	for active_offer_index in range(active_offer_ids.size()):
+		if active_offer_index == offer_index:
+			continue
+		if str(active_offer_ids[active_offer_index]) == event_id:
+			return true
+	return false
+
+
+func _pick_weighted_event_from_candidates(candidates: Array) -> String:
+	if candidates.is_empty():
+		return EMPTY_OFFER_ID
+	var picked_index := _pick_weighted_event_index(candidates)
+	if picked_index < 0:
+		return EMPTY_OFFER_ID
+	return str(candidates[picked_index])
 
 
 func _pick_weighted_event_index(events: Array) -> int:

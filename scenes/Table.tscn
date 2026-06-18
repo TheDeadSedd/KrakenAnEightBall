@@ -1,4 +1,4 @@
-[gd_scene load_steps=27 format=3]
+[gd_scene load_steps=31 format=3]
 
 [ext_resource type="Script" path="res://scripts/Table.gd" id="1_table_script"]
 [ext_resource type="Script" path="res://scripts/CueController.gd" id="2_cue_controller"]
@@ -26,6 +26,10 @@
 [ext_resource type="Script" path="res://scripts/PocketStreakPresenter.gd" id="23_pocket_streak_presenter"]
 [ext_resource type="Script" path="res://scripts/TableEventSystem.gd" id="24_table_event_system"]
 [ext_resource type="Script" path="res://scripts/RunStatsSystem.gd" id="25_run_stats_system"]
+[ext_resource type="Script" path="res://scripts/TableObstacleSystem.gd" id="26_table_obstacle_system"]
+[ext_resource type="Script" path="res://scripts/PassageSystem.gd" id="27_passage_system"]
+[ext_resource type="Script" path="res://scripts/OathSystem.gd" id="28_oath_system"]
+[ext_resource type="Script" path="res://scripts/BackRoomDealSystem.gd" id="29_back_room_deal_system"]
 
 [node name="Table" type="Node2D"]
 script = ExtResource("1_table_script")
@@ -54,6 +58,16 @@ script = ExtResource("24_table_event_system")
 [node name="RunStatsSystem" type="Node" parent="."]
 script = ExtResource("25_run_stats_system")
 
+[node name="PassageSystem" type="Node" parent="."]
+script = ExtResource("27_passage_system")
+
+[node name="OathSystem" type="Node" parent="."]
+script = ExtResource("28_oath_system")
+
+[node name="TableObstacleSystem" type="Node2D" parent="."]
+z_index = 44
+script = ExtResource("26_table_obstacle_system")
+
 [node name="BallAudioSystem" type="Node" parent="."]
 script = ExtResource("19_ball_audio_system")
 
@@ -72,6 +86,9 @@ script = ExtResource("17_quartermaster_system")
 
 [node name="ReserveSystem" type="Node" parent="."]
 script = ExtResource("18_reserve_system")
+
+[node name="BackRoomDealSystem" type="Node" parent="."]
+script = ExtResource("29_back_room_deal_system")
 
 [node name="WayfinderSystem" type="Node" parent="."]
 script = ExtResource("5_wayfinder_system")
@@ -113,5 +130,7 @@ script = ExtResource("2_cue_controller")
 
 [node name="CueSprite" type="Sprite2D" parent="CuePivot"]
 centered = false
+
+[node name="Obstacles" type="Node2D" parent="."]
 
 [node name="Balls" type="Node2D" parent="."]

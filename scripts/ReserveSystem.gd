@@ -283,13 +283,20 @@ func _finish_deployment(_confirmed: bool, slot_index: int) -> void:
 
 
 func _spawn_reserved_item(content: Dictionary, position: Vector2) -> bool:
+	var ball: Ball
 	match str(content.get("spawn_type", "")):
 		"plain_object_ball":
-			table.spawn_system.spawn_manual_plain_object_ball(position)
+			ball = table.spawn_system.spawn_manual_plain_object_ball(position)
 		"wayfinder_ball":
-			table.spawn_system.spawn_manual_wayfinder_ball(position)
+			ball = table.spawn_system.spawn_manual_wayfinder_ball(position)
 		"powder_keg_ball":
-			table.spawn_system.spawn_manual_powder_keg_ball(position)
+			ball = table.spawn_system.spawn_manual_powder_keg_ball(position)
+		"treasure_ball":
+			ball = table.spawn_system.spawn_manual_treasure_ball(position)
+		"cannon_ball":
+			ball = table.spawn_system.spawn_manual_cannon_ball(position)
+		"embezzler_ball":
+			ball = table.spawn_system.spawn_manual_embezzler_ball(position)
 		_:
 			return false
-	return true
+	return ball != null

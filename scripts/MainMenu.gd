@@ -14,6 +14,7 @@ const FOREGROUND_TEXTURE := preload("res://assets/ui/mainmenu_fg.png")
 const PRESENTATION_OVERLAY_SCRIPT := preload("res://scripts/MainMenuPresentationOverlay.gd")
 const OPTIONS_MENU_SCRIPT := preload("res://scripts/OptionsMenu.gd")
 const RUN_HISTORY_SCRIPT := preload("res://scripts/RunHistorySystem.gd")
+const PROGRESSION_SCRIPT := preload("res://scripts/ProgressionSystem.gd")
 const HISTORY_PANEL_SIZE := Vector2(780.0, 610.0)
 const HISTORY_EMPTY_TEXT := "No voyages logged yet."
 
@@ -25,15 +26,21 @@ var menu_panel: PanelContainer
 var title_label: Label
 var subtitle_label: Label
 var status_label: Label
+var kraken_favor_label: Label
 var start_button: Button
 var options_button: Button
 var run_history_button: Button
 var quit_button: Button
 var options_panel: OptionsMenu
 var run_history_system: RunHistorySystem
+var progression_system: ProgressionSystem
 var run_history_panel: PanelContainer
 var run_history_list: VBoxContainer
 var run_history_empty_label: Label
+var run_history_clear_button: Button
+var run_history_clear_confirm_panel: PanelContainer
+var run_history_clear_confirm_yes_button: Button
+var run_history_clear_confirm_cancel_button: Button
 var run_history_back_button: Button
 
 
@@ -45,9 +52,13 @@ func _ready() -> void:
 	run_history_system = RUN_HISTORY_SCRIPT.new()
 	run_history_system.name = "RunHistorySystem"
 	add_child(run_history_system)
+	progression_system = PROGRESSION_SCRIPT.new()
+	progression_system.name = "ProgressionSystem"
+	add_child(progression_system)
 	_build_scene_layers()
 	_build_interface()
 	_update_menu_layout()
+	_update_progression_display()
 	start_button.grab_focus()
 
 
@@ -156,6 +167,15 @@ func _build_interface() -> void:
 	stack.add_child(_make_gap(4.0))
 	stack.add_child(status_label)
 
+	kraken_favor_label = Label.new()
+	kraken_favor_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	kraken_favor_label.add_theme_font_override("font", UI_FONT)
+	kraken_favor_label.add_theme_font_size_override("font_size", 20)
+	kraken_favor_label.add_theme_color_override("font_color", Color(1.0, 0.84, 0.36, 0.94))
+	kraken_favor_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.72))
+	kraken_favor_label.add_theme_constant_override("outline_size", 2)
+	stack.add_child(kraken_favor_label)
+
 	start_button.pressed.connect(_on_start_pressed)
 	options_button.pressed.connect(_on_options_pressed)
 	run_history_button.pressed.connect(_on_run_history_pressed)
@@ -202,6 +222,26 @@ func _make_menu_button(text: String) -> Button:
 	button.add_theme_stylebox_override("hover", _make_button_style(Color(0.15, 0.096, 0.044, 0.98), Color(1.0, 0.82, 0.38, 0.94)))
 	button.add_theme_stylebox_override("pressed", _make_button_style(Color(0.88, 0.67, 0.31, 0.98), Color(1.0, 0.91, 0.62, 1.0)))
 	button.add_theme_stylebox_override("focus", _make_button_style(Color(0.11, 0.070, 0.038, 0.96), Color(0.64, 0.95, 0.88, 0.78)))
+	return button
+
+
+func _make_secondary_menu_button(text: String) -> Button:
+	var button := Button.new()
+	button.text = text
+	button.custom_minimum_size = Vector2(170.0, 42.0)
+	button.focus_mode = Control.FOCUS_ALL
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	button.add_theme_font_override("font", UI_FONT)
+	button.add_theme_font_size_override("font_size", 20)
+	button.add_theme_color_override("font_color", Color(0.86, 0.82, 0.66, 0.95))
+	button.add_theme_color_override("font_hover_color", Color(1.0, 0.92, 0.60, 1.0))
+	button.add_theme_color_override("font_pressed_color", Color(0.18, 0.09, 0.03, 1.0))
+	button.add_theme_color_override("font_disabled_color", Color(0.46, 0.43, 0.36, 0.62))
+	button.add_theme_stylebox_override("normal", _make_button_style(Color(0.055, 0.044, 0.034, 0.76), Color(0.72, 0.58, 0.34, 0.34)))
+	button.add_theme_stylebox_override("hover", _make_button_style(Color(0.11, 0.074, 0.040, 0.92), Color(0.96, 0.74, 0.34, 0.78)))
+	button.add_theme_stylebox_override("pressed", _make_button_style(Color(0.80, 0.58, 0.26, 0.94), Color(1.0, 0.88, 0.56, 0.96)))
+	button.add_theme_stylebox_override("disabled", _make_button_style(Color(0.030, 0.027, 0.024, 0.50), Color(0.38, 0.34, 0.26, 0.28)))
+	button.add_theme_stylebox_override("focus", _make_button_style(Color(0.070, 0.054, 0.035, 0.88), Color(0.64, 0.95, 0.88, 0.58)))
 	return button
 
 
@@ -297,7 +337,7 @@ func _build_run_history_panel() -> void:
 	stack.add_child(subtitle_label)
 
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(690.0, 410.0)
+	scroll.custom_minimum_size = Vector2(690.0, 360.0)
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.mouse_filter = Control.MOUSE_FILTER_STOP
 	stack.add_child(scroll)
@@ -318,10 +358,56 @@ func _build_run_history_panel() -> void:
 	run_history_empty_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.72))
 	run_history_empty_label.add_theme_constant_override("outline_size", 2)
 
+	run_history_clear_confirm_panel = PanelContainer.new()
+	run_history_clear_confirm_panel.visible = false
+	run_history_clear_confirm_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	run_history_clear_confirm_panel.add_theme_stylebox_override("panel", _make_history_row_style())
+	stack.add_child(run_history_clear_confirm_panel)
+
+	var confirm_margin := MarginContainer.new()
+	confirm_margin.add_theme_constant_override("margin_left", 14)
+	confirm_margin.add_theme_constant_override("margin_top", 8)
+	confirm_margin.add_theme_constant_override("margin_right", 14)
+	confirm_margin.add_theme_constant_override("margin_bottom", 8)
+	run_history_clear_confirm_panel.add_child(confirm_margin)
+
+	var confirm_row := HBoxContainer.new()
+	confirm_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	confirm_row.add_theme_constant_override("separation", 12)
+	confirm_margin.add_child(confirm_row)
+
+	var confirm_label := Label.new()
+	confirm_label.text = "Clear all voyage records?"
+	confirm_label.add_theme_font_override("font", UI_FONT)
+	confirm_label.add_theme_font_size_override("font_size", 19)
+	confirm_label.add_theme_color_override("font_color", Color(1.0, 0.84, 0.42, 0.96))
+	confirm_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.74))
+	confirm_label.add_theme_constant_override("outline_size", 2)
+	confirm_row.add_child(confirm_label)
+
+	run_history_clear_confirm_yes_button = _make_secondary_menu_button("Yes")
+	run_history_clear_confirm_yes_button.custom_minimum_size = Vector2(92.0, 38.0)
+	run_history_clear_confirm_cancel_button = _make_secondary_menu_button("Cancel")
+	run_history_clear_confirm_cancel_button.custom_minimum_size = Vector2(112.0, 38.0)
+	confirm_row.add_child(run_history_clear_confirm_yes_button)
+	confirm_row.add_child(run_history_clear_confirm_cancel_button)
+	run_history_clear_confirm_yes_button.pressed.connect(_on_run_history_clear_confirmed)
+	run_history_clear_confirm_cancel_button.pressed.connect(_on_run_history_clear_cancelled)
+
+	var action_row := HBoxContainer.new()
+	action_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	action_row.add_theme_constant_override("separation", 18)
+	stack.add_child(action_row)
+
+	run_history_clear_button = _make_secondary_menu_button("Clear History")
+	run_history_clear_button.custom_minimum_size = Vector2(180.0, 42.0)
+	action_row.add_child(run_history_clear_button)
+	run_history_clear_button.pressed.connect(_on_run_history_clear_pressed)
+
 	run_history_back_button = _make_menu_button("Back")
-	run_history_back_button.custom_minimum_size = Vector2(230.0, 48.0)
+	run_history_back_button.custom_minimum_size = Vector2(190.0, 48.0)
 	run_history_back_button.add_theme_font_size_override("font_size", 24)
-	stack.add_child(run_history_back_button)
+	action_row.add_child(run_history_back_button)
 	run_history_back_button.pressed.connect(_on_run_history_back_pressed)
 
 
@@ -370,9 +456,13 @@ func _rebuild_run_history_list() -> void:
 	if run_history_system == null or run_history_list == null:
 		return
 
+	_set_run_history_clear_confirm_visible(false)
+	_update_progression_display()
 	run_history_system.load_history()
 	_clear_run_history_list()
 	var records: Array = run_history_system.get_records_snapshot()
+	if run_history_clear_button != null:
+		run_history_clear_button.disabled = records.is_empty()
 	if records.is_empty():
 		run_history_list.add_child(run_history_empty_label)
 		return
@@ -387,6 +477,23 @@ func _clear_run_history_list() -> void:
 		run_history_list.remove_child(child)
 		if child != run_history_empty_label:
 			child.queue_free()
+
+
+func _set_run_history_clear_confirm_visible(is_visible: bool) -> void:
+	if run_history_clear_confirm_panel != null:
+		run_history_clear_confirm_panel.visible = is_visible
+	if run_history_clear_button != null:
+		run_history_clear_button.disabled = is_visible or run_history_system == null or run_history_system.get_records_snapshot().is_empty()
+
+
+func _update_progression_display() -> void:
+	if progression_system != null:
+		progression_system.load_progression()
+	var total_favor := 0
+	if progression_system != null:
+		total_favor = maxi(int(progression_system.get_progression_snapshot().get("total_kraken_favor", 0)), 0)
+	if kraken_favor_label != null:
+		kraken_favor_label.text = "Kraken Favor: %s" % total_favor
 
 
 func _make_run_history_row(record: Dictionary) -> Control:
@@ -409,10 +516,11 @@ func _make_run_history_row(record: Dictionary) -> Control:
 	var timestamp_label := _make_history_label(str(record.get("timestamp", "Unknown voyage")), 19, Color(1.0, 0.88, 0.48, 1.0))
 	stack.add_child(timestamp_label)
 	stack.add_child(_make_history_label(
-		"Time %s    Final %s Doubloons    Earned %s" % [
+		"Time %s    Final %s Doubloons    Earned %s    Lost %s" % [
 			_format_run_duration(float(record.get("run_duration", 0.0))),
 			maxi(int(record.get("final_doubloons", 0)), 0),
 			maxi(int(record.get("doubloons_earned", 0)), 0),
+			maxi(int(record.get("doubloons_lost", 0)), 0),
 		],
 		16,
 		Color(0.88, 0.86, 0.76, 0.96)
@@ -434,6 +542,20 @@ func _make_run_history_row(record: Dictionary) -> Control:
 		],
 		16,
 		Color(1.0, 0.84, 0.36, 0.94)
+	))
+	var has_passage_fields := record.has("passage_completed") or record.has("remaining_passage")
+	var passage_text := "Passage Not Logged"
+	if has_passage_fields:
+		passage_text = "Passage Granted" if bool(record.get("passage_completed", false)) else "Passage Unfinished"
+	var favor_earned := maxi(int(record.get("kraken_favor_earned", record.get("voyage_marks_awarded", 0))), 0)
+	stack.add_child(_make_history_label(
+		"%s    Remaining %s    Kraken Favor +%s" % [
+			passage_text,
+			maxi(int(record.get("remaining_passage", 0 if has_passage_fields else -1)), 0),
+			favor_earned,
+		],
+		16,
+		Color(0.74, 0.88, 0.82, 0.94)
 	))
 	return row_panel
 
@@ -483,6 +605,7 @@ func _on_options_back_requested() -> void:
 	options_panel.visible = false
 	menu_panel.visible = true
 	status_label.text = "The moon is high. The table waits."
+	_update_progression_display()
 	options_button.grab_focus()
 
 
@@ -490,16 +613,39 @@ func _on_run_history_pressed() -> void:
 	menu_panel.visible = false
 	if options_panel != null:
 		options_panel.visible = false
+	_update_progression_display()
 	_rebuild_run_history_list()
 	run_history_panel.visible = true
 	run_history_back_button.grab_focus()
 
 
 func _on_run_history_back_pressed() -> void:
+	_set_run_history_clear_confirm_visible(false)
 	run_history_panel.visible = false
 	menu_panel.visible = true
 	status_label.text = "The moon is high. The ledger waits."
 	run_history_button.grab_focus()
+
+
+func _on_run_history_clear_pressed() -> void:
+	_set_run_history_clear_confirm_visible(true)
+	run_history_clear_confirm_cancel_button.grab_focus()
+
+
+func _on_run_history_clear_confirmed() -> void:
+	if run_history_system == null:
+		return
+
+	var clear_succeeded := run_history_system.clear_history()
+	_rebuild_run_history_list()
+	if not clear_succeeded:
+		push_warning("Run history could not be cleared.")
+	run_history_back_button.grab_focus()
+
+
+func _on_run_history_clear_cancelled() -> void:
+	_set_run_history_clear_confirm_visible(false)
+	run_history_clear_button.grab_focus()
 
 
 func _on_quit_pressed() -> void:

@@ -4,6 +4,8 @@ class_name ScoreSystem
 
 signal doubloons_changed(total: int)
 signal doubloons_awarded(amount: int, total: int)
+signal doubloons_lost(amount: int, total: int, reason: String)
+signal scoring_event_awarded(event_type: String, amount: int)
 signal score_feed_message(text: String)
 
 # Converts ShotEventSystem histories into Doubloon rewards.
@@ -21,8 +23,12 @@ const KRAKEN_KICK_REWARD := 10
 const DOUBLE_BANK_REWARD := 10
 const THIN_CUT_REWARD := 6
 const CLUSTER_BREAK_REWARD := 8
+const LAST_GASP_REWARD := 7
+const POWER_SINK_REWARD := 7
+const SPLIT_THE_LOOT_REWARD := 6
 const CROSS_CORNER_BANK_REWARD := 14
 const FULL_TABLE_KICK_REWARD := 12
+const LONG_HAUL_REWARD := 12
 const POWDER_ROUTE_REWARD := 10
 const KRAKEN_CURRENT_REWARD := 10
 const TRIPLE_BANK_REWARD := 18
@@ -161,10 +167,14 @@ const SKILLED_EVENT_TYPES := {
 	ShotEventSystem.EVENT_DOUBLE_BANK: true,
 	ShotEventSystem.EVENT_THIN_CUT: true,
 	ShotEventSystem.EVENT_CLUSTER_BREAK: true,
+	ShotEventSystem.EVENT_LAST_GASP: true,
+	ShotEventSystem.EVENT_POWER_SINK: true,
+	ShotEventSystem.EVENT_SPLIT_THE_LOOT: true,
 }
 const HEROIC_EVENT_TYPES := {
 	ShotEventSystem.EVENT_CROSS_CORNER_BANK: true,
 	ShotEventSystem.EVENT_FULL_TABLE_KICK: true,
+	ShotEventSystem.EVENT_LONG_HAUL: true,
 	ShotEventSystem.EVENT_POWDER_ROUTE: true,
 	ShotEventSystem.EVENT_KRAKEN_CURRENT: true,
 }
@@ -184,8 +194,12 @@ const EVENT_REWARDS := {
 	ShotEventSystem.EVENT_DOUBLE_BANK: DOUBLE_BANK_REWARD,
 	ShotEventSystem.EVENT_THIN_CUT: THIN_CUT_REWARD,
 	ShotEventSystem.EVENT_CLUSTER_BREAK: CLUSTER_BREAK_REWARD,
+	ShotEventSystem.EVENT_LAST_GASP: LAST_GASP_REWARD,
+	ShotEventSystem.EVENT_POWER_SINK: POWER_SINK_REWARD,
+	ShotEventSystem.EVENT_SPLIT_THE_LOOT: SPLIT_THE_LOOT_REWARD,
 	ShotEventSystem.EVENT_CROSS_CORNER_BANK: CROSS_CORNER_BANK_REWARD,
 	ShotEventSystem.EVENT_FULL_TABLE_KICK: FULL_TABLE_KICK_REWARD,
+	ShotEventSystem.EVENT_LONG_HAUL: LONG_HAUL_REWARD,
 	ShotEventSystem.EVENT_POWDER_ROUTE: POWDER_ROUTE_REWARD,
 	ShotEventSystem.EVENT_KRAKEN_CURRENT: KRAKEN_CURRENT_REWARD,
 	ShotEventSystem.EVENT_TRIPLE_BANK: TRIPLE_BANK_REWARD,
@@ -304,6 +318,7 @@ func try_spend_doubloons(amount: int) -> bool:
 
 	doubloons_total -= spend_amount
 	doubloons_changed.emit(doubloons_total)
+	doubloons_lost.emit(spend_amount, doubloons_total, "spend")
 	return true
 
 
@@ -314,6 +329,7 @@ func apply_doubloons_penalty(amount: int) -> int:
 
 	doubloons_total -= penalty_amount
 	doubloons_changed.emit(doubloons_total)
+	doubloons_lost.emit(penalty_amount, doubloons_total, "penalty")
 	return penalty_amount
 
 
@@ -643,6 +659,7 @@ func _append_grouped_event_rewards(
 			"amount": int(reward_data["amount"]),
 			"event_type": event_type,
 		})
+		scoring_event_awarded.emit(event_type, int(reward_data["amount"]))
 
 
 func _get_grouped_reward_label(label_text: String, event_count: int) -> String:
@@ -1804,10 +1821,18 @@ func _get_event_reward_label(event_type: String) -> String:
 		return "Thin Cut"
 	if event_type == ShotEventSystem.EVENT_CLUSTER_BREAK:
 		return "Cluster Break"
+	if event_type == ShotEventSystem.EVENT_LAST_GASP:
+		return "Last Gasp"
+	if event_type == ShotEventSystem.EVENT_POWER_SINK:
+		return "Power Sink"
+	if event_type == ShotEventSystem.EVENT_SPLIT_THE_LOOT:
+		return "Split the Loot"
 	if event_type == ShotEventSystem.EVENT_CROSS_CORNER_BANK:
 		return "Cross-Corner Bank"
 	if event_type == ShotEventSystem.EVENT_FULL_TABLE_KICK:
 		return "Full-Table Kick"
+	if event_type == ShotEventSystem.EVENT_LONG_HAUL:
+		return "Long Haul"
 	if event_type == ShotEventSystem.EVENT_POWDER_ROUTE:
 		return "Powder Route"
 	if event_type == ShotEventSystem.EVENT_KRAKEN_CURRENT:
@@ -2595,7 +2620,28 @@ func _update_score_stack_label_layout(stack: ScoreStack) -> void:
 
 
 func _place_score_label_below_gameplay(label: Label) -> void:
-	table.move_child(label, table.aim_preview.get_index())
+	if table == null or label == null or label.get_parent() != table:
+		return
+
+	var target_index := _get_score_readability_insert_index()
+	if target_index < 0:
+		return
+
+	table.move_child(label, clampi(target_index, 0, table.get_child_count() - 1))
+
+
+func _get_score_readability_insert_index() -> int:
+	if table == null:
+		return -1
+	if table.pocket_streak_presenter != null:
+		return table.pocket_streak_presenter.get_index()
+
+	var decor_layer: CanvasItem = table.get_node_or_null("TableDecorRandomizer") as CanvasItem
+	if decor_layer != null:
+		return decor_layer.get_index() + 1
+	if table.aim_preview != null:
+		return table.aim_preview.get_index()
+	return table.get_child_count() - 1
 
 
 func _fade_out_score_popup(popup: ScorePopup) -> void:

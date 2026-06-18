@@ -21,6 +21,10 @@ const EVENT_KRAKEN_CURRENT := "KRAKEN_CURRENT"
 const EVENT_TRIPLE_BANK := "TRIPLE_BANK"
 const EVENT_CANNON_CHAIN := "CANNON_CHAIN"
 const EVENT_TREASURE_SNARE := "TREASURE_SNARE"
+const EVENT_LAST_GASP := "LAST_GASP"
+const EVENT_POWER_SINK := "POWER_SINK"
+const EVENT_LONG_HAUL := "LONG_HAUL"
+const EVENT_SPLIT_THE_LOOT := "SPLIT_THE_LOOT"
 const DOUBLE_BANK_RAIL_COUNT := 2
 const TRIPLE_BANK_RAIL_COUNT := 3
 const THIN_CUT_MAX_CENTER_ALIGNMENT := 0.30
@@ -40,11 +44,16 @@ const CANNON_CHAIN_MIN_ROUTE_DEPTH := 2
 const TREASURE_SNARE_MIN_VELOCITY_DELTA := 14.0
 const CORNER_POCKET_AXIS_RATIO := 0.34
 
+@export_range(0.0, 300.0, 1.0) var last_gasp_max_sink_speed := 45.0
+@export_range(100.0, 1200.0, 5.0) var power_sink_min_sink_speed := 450.0
+@export_range(0.1, 1.0, 0.01) var long_haul_min_table_diagonal_ratio := 0.45
+
 var table
 var shot_active := false
 var next_event_order := 0
 var ball_event_histories: Dictionary = {}
 var ball_event_types: Dictionary = {}
+var ball_route_start_positions: Dictionary = {}
 var ball_chain_depths: Dictionary = {}
 var ball_rail_counts: Dictionary = {}
 var ball_rail_contact_positions: Dictionary = {}
@@ -55,6 +64,8 @@ var anchor_velocity_delta_totals: Dictionary = {}
 var cannon_route_depths_by_ball_id: Dictionary = {}
 var sunk_ball_ids: Array[int] = []
 var sunk_ball_labels: Dictionary = {}
+var shot_sunk_pocket_indexes: Dictionary = {}
+var split_the_loot_recorded := false
 
 
 func setup(table_ref) -> void:
@@ -76,6 +87,7 @@ func clear_shot_events() -> void:
 	next_event_order = 0
 	ball_event_histories.clear()
 	ball_event_types.clear()
+	ball_route_start_positions.clear()
 	ball_chain_depths.clear()
 	ball_rail_counts.clear()
 	ball_rail_contact_positions.clear()
@@ -86,6 +98,8 @@ func clear_shot_events() -> void:
 	cannon_route_depths_by_ball_id.clear()
 	sunk_ball_ids.clear()
 	sunk_ball_labels.clear()
+	shot_sunk_pocket_indexes.clear()
+	split_the_loot_recorded = false
 
 
 func record_rail_contact(ball: Ball, rail_position: Vector2 = Vector2.ZERO) -> void:
@@ -99,6 +113,7 @@ func record_rail_contact(ball: Ball, rail_position: Vector2 = Vector2.ZERO) -> v
 	if not _is_scoring_object_ball(ball):
 		return
 
+	_remember_ball_route_start(ball)
 	var ball_id: int = ball.get_instance_id()
 	var rail_count: int = int(ball_rail_counts.get(ball_id, 0)) + 1
 	ball_rail_counts[ball_id] = rail_count
@@ -124,6 +139,7 @@ func record_cue_object_contact(
 	if not shot_active or ball == null:
 		return
 
+	_remember_ball_route_start(ball)
 	_set_chain_depth(ball.get_instance_id(), maxi(_get_chain_depth(ball), 1))
 	if cue_rail_contacts > 0:
 		_record_unique_event(ball, EVENT_KRAKEN_KICK)
@@ -139,6 +155,7 @@ func record_chain_transfer(source_ball: Ball, target_ball: Ball, target_speed_ga
 
 	var source_depth: int = maxi(_get_chain_depth(source_ball), 1)
 	var target_depth: int = source_depth + 1
+	_remember_ball_route_start(target_ball)
 	_set_chain_depth(target_ball.get_instance_id(), target_depth)
 	_propagate_route_events(source_ball, target_ball, target_speed_gain)
 
@@ -173,6 +190,7 @@ func record_anchor_influence(ball: Ball, velocity_delta: Vector2) -> void:
 	if not shot_active or not _is_scoring_object_ball(ball):
 		return
 
+	_remember_ball_route_start(ball)
 	var ball_id: int = ball.get_instance_id()
 	var total_delta: float = float(anchor_velocity_delta_totals.get(ball_id, 0.0)) + velocity_delta.length()
 	anchor_velocity_delta_totals[ball_id] = total_delta
@@ -195,6 +213,7 @@ func record_cannon_chain_influence(
 	if velocity_delta.length() < CANNON_CHAIN_MIN_TARGET_VELOCITY_DELTA:
 		return
 
+	_remember_ball_route_start(target_ball)
 	_set_cannon_route_depth(target_ball.get_instance_id(), 1)
 
 
@@ -218,6 +237,7 @@ func record_ball_sunk(ball: Ball, sink_context: Dictionary = {}) -> void:
 
 	sunk_ball_ids.append(ball_id)
 	_record_sink_geometry_events(ball_id, sink_context)
+	_record_split_the_loot_if_qualified(ball_id, sink_context)
 	_record_chain_events_for_sunk_ball(ball_id)
 	if sunk_ball_ids.size() >= 2:
 		_record_unique_event_for_id(ball_id, EVENT_MULTI_SINK)
@@ -248,6 +268,7 @@ func _record_unique_event(ball: Ball, event_type: String) -> void:
 	if not shot_active or ball == null:
 		return
 
+	_remember_ball_route_start(ball)
 	_record_unique_event_for_id(ball.get_instance_id(), event_type)
 
 
@@ -327,6 +348,55 @@ func _record_sink_geometry_events(ball_id: int, sink_context: Dictionary) -> voi
 		pocket_position = pocket_position_value
 	if _is_cross_corner_bank(ball_id, pocket_position):
 		_record_unique_event_for_id(ball_id, EVENT_CROSS_CORNER_BANK)
+
+	var sink_velocity := _get_vector2_from_context(sink_context, "sink_velocity")
+	var sink_speed := sink_velocity.length()
+	if sink_speed < last_gasp_max_sink_speed:
+		_record_unique_event_for_id(ball_id, EVENT_LAST_GASP)
+	elif sink_speed > power_sink_min_sink_speed:
+		_record_unique_event_for_id(ball_id, EVENT_POWER_SINK)
+
+	var sink_position := _get_vector2_from_context(sink_context, "sink_position")
+	if _is_long_haul_sink(ball_id, sink_position):
+		_record_unique_event_for_id(ball_id, EVENT_LONG_HAUL)
+
+
+func _record_split_the_loot_if_qualified(ball_id: int, sink_context: Dictionary) -> void:
+	if split_the_loot_recorded:
+		return
+
+	var pocket_index := int(sink_context.get("pocket_index", -1))
+	if pocket_index >= 0:
+		shot_sunk_pocket_indexes[pocket_index] = true
+	if sunk_ball_ids.size() < 3 or shot_sunk_pocket_indexes.size() < 3:
+		return
+
+	split_the_loot_recorded = true
+	_record_unique_event_for_id(ball_id, EVENT_SPLIT_THE_LOOT)
+
+
+func _is_long_haul_sink(ball_id: int, sink_position: Vector2) -> bool:
+	if sink_position == Vector2.ZERO or not ball_route_start_positions.has(ball_id):
+		return false
+
+	var table_diagonal := _get_table_diagonal()
+	if table_diagonal <= 0.0:
+		return false
+
+	var start_position_value: Variant = ball_route_start_positions.get(ball_id, Vector2.ZERO)
+	if not start_position_value is Vector2:
+		return false
+
+	var start_position: Vector2 = start_position_value
+	var travel_ratio := start_position.distance_to(sink_position) / table_diagonal
+	return travel_ratio >= long_haul_min_table_diagonal_ratio
+
+
+func _get_vector2_from_context(context: Dictionary, key: String) -> Vector2:
+	var value: Variant = context.get(key, Vector2.ZERO)
+	if value is Vector2:
+		return value
+	return Vector2.ZERO
 
 
 func _is_cross_corner_bank(ball_id: int, pocket_position: Vector2) -> bool:
@@ -458,6 +528,16 @@ func _has_recorded_event(ball_id: int, event_type: String) -> bool:
 
 	var known_types: Dictionary = known_types_value
 	return known_types.has(event_type)
+
+
+func _remember_ball_route_start(ball: Ball) -> void:
+	if ball == null or not _is_scoring_object_ball(ball):
+		return
+
+	var ball_id := ball.get_instance_id()
+	if ball_route_start_positions.has(ball_id):
+		return
+	ball_route_start_positions[ball_id] = ball.global_position
 
 
 func _is_corner_pocket_position(pocket_position: Vector2) -> bool:

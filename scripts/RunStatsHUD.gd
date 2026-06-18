@@ -6,14 +6,25 @@ class_name RunStatsHUD
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 
 const BUTTON_SIZE := Vector2(56.0, 42.0)
-const PANEL_SIZE := Vector2(340.0, 310.0)
+const PANEL_SIZE := Vector2(400.0, 705.0)
 const PANEL_OFFSET := Vector2(0.0, 50.0)
-const ROOT_SIZE := Vector2(356.0, 374.0)
+const ROOT_SIZE := Vector2(430.0, 785.0)
 const ROWS := [
 	{"label": "Doubloons Earned", "key": "doubloons_earned"},
+	{"label": "Doubloons Lost", "key": "doubloons_lost"},
+	{"label": "Passage Remaining", "key": "remaining_passage"},
+	{"label": "Kraken Wants", "key": "current_kraken_request"},
+	{"label": "Active Oaths", "key": "active_oaths_summary"},
+	{"label": "Shots Taken", "key": "shots_taken"},
 	{"label": "Balls Sunk", "key": "balls_sunk"},
 	{"label": "Highest Pocket Streak", "key": "highest_pocket_streak"},
 	{"label": "Interventions Triggered", "key": "interventions_triggered"},
+	{"label": "Shop Refreshes", "key": "quartermaster_refreshes_used"},
+	{"label": "Refresh Doubloons", "key": "quartermaster_refresh_doubloons_spent"},
+	{"label": "Back Room Deals", "key": "back_room_deals_made"},
+	{"label": "Back Room Doubloons", "key": "back_room_deal_doubloons_spent"},
+	{"label": "Request Rerolls", "key": "kraken_request_rerolls_used"},
+	{"label": "Reroll Passage Added", "key": "passage_added_by_request_rerolls"},
 	{"label": "Contraband Found", "key": "contraband_found"},
 	{"label": "Treasure Claimed", "key": "treasure_claimed"},
 	{"label": "Current Ball Count", "key": "current_ball_count"},
@@ -26,6 +37,7 @@ var stats_panel: PanelContainer
 var close_button: Button
 var value_labels: Dictionary = {}
 var latest_snapshot: Dictionary = {}
+var intervention_history_label: Label
 
 
 func _ready() -> void:
@@ -165,11 +177,31 @@ func _build_panel() -> void:
 		value_labels[stat_key] = value_label
 		stats_grid.add_child(value_label)
 
+	var history_title_label := Label.new()
+	history_title_label.text = "Interventions Purchased"
+	history_title_label.add_theme_font_override("font", UI_FONT)
+	history_title_label.add_theme_font_size_override("font_size", 16)
+	history_title_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.54, 1.0))
+	history_title_label.add_theme_color_override("font_outline_color", Color(0.08, 0.04, 0.02, 0.95))
+	history_title_label.add_theme_constant_override("outline_size", 2)
+	stack.add_child(history_title_label)
+
+	intervention_history_label = Label.new()
+	intervention_history_label.custom_minimum_size = Vector2(300.0, 82.0)
+	intervention_history_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	intervention_history_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	intervention_history_label.add_theme_font_override("font", UI_FONT)
+	intervention_history_label.add_theme_font_size_override("font_size", 14)
+	intervention_history_label.add_theme_color_override("font_color", Color(0.86, 0.84, 0.72, 0.96))
+	intervention_history_label.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.02, 0.82))
+	intervention_history_label.add_theme_constant_override("outline_size", 1)
+	stack.add_child(intervention_history_label)
+
 
 func _make_name_label(text: String) -> Label:
 	var label := Label.new()
 	label.text = text
-	label.custom_minimum_size = Vector2(188.0, 20.0)
+	label.custom_minimum_size = Vector2(170.0, 20.0)
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.add_theme_font_override("font", UI_FONT)
 	label.add_theme_font_size_override("font_size", 15)
@@ -181,7 +213,7 @@ func _make_name_label(text: String) -> Label:
 
 func _make_value_label() -> Label:
 	var label := Label.new()
-	label.custom_minimum_size = Vector2(88.0, 20.0)
+	label.custom_minimum_size = Vector2(174.0, 20.0)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.add_theme_font_override("font", UI_FONT)
@@ -218,6 +250,10 @@ func _update_values() -> void:
 		if value_label == null:
 			continue
 		value_label.text = _format_value(stat_key, latest_snapshot.get(stat_key, 0))
+	if intervention_history_label != null:
+		intervention_history_label.text = _format_intervention_purchase_history(
+			latest_snapshot.get("intervention_purchase_history", [])
+		)
 
 
 func _format_value(stat_key: String, value: Variant) -> String:
@@ -226,6 +262,12 @@ func _format_value(stat_key: String, value: Variant) -> String:
 			return "X%s" % maxi(int(value), 1)
 		"run_time_seconds":
 			return _format_run_time(float(value))
+		"current_kraken_request":
+			var request_text := str(value)
+			return "None" if request_text.is_empty() else request_text
+		"active_oaths_summary":
+			var oath_text := str(value)
+			return "None sworn." if oath_text.is_empty() else oath_text
 	return str(maxi(int(value), 0))
 
 
@@ -237,6 +279,30 @@ func _format_run_time(seconds_value: float) -> String:
 	if hours > 0:
 		return "%d:%02d:%02d" % [hours, minutes, seconds]
 	return "%02d:%02d" % [minutes, seconds]
+
+
+func _format_intervention_purchase_history(value: Variant) -> String:
+	if not value is Array:
+		return "None purchased yet."
+
+	var lines: Array = []
+	for record_value in value:
+		if not record_value is Dictionary:
+			continue
+		var record: Dictionary = record_value
+		var name := str(record.get("name", "Intervention"))
+		var count := maxi(int(record.get("count", 0)), 0)
+		var total_cost := maxi(int(record.get("total_cost", 0)), 0)
+		if count <= 0:
+			continue
+		if count > 1:
+			lines.append("%s x%s - %s total" % [name, count, total_cost])
+		else:
+			lines.append("%s - %s" % [name, total_cost])
+
+	if lines.is_empty():
+		return "None purchased yet."
+	return "\n".join(lines)
 
 
 func _on_run_stats_changed(snapshot: Dictionary) -> void:

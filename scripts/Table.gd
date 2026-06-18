@@ -5,6 +5,7 @@ class_name BilliardsTable
 signal status_text_changed(text: String)
 signal game_finished(text: String)
 signal run_ball_counts_changed(active_ball_count: int, balls_sunk_count: int)
+signal shot_taken(count: int)
 
 #region Data Containers
 class ResultCallout:
@@ -112,6 +113,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 #region Cached Node References
 # Scene-authored nodes stay the source of truth for geometry and cue art.
 @onready var balls: Node2D = $Balls
+@onready var obstacles: Node2D = get_node_or_null("Obstacles") as Node2D
 @onready var pocket_system: PocketSystem = $PocketSystem
 @onready var boundary_system: BoundarySystem = $BoundarySystem
 @onready var shot_event_system: ShotEventSystem = $ShotEventSystem
@@ -120,12 +122,16 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var ball_drop_system: BallDropSystem = $BallDropSystem
 @onready var table_event_system: TableEventSystem = $TableEventSystem
 @onready var run_stats_system: RunStatsSystem = $RunStatsSystem
+@onready var passage_system: PassageSystem = $PassageSystem
+@onready var oath_system: OathSystem = $OathSystem
+@onready var table_obstacle_system: TableObstacleSystem = $TableObstacleSystem
 @onready var ball_audio_system: BallAudioSystem = $BallAudioSystem
 @onready var aim_preview: AimPreview = $AimPreview
 @onready var spawn_system: SpawnSystem = $SpawnSystem
 @onready var ball_placement_system: BallPlacementSystem = $BallPlacementSystem
 @onready var quartermaster_system: QuartermasterSystem = $QuartermasterSystem
 @onready var reserve_system: ReserveSystem = $ReserveSystem
+@onready var back_room_deal_system: BackRoomDealSystem = $BackRoomDealSystem
 @onready var wayfinder_system: WayfinderSystem = $WayfinderSystem
 @onready var powder_keg_system: PowderKegSystem = $PowderKegSystem
 @onready var anchor_ball_system: AnchorBallSystem = $AnchorBallSystem
@@ -161,6 +167,7 @@ var shot_multi_pocket_bonus_awarded := false
 var shot_bank_bonus_awarded := false
 var shot_bank_eligible_ball_ids: Dictionary = {}
 var shot_elapsed_time := 0.0
+var shots_taken_count := 0
 var balls_sunk_count := 0
 var run_ball_count_update_queued := false
 var cue_control_reclaimed := false
@@ -203,6 +210,9 @@ func _ready() -> void:
 	table_event_system.setup(self)
 	if table_event_system.should_disable_automatic_ball_drops():
 		ball_drop_system.enabled = false
+	passage_system.setup(self)
+	oath_system.setup(self)
+	table_obstacle_system.setup(self)
 	ball_audio_system.setup(self)
 	_connect_score_drop_events()
 	aim_preview.setup(self)
@@ -217,6 +227,7 @@ func _ready() -> void:
 	table_impact_shake_system.setup(self)
 	quartermaster_system.setup(self)
 	reserve_system.setup(self)
+	back_room_deal_system.setup(self)
 	run_stats_system.setup(self)
 	_cache_table_geometry()
 	cue_controller.setup()
@@ -342,6 +353,7 @@ func _physics_process(delta: float) -> void:
 		anchor_ball_system.enforce_curse_chain_constraints()
 		var phase_start_usec: int = Time.get_ticks_usec()
 		_resolve_ball_collisions()
+		_resolve_obstacle_collisions()
 		perf_ball_collision_ms += _elapsed_ms_since(phase_start_usec)
 		anchor_ball_system.enforce_curse_chain_constraints()
 		phase_start_usec = Time.get_ticks_usec()
@@ -546,6 +558,13 @@ func _resolve_ball_collisions() -> void:
 		if not ball.is_moving():
 			continue
 		_resolve_ball_against_neighbor_cells(ball, spatial_grid, checked_pairs)
+
+
+func _resolve_obstacle_collisions() -> void:
+	if table_obstacle_system == null or not table_obstacle_system.has_collision_obstacles():
+		return
+
+	table_obstacle_system.resolve_ball_collisions(_get_moving_active_balls())
 
 
 func _get_active_balls() -> Array[Ball]:
@@ -758,6 +777,7 @@ func _reset_performance_frame_stats() -> void:
 	cannon_ball_system.reset_frame_stats()
 	treasure_ball_system.reset_frame_stats()
 	embezzler_system.reset_frame_stats()
+	table_obstacle_system.reset_frame_stats()
 
 
 func _reset_ball_debug_frame_stats() -> void:
@@ -1032,6 +1052,28 @@ func _remove_penalty_object_ball(origin: Vector2) -> bool:
 	return true
 
 
+func remove_oath_penalty_object_balls(count: int) -> int:
+	var removal_count := maxi(count, 0)
+	if removal_count <= 0:
+		return 0
+
+	var removal_origin := SPAWN_REFERENCE_RECT.get_center()
+	if is_instance_valid(cue_ball):
+		removal_origin = cue_ball.global_position
+
+	var removed_count := 0
+	for _index in range(removal_count):
+		var penalty_ball: Ball = _get_penalty_object_ball(removal_origin)
+		if penalty_ball == null:
+			break
+		_animate_penalty_ball_removal(penalty_ball)
+		removed_count += 1
+
+	if removed_count > 0:
+		_queue_run_ball_count_update()
+	return removed_count
+
+
 func _get_penalty_object_ball(origin: Vector2) -> Ball:
 	var closest_stopped_ball: Ball = null
 	var closest_stopped_distance_sq: float = INF
@@ -1094,6 +1136,8 @@ func _note_actual_cue_pocketed(ball: Ball) -> void:
 
 func _start_shot_tracking() -> void:
 	shot_active = true
+	shots_taken_count += 1
+	shot_taken.emit(shots_taken_count)
 	shot_elapsed_time = 0.0
 	cue_control_reclaimed = false
 	cue_reclaim_eligible = false
@@ -1783,6 +1827,10 @@ func _get_visual_cost_performance_snapshot(counts: Dictionary) -> Dictionary:
 
 
 func _get_physics_performance_snapshot() -> Dictionary:
+	var obstacle_snapshot := {}
+	if table_obstacle_system != null:
+		obstacle_snapshot = table_obstacle_system.get_debug_snapshot()
+
 	return {
 		"physics_substeps": PHYSICS_SUBSTEPS,
 		"spatial_grid_cells": perf_spatial_grid_cells,
@@ -1794,6 +1842,13 @@ func _get_physics_performance_snapshot() -> Dictionary:
 		"rail_collisions_resolved": boundary_system.get_collisions_this_frame(),
 		"pocket_checks": pocket_system.get_checks_this_frame(),
 		"pocket_captures": pocket_system.get_captures_this_frame(),
+		"active_debris_count": int(obstacle_snapshot.get("active_debris_count", 0)),
+		"obstacle_broadphase_checks": int(obstacle_snapshot.get("obstacle_broadphase_checks", 0)),
+		"obstacle_broadphase_skips": int(obstacle_snapshot.get("obstacle_broadphase_skips", 0)),
+		"obstacle_detailed_polygon_checks": int(obstacle_snapshot.get("obstacle_detailed_polygon_checks", 0)),
+		"obstacle_collision_hits": int(obstacle_snapshot.get("obstacle_collision_hits", 0)),
+		"obstacle_cache_rebuilds": int(obstacle_snapshot.get("obstacle_cache_rebuilds", 0)),
+		"obstacle_collision_ms": float(obstacle_snapshot.get("obstacle_collision_ms", 0.0)),
 	}
 
 

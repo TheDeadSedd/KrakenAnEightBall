@@ -4,19 +4,22 @@
 [ext_resource type="Script" uid="uid://cpk1835bhdruv" path="res://scripts/Main.gd" id="2_main_script"]
 [ext_resource type="FontFile" uid="uid://b4jk3m14mv2u2" path="res://assets/fonts/NotJamOldStyle11.ttf" id="3_ui_font"]
 [ext_resource type="Script" uid="uid://cg0xx05qehx7o" path="res://scripts/DebugOverlay.gd" id="4_debug_overlay"]
-[ext_resource type="Script" path="res://scripts/TableEventMeter.gd" id="5_table_event_meter"]
+[ext_resource type="Script" uid="uid://ihqmlm7gvg4h" path="res://scripts/TableEventMeter.gd" id="5_table_event_meter"]
 [ext_resource type="Script" uid="uid://bg1rdbmkpcn84" path="res://scripts/PauseMenu.gd" id="6_pause_menu"]
 [ext_resource type="Script" uid="uid://dea5qsnybmcuc" path="res://scripts/DebugPanel.gd" id="7_debug_panel"]
 [ext_resource type="Script" uid="uid://c5h88rg15m2pu" path="res://scripts/ReserveSlotsUI.gd" id="8_reserve_slots_ui"]
 [ext_resource type="Script" uid="uid://clp8ek2x13i4q" path="res://scripts/ReserveDeploymentPresenter.gd" id="9_reserve_deploy_presenter"]
 [ext_resource type="Script" uid="uid://d37dyx8pma2f6" path="res://scripts/HudFeed.gd" id="10_hud_feed"]
 [ext_resource type="Script" uid="uid://dy86pgjpqxn3s" path="res://scripts/QuartermasterHUD.gd" id="11_quartermaster_hud"]
-[ext_resource type="Script" path="res://scripts/GameplayMusicSystem.gd" id="12_gameplay_music_system"]
-[ext_resource type="AudioStream" path="res://audio/sfx/ui/background_gameplay.wav" id="13_gameplay_music"]
-[ext_resource type="Script" path="res://scripts/TableEventMenu.gd" id="14_table_event_menu"]
-[ext_resource type="Script" path="res://scripts/RunLedgerHUD.gd" id="15_run_ledger_hud"]
-[ext_resource type="Script" path="res://scripts/RunStatsHUD.gd" id="16_run_stats_hud"]
-[ext_resource type="Script" path="res://scripts/RunHistorySystem.gd" id="17_run_history_system"]
+[ext_resource type="Script" uid="uid://c3o4etj0wy0ax" path="res://scripts/GameplayMusicSystem.gd" id="12_gameplay_music_system"]
+[ext_resource type="AudioStream" uid="uid://5hs4lgrlbf8" path="res://audio/sfx/ui/background_gameplay.wav" id="13_gameplay_music"]
+[ext_resource type="Script" uid="uid://btbxjjwth2bf2" path="res://scripts/TableEventMenu.gd" id="14_table_event_menu"]
+[ext_resource type="Script" uid="uid://cxove57ty23eg" path="res://scripts/RunLedgerHUD.gd" id="15_run_ledger_hud"]
+[ext_resource type="Script" uid="uid://b48w0aajbeplw" path="res://scripts/RunStatsHUD.gd" id="16_run_stats_hud"]
+[ext_resource type="Script" uid="uid://b6aiwp4bn30sw" path="res://scripts/RunHistorySystem.gd" id="17_run_history_system"]
+[ext_resource type="Script" path="res://scripts/PassageHUD.gd" id="18_passage_hud"]
+[ext_resource type="Script" path="res://scripts/OathHUD.gd" id="19_oath_hud"]
+[ext_resource type="Script" path="res://scripts/ProgressionSystem.gd" id="20_progression_system"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -78,13 +81,16 @@ corner_radius_bottom_left = 12
 [node name="Main" type="Node2D" unique_id=666290206]
 script = ExtResource("2_main_script")
 
-[node name="GameplayMusic" type="AudioStreamPlayer" parent="."]
+[node name="GameplayMusic" type="AudioStreamPlayer" parent="." unique_id=683195992]
 stream = ExtResource("13_gameplay_music")
 volume_db = -21.0
 script = ExtResource("12_gameplay_music_system")
 
-[node name="RunHistorySystem" type="Node" parent="."]
+[node name="RunHistorySystem" type="Node" parent="." unique_id=1838414387]
 script = ExtResource("17_run_history_system")
+
+[node name="ProgressionSystem" type="Node" parent="."]
+script = ExtResource("20_progression_system")
 
 [node name="Table" parent="." unique_id=1446886136 instance=ExtResource("1_table_scene")]
 
@@ -234,6 +240,7 @@ shape = SubResource("CircleShape2D_rvslj")
 [node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=980633167]
 
 [node name="HUD" type="Control" parent="CanvasLayer" unique_id=841761493]
+visible = false
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -276,10 +283,10 @@ theme_override_font_sizes/font_size = 28
 text = "Doubloons: 0"
 horizontal_alignment = 2
 
-[node name="RunLedgerHUD" type="Control" parent="CanvasLayer/HUD"]
+[node name="RunLedgerHUD" type="Control" parent="CanvasLayer/HUD" unique_id=304544298]
 process_mode = 3
 z_index = 17
-layout_mode = 0
+anchors_preset = 0
 offset_left = 1138.0
 offset_top = 842.0
 offset_right = 1302.0
@@ -287,16 +294,38 @@ offset_bottom = 896.0
 mouse_filter = 2
 script = ExtResource("15_run_ledger_hud")
 
-[node name="RunStatsHUD" type="Control" parent="CanvasLayer/HUD"]
+[node name="RunStatsHUD" type="Control" parent="CanvasLayer/HUD" unique_id=2032437953]
 process_mode = 3
 z_index = 20
-layout_mode = 0
+anchors_preset = 0
 offset_left = 28.0
 offset_top = 28.0
 offset_right = 384.0
 offset_bottom = 402.0
 mouse_filter = 2
 script = ExtResource("16_run_stats_hud")
+
+[node name="PassageHUD" type="Control" parent="CanvasLayer/HUD"]
+process_mode = 3
+z_index = 19
+anchors_preset = 0
+offset_left = 746.0
+offset_top = 94.0
+offset_right = 1166.0
+offset_bottom = 158.0
+mouse_filter = 2
+script = ExtResource("18_passage_hud")
+
+[node name="OathHUD" type="Control" parent="CanvasLayer/HUD"]
+process_mode = 3
+z_index = 21
+anchors_preset = 0
+offset_left = 746.0
+offset_top = 166.0
+offset_right = 1136.0
+offset_bottom = 416.0
+mouse_filter = 2
+script = ExtResource("19_oath_hud")
 
 [node name="HudFeed" type="Control" parent="CanvasLayer/HUD" unique_id=634428339]
 process_mode = 3
@@ -318,7 +347,7 @@ offset_bottom = 964.0
 mouse_filter = 1
 script = ExtResource("5_table_event_meter")
 
-[node name="TableEventMenu" type="Control" parent="CanvasLayer/HUD"]
+[node name="TableEventMenu" type="Control" parent="CanvasLayer/HUD" unique_id=140587156]
 process_mode = 3
 visible = false
 z_index = 32

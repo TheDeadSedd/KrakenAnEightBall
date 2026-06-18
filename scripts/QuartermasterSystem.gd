@@ -5,6 +5,7 @@ signal shop_state_changed(items: Array)
 signal status_changed(text: String)
 signal placement_started(item_name: String)
 signal placement_finished
+signal stock_refresh_purchased(cost: int, refresh_count: int)
 
 # Owns shop inventory, prices, affordability, and purchase intent. Purchases
 # fill ReserveSystem slots; reserve deployment is handled outside this shop.
@@ -41,6 +42,11 @@ const SHOP_ITEMS := {
 	},
 }
 
+@export var refresh_base_cost := 10
+@export var refresh_cost_multiplier := 2.0
+@export var refresh_shot_decay_amount := 2
+@export var refresh_max_cost := 0
+
 var table
 var pending_item_id := ""
 var purchase_attempts := 0
@@ -51,6 +57,10 @@ var canceled_purchases := 0
 var stock_refreshes := 0
 var offer_replacements := 0
 var duplicate_offer_fallbacks := 0
+var manual_stock_refreshes := 0
+var denied_stock_refresh_attempts := 0
+var refresh_doubloons_spent := 0
+var current_refresh_cost := 10
 var stock_refresh_serial := 0
 var last_refreshed_offer_index := -1
 var last_blocker_reason := ""
@@ -63,7 +73,16 @@ func setup(table_ref) -> void:
 	stock_rng.seed = STOCK_RNG_SEED
 	stock_refresh_serial = 0
 	last_refreshed_offer_index = -1
+	manual_stock_refreshes = 0
+	denied_stock_refresh_attempts = 0
+	refresh_doubloons_spent = 0
+	current_refresh_cost = _get_base_refresh_cost()
 	active_offer_item_ids.clear()
+	if table != null and not table.shot_taken.is_connected(_on_shot_taken):
+		table.shot_taken.connect(_on_shot_taken)
+	if table != null and table.oath_system != null:
+		if not table.oath_system.oaths_changed.is_connected(_on_oaths_changed):
+			table.oath_system.oaths_changed.connect(_on_oaths_changed)
 	_ensure_active_offers_filled()
 	_emit_shop_state_changed()
 
@@ -126,6 +145,35 @@ func request_purchase_offer(offer_index: int) -> bool:
 	return true
 
 
+func request_refresh_stock() -> bool:
+	_ensure_active_offers_filled()
+	var blocker := _get_refresh_blocker()
+	if not blocker.is_empty():
+		denied_stock_refresh_attempts += 1
+		last_blocker_reason = blocker
+		status_changed.emit(blocker)
+		_emit_shop_state_changed()
+		return false
+
+	var refresh_cost := get_current_refresh_cost()
+	if not table.score_system.try_spend_doubloons(refresh_cost):
+		denied_stock_refresh_attempts += 1
+		last_blocker_reason = "Not enough Doubloons"
+		status_changed.emit(last_blocker_reason)
+		_emit_shop_state_changed()
+		return false
+
+	_reroll_all_offer_slots()
+	manual_stock_refreshes += 1
+	refresh_doubloons_spent += refresh_cost
+	current_refresh_cost = _get_next_refresh_cost(refresh_cost)
+	last_blocker_reason = ""
+	stock_refresh_purchased.emit(refresh_cost, manual_stock_refreshes)
+	status_changed.emit("Quartermaster refreshed stock for %s Doubloons." % refresh_cost)
+	_emit_shop_state_changed()
+	return true
+
+
 func cancel_active_purchase() -> void:
 	return
 
@@ -134,6 +182,7 @@ func get_shop_items_snapshot() -> Array:
 	_ensure_active_offers_filled()
 	var items: Array = []
 	var doubloons_available := _get_doubloons_available()
+	var refresh_snapshot := get_refresh_snapshot()
 	for offer_index in range(OFFER_SLOT_COUNT):
 		var item_id := str(active_offer_item_ids[offer_index])
 		var item: Dictionary = _get_item(item_id).duplicate(true)
@@ -144,8 +193,29 @@ func get_shop_items_snapshot() -> Array:
 		item["last_refreshed_offer_index"] = last_refreshed_offer_index
 		item["blocked_reason"] = _get_offer_purchase_blocker(offer_index)
 		item["available"] = str(item["blocked_reason"]).is_empty()
+		item["refresh"] = refresh_snapshot
 		items.append(item)
 	return items
+
+
+func get_refresh_snapshot() -> Dictionary:
+	var blocker := _get_refresh_blocker()
+	var cost := get_current_refresh_cost()
+	return {
+		"cost": cost,
+		"base_cost": _get_base_refresh_cost(),
+		"cost_multiplier": refresh_cost_multiplier,
+		"shot_decay_amount": _get_refresh_decay_amount(),
+		"max_cost": refresh_max_cost,
+		"affordable": blocker.is_empty(),
+		"blocked_reason": blocker,
+		"refreshes_used": manual_stock_refreshes,
+		"doubloons_spent": refresh_doubloons_spent,
+	}
+
+
+func get_current_refresh_cost() -> int:
+	return _apply_refresh_cost_cap(maxi(current_refresh_cost, _get_base_refresh_cost()))
 
 
 func can_afford_item(item_id: String) -> bool:
@@ -170,6 +240,12 @@ func get_debug_snapshot() -> Dictionary:
 		"canceled_purchases": canceled_purchases,
 		"active_offer_item_ids": active_offer_item_ids.duplicate(),
 		"stock_refreshes": stock_refreshes,
+		"manual_stock_refreshes": manual_stock_refreshes,
+		"denied_stock_refresh_attempts": denied_stock_refresh_attempts,
+		"refresh_doubloons_spent": refresh_doubloons_spent,
+		"current_refresh_cost": get_current_refresh_cost(),
+		"refresh_base_cost": _get_base_refresh_cost(),
+		"refresh_shot_decay_amount": _get_refresh_decay_amount(),
 		"offer_replacements": offer_replacements,
 		"duplicate_offer_fallbacks": duplicate_offer_fallbacks,
 		"stock_refresh_serial": stock_refresh_serial,
@@ -192,12 +268,26 @@ func _get_offer_purchase_blocker(offer_index: int) -> String:
 	return _get_purchase_blocker(item_id)
 
 
+func _get_refresh_blocker() -> String:
+	if table == null or table.score_system == null:
+		return "Quartermaster not ready"
+	var oath_blocker := _get_oath_quartermaster_blocker()
+	if not oath_blocker.is_empty():
+		return oath_blocker
+	if not table.score_system.can_afford_doubloons(get_current_refresh_cost()):
+		return "Not enough Doubloons"
+	return ""
+
+
 func _get_purchase_blocker(item_id: String) -> String:
 	var item: Dictionary = _get_item(item_id)
 	if item.is_empty():
 		return "Unknown Quartermaster item"
 	if table == null or table.score_system == null or table.reserve_system == null:
 		return "Quartermaster not ready"
+	var oath_blocker := _get_oath_quartermaster_blocker()
+	if not oath_blocker.is_empty():
+		return oath_blocker
 	if is_purchase_pending():
 		return "Placement already active"
 	if table.reserve_system.is_full():
@@ -211,6 +301,12 @@ func _get_item(item_id: String) -> Dictionary:
 	if not SHOP_ITEMS.has(item_id):
 		return {}
 	return SHOP_ITEMS[item_id]
+
+
+func _get_oath_quartermaster_blocker() -> String:
+	if table == null or table.oath_system == null:
+		return ""
+	return table.oath_system.get_quartermaster_access_blocker()
 
 
 func _ensure_active_offers_filled() -> void:
@@ -234,6 +330,47 @@ func _replace_offer_slot(offer_index: int, previous_item_id: String) -> void:
 	offer_replacements += 1
 	stock_refresh_serial += 1
 	last_refreshed_offer_index = offer_index
+
+
+func _reroll_all_offer_slots() -> void:
+	var previous_offers := active_offer_item_ids.duplicate()
+	var refreshed_offers := _pick_refreshed_offer_set(previous_offers)
+	if refreshed_offers.is_empty():
+		return
+
+	active_offer_item_ids = refreshed_offers
+	stock_refreshes += active_offer_item_ids.size()
+	offer_replacements += active_offer_item_ids.size()
+	stock_refresh_serial += 1
+	last_refreshed_offer_index = -1
+
+
+func _pick_refreshed_offer_set(previous_offers: Array) -> Array:
+	var pool := _get_purchasable_item_ids()
+	if pool.is_empty():
+		return []
+
+	var refreshed_offers: Array = []
+	var available_unique := pool.duplicate()
+	for offer_index in range(OFFER_SLOT_COUNT):
+		var previous_item_id := ""
+		if offer_index < previous_offers.size():
+			previous_item_id = str(previous_offers[offer_index])
+
+		var candidates := _get_candidates_excluding_item(available_unique, previous_item_id)
+		if candidates.is_empty():
+			candidates = available_unique.duplicate()
+		if candidates.is_empty():
+			candidates = _get_candidates_excluding_item(pool, previous_item_id)
+		if candidates.is_empty():
+			candidates = pool.duplicate()
+
+		var picked_item_id := _pick_random_item_id(candidates)
+		refreshed_offers.append(picked_item_id)
+		available_unique.erase(picked_item_id)
+		if available_unique.is_empty() and refreshed_offers.size() < min(OFFER_SLOT_COUNT, pool.size()):
+			available_unique = pool.duplicate()
+	return refreshed_offers
 
 
 func _pick_offer_item_id(offer_index: int, previous_item_id: String = "") -> String:
@@ -308,6 +445,42 @@ func _get_doubloons_available() -> int:
 	if table == null or table.score_system == null:
 		return 0
 	return table.score_system.get_doubloons_total()
+
+
+func _get_base_refresh_cost() -> int:
+	return maxi(refresh_base_cost, 0)
+
+
+func _get_refresh_decay_amount() -> int:
+	return maxi(refresh_shot_decay_amount, 0)
+
+
+func _get_next_refresh_cost(paid_cost: int) -> int:
+	var multiplied_cost := ceili(maxf(float(paid_cost), float(_get_base_refresh_cost())) * maxf(refresh_cost_multiplier, 1.0))
+	return _apply_refresh_cost_cap(maxi(multiplied_cost, _get_base_refresh_cost()))
+
+
+func _apply_refresh_cost_cap(cost: int) -> int:
+	if refresh_max_cost > 0:
+		return mini(cost, refresh_max_cost)
+	return cost
+
+
+func _on_shot_taken(_count: int) -> void:
+	var base_cost := _get_base_refresh_cost()
+	if current_refresh_cost <= base_cost:
+		return
+
+	var decayed_cost := maxi(current_refresh_cost - _get_refresh_decay_amount(), base_cost)
+	if decayed_cost == current_refresh_cost:
+		return
+
+	current_refresh_cost = decayed_cost
+	_emit_shop_state_changed()
+
+
+func _on_oaths_changed(_snapshot: Dictionary) -> void:
+	_emit_shop_state_changed()
 
 
 func _make_reserve_item_payload(item: Dictionary) -> Dictionary:
