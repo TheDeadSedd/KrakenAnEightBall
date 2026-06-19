@@ -17,6 +17,7 @@ const SPAWN_TYPE_WAYFINDER_BALL := "wayfinder_ball"
 const SPAWN_TYPE_POWDER_KEG_BALL := "powder_keg_ball"
 const OFFER_SLOT_COUNT := 3
 const STOCK_RNG_SEED := 802408
+const CUE_MODIFIER_QUARTERMASTER_REFRESH_SHOT_DECAY_BONUS := "quartermaster_refresh_shot_decay_bonus"
 const SHOP_ITEM_IDS := ["plain_object_ball", "wayfinder_ball", "powder_keg_ball"]
 const SHOP_ITEMS := {
 	"plain_object_ball": {
@@ -65,6 +66,7 @@ var stock_refresh_serial := 0
 var last_refreshed_offer_index := -1
 var last_blocker_reason := ""
 var active_offer_item_ids: Array = []
+var cue_modifier_snapshot: Dictionary = {}
 var stock_rng := RandomNumberGenerator.new()
 
 
@@ -174,6 +176,11 @@ func request_refresh_stock() -> bool:
 	return true
 
 
+func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
+	cue_modifier_snapshot = snapshot.duplicate(true)
+	_emit_shop_state_changed()
+
+
 func cancel_active_purchase() -> void:
 	return
 
@@ -201,16 +208,33 @@ func get_shop_items_snapshot() -> Array:
 func get_refresh_snapshot() -> Dictionary:
 	var blocker := _get_refresh_blocker()
 	var cost := get_current_refresh_cost()
+	var decay_snapshot := get_refresh_decay_snapshot()
 	return {
 		"cost": cost,
 		"base_cost": _get_base_refresh_cost(),
 		"cost_multiplier": refresh_cost_multiplier,
-		"shot_decay_amount": _get_refresh_decay_amount(),
+		"shot_decay_amount": int(decay_snapshot.get("final_decay", 0)),
+		"base_shot_decay_amount": int(decay_snapshot.get("base_decay", 0)),
+		"cue_shot_decay_bonus": int(decay_snapshot.get("cue_bonus", 0)),
+		"final_shot_decay_amount": int(decay_snapshot.get("final_decay", 0)),
+		"active_cue_modifiers_summary": str(decay_snapshot.get("active_cue_modifiers_summary", "None")),
 		"max_cost": refresh_max_cost,
 		"affordable": blocker.is_empty(),
 		"blocked_reason": blocker,
 		"refreshes_used": manual_stock_refreshes,
 		"doubloons_spent": refresh_doubloons_spent,
+	}
+
+
+func get_refresh_decay_snapshot() -> Dictionary:
+	var base_decay := _get_base_refresh_decay_amount()
+	var cue_bonus := _get_refresh_decay_cue_bonus()
+	var final_decay := _get_refresh_decay_amount()
+	return {
+		"base_decay": base_decay,
+		"cue_bonus": cue_bonus,
+		"final_decay": final_decay,
+		"active_cue_modifiers_summary": _get_active_cue_modifier_summary(),
 	}
 
 
@@ -230,6 +254,7 @@ func is_purchase_pending() -> bool:
 
 
 func get_debug_snapshot() -> Dictionary:
+	var decay_snapshot := get_refresh_decay_snapshot()
 	return {
 		"purchase_pending": is_purchase_pending(),
 		"pending_item_id": pending_item_id,
@@ -245,7 +270,11 @@ func get_debug_snapshot() -> Dictionary:
 		"refresh_doubloons_spent": refresh_doubloons_spent,
 		"current_refresh_cost": get_current_refresh_cost(),
 		"refresh_base_cost": _get_base_refresh_cost(),
-		"refresh_shot_decay_amount": _get_refresh_decay_amount(),
+		"refresh_shot_decay_amount": int(decay_snapshot.get("final_decay", 0)),
+		"refresh_base_shot_decay_amount": int(decay_snapshot.get("base_decay", 0)),
+		"refresh_cue_shot_decay_bonus": int(decay_snapshot.get("cue_bonus", 0)),
+		"refresh_final_shot_decay_amount": int(decay_snapshot.get("final_decay", 0)),
+		"active_cue_modifiers_summary": str(decay_snapshot.get("active_cue_modifiers_summary", "None")),
 		"offer_replacements": offer_replacements,
 		"duplicate_offer_fallbacks": duplicate_offer_fallbacks,
 		"stock_refresh_serial": stock_refresh_serial,
@@ -451,8 +480,31 @@ func _get_base_refresh_cost() -> int:
 	return maxi(refresh_base_cost, 0)
 
 
-func _get_refresh_decay_amount() -> int:
+func _get_base_refresh_decay_amount() -> int:
 	return maxi(refresh_shot_decay_amount, 0)
+
+
+func _get_refresh_decay_cue_bonus() -> int:
+	return maxi(roundi(_get_cue_modifier_value(CUE_MODIFIER_QUARTERMASTER_REFRESH_SHOT_DECAY_BONUS, 0.0)), 0)
+
+
+func _get_refresh_decay_amount() -> int:
+	return maxi(_get_base_refresh_decay_amount() + _get_refresh_decay_cue_bonus(), 0)
+
+
+func _get_cue_modifier_value(modifier_key: String, fallback: float = 0.0) -> float:
+	if not bool(cue_modifier_snapshot.get("modifiers_enabled", true)):
+		return fallback
+	var modifiers_value: Variant = cue_modifier_snapshot.get("modifiers", {})
+	if not modifiers_value is Dictionary:
+		return fallback
+	var modifiers: Dictionary = modifiers_value as Dictionary
+	return float(modifiers.get(modifier_key, fallback))
+
+
+func _get_active_cue_modifier_summary() -> String:
+	var summary := str(cue_modifier_snapshot.get("active_effect_summary", "None"))
+	return "None" if summary.is_empty() else summary
 
 
 func _get_next_refresh_cost(paid_cost: int) -> int:

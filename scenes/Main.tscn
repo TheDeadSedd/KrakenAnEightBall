@@ -20,6 +20,7 @@
 [ext_resource type="Script" path="res://scripts/PassageHUD.gd" id="18_passage_hud"]
 [ext_resource type="Script" path="res://scripts/OathHUD.gd" id="19_oath_hud"]
 [ext_resource type="Script" path="res://scripts/ProgressionSystem.gd" id="20_progression_system"]
+[ext_resource type="Script" path="res://scripts/CueProgressionSystem.gd" id="21_cue_progression_system"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -91,6 +92,9 @@ script = ExtResource("17_run_history_system")
 
 [node name="ProgressionSystem" type="Node" parent="."]
 script = ExtResource("20_progression_system")
+
+[node name="CueProgressionSystem" type="Node" parent="."]
+script = ExtResource("21_cue_progression_system")
 
 [node name="Table" parent="." unique_id=1446886136 instance=ExtResource("1_table_scene")]
 

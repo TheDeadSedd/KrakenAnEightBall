@@ -3,11 +3,12 @@ class_name ProgressionSystem
 
 signal progression_changed(snapshot: Dictionary)
 signal kraken_favor_awarded(amount: int, total: int, award_snapshot: Dictionary)
+signal kraken_favor_spent(amount: int, total: int, reason: String)
 
 # Persistent run-spanning progression currency only. Cue upgrades will consume
 # this later, but no upgrade inventory or shop logic belongs in this pass.
 const PROGRESSION_FILE_PATH := "user://progression.json"
-const SAVE_VERSION := 1
+const SAVE_VERSION := 2
 
 @export var base_success_favor_reward := 1
 @export var doubloons_earned_bonus_threshold := 5000
@@ -21,6 +22,7 @@ var lifetime_kraken_favor_earned := 0
 var successful_passages := 0
 var current_run_reward_finalized := false
 var last_award_snapshot: Dictionary = {}
+var cue_progression_data: Dictionary = {}
 
 
 func _ready() -> void:
@@ -32,6 +34,7 @@ func load_progression() -> void:
 	lifetime_kraken_favor_earned = 0
 	successful_passages = 0
 	last_award_snapshot = {}
+	cue_progression_data = {}
 
 	if not FileAccess.file_exists(PROGRESSION_FILE_PATH):
 		progression_changed.emit(get_progression_snapshot())
@@ -56,6 +59,9 @@ func load_progression() -> void:
 	var last_award_value: Variant = payload.get("last_award", {})
 	if last_award_value is Dictionary:
 		last_award_snapshot = (last_award_value as Dictionary).duplicate(true)
+	var cue_progression_value: Variant = payload.get("cue_progression", {})
+	if cue_progression_value is Dictionary:
+		cue_progression_data = (cue_progression_value as Dictionary).duplicate(true)
 	progression_changed.emit(get_progression_snapshot())
 
 
@@ -68,8 +74,65 @@ func get_progression_snapshot() -> Dictionary:
 		"successful_passages": successful_passages,
 		"current_run_reward_finalized": current_run_reward_finalized,
 		"last_award": last_award_snapshot.duplicate(true),
+		"cue_progression": cue_progression_data.duplicate(true),
 		"reward_formula": get_reward_formula_snapshot(),
 	}
+
+
+func can_afford_kraken_favor(amount: int) -> bool:
+	return total_kraken_favor >= maxi(amount, 0)
+
+
+func try_spend_kraken_favor(amount: int, reason: String = "") -> bool:
+	var spend_amount := maxi(amount, 0)
+	if spend_amount <= 0:
+		return true
+	if not can_afford_kraken_favor(spend_amount):
+		return false
+
+	total_kraken_favor -= spend_amount
+	if not _write_progression():
+		total_kraken_favor += spend_amount
+		return false
+
+	kraken_favor_spent.emit(spend_amount, total_kraken_favor, reason)
+	progression_changed.emit(get_progression_snapshot())
+	return true
+
+
+func try_spend_kraken_favor_and_set_cue_progression(amount: int, data: Dictionary, reason: String = "") -> bool:
+	var spend_amount := maxi(amount, 0)
+	if spend_amount > 0 and not can_afford_kraken_favor(spend_amount):
+		return false
+
+	var previous_total := total_kraken_favor
+	var previous_cue_progression := cue_progression_data.duplicate(true)
+	total_kraken_favor -= spend_amount
+	cue_progression_data = data.duplicate(true)
+	if not _write_progression():
+		total_kraken_favor = previous_total
+		cue_progression_data = previous_cue_progression
+		return false
+
+	if spend_amount > 0:
+		kraken_favor_spent.emit(spend_amount, total_kraken_favor, reason)
+	progression_changed.emit(get_progression_snapshot())
+	return true
+
+
+func get_cue_progression_data_snapshot() -> Dictionary:
+	return cue_progression_data.duplicate(true)
+
+
+func set_cue_progression_data(data: Dictionary) -> bool:
+	cue_progression_data = data.duplicate(true)
+	var write_succeeded := _write_progression()
+	if not write_succeeded:
+		load_progression()
+		return false
+
+	progression_changed.emit(get_progression_snapshot())
+	return true
 
 
 func get_reward_formula_snapshot() -> Dictionary:
@@ -201,6 +264,7 @@ func _write_progression() -> bool:
 		"lifetime_kraken_favor_earned": maxi(lifetime_kraken_favor_earned, 0),
 		"successful_passages": maxi(successful_passages, 0),
 		"last_award": last_award_snapshot,
+		"cue_progression": cue_progression_data,
 	}
 	var file := FileAccess.open(PROGRESSION_FILE_PATH, FileAccess.WRITE)
 	if file == null:

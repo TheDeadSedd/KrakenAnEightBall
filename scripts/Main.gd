@@ -9,6 +9,7 @@ const COMPLETION_PANEL_SIZE := Vector2(620.0, 710.0)
 @onready var table: BilliardsTable = $Table
 @onready var run_history_system: RunHistorySystem = $RunHistorySystem
 @onready var progression_system: ProgressionSystem = $ProgressionSystem
+@onready var cue_progression_system: CueProgressionSystem = $CueProgressionSystem
 @onready var debug_overlay: DebugOverlay = $CanvasLayer/HUD
 @onready var pause_menu: PauseMenu = $CanvasLayer/HUD/PauseMenu
 @onready var hud_feed: HudFeed = $CanvasLayer/HUD/HudFeed
@@ -33,11 +34,13 @@ var passage_completion_panel: PanelContainer
 var passage_completion_value_labels: Dictionary = {}
 var passage_completion_confirm_button: Button
 var passage_completion_progression_award: Dictionary = {}
+var latest_cue_progression_snapshot: Dictionary = {}
 
 
 func _ready() -> void:
 	_configure_pause_process_modes()
 	debug_overlay.visible = true
+	_setup_cue_progression_runtime_bridge()
 	table.status_text_changed.connect(_on_status_text_changed)
 	table.game_finished.connect(_on_game_finished)
 	table.score_system.doubloons_changed.connect(_on_doubloons_changed)
@@ -82,6 +85,16 @@ func _ready() -> void:
 		pause_menu.debug_obstacle_collision_toggled.connect(_on_pause_obstacle_collision_toggled)
 	if not pause_menu.debug_obstacle_collision_draw_toggled.is_connected(_on_pause_obstacle_collision_draw_toggled):
 		pause_menu.debug_obstacle_collision_draw_toggled.connect(_on_pause_obstacle_collision_draw_toggled)
+	if not pause_menu.debug_oath_activate_requested.is_connected(_on_pause_debug_oath_activate_requested):
+		pause_menu.debug_oath_activate_requested.connect(_on_pause_debug_oath_activate_requested)
+	if not pause_menu.debug_oath_clear_requested.is_connected(_on_pause_debug_oath_clear_requested):
+		pause_menu.debug_oath_clear_requested.connect(_on_pause_debug_oath_clear_requested)
+	if not pause_menu.debug_oath_advance_shot_requested.is_connected(_on_pause_debug_oath_advance_shot_requested):
+		pause_menu.debug_oath_advance_shot_requested.connect(_on_pause_debug_oath_advance_shot_requested)
+	if not pause_menu.debug_oath_fail_requested.is_connected(_on_pause_debug_oath_fail_requested):
+		pause_menu.debug_oath_fail_requested.connect(_on_pause_debug_oath_fail_requested)
+	if not pause_menu.debug_oath_complete_requested.is_connected(_on_pause_debug_oath_complete_requested):
+		pause_menu.debug_oath_complete_requested.connect(_on_pause_debug_oath_complete_requested)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 	if not quartermaster_hud.quartermaster_offer_requested.is_connected(_on_quartermaster_hud_offer_requested):
@@ -121,6 +134,8 @@ func _ready() -> void:
 
 func _configure_pause_process_modes() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	progression_system.process_mode = Node.PROCESS_MODE_ALWAYS
+	cue_progression_system.process_mode = Node.PROCESS_MODE_ALWAYS
 	table.process_mode = Node.PROCESS_MODE_PAUSABLE
 	debug_overlay.process_mode = Node.PROCESS_MODE_ALWAYS
 	pause_menu.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -134,6 +149,83 @@ func _configure_pause_process_modes() -> void:
 	oath_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	table_event_meter.process_mode = Node.PROCESS_MODE_ALWAYS
 	table_event_menu.process_mode = Node.PROCESS_MODE_ALWAYS
+
+
+func _setup_cue_progression_runtime_bridge() -> void:
+	if cue_progression_system == null or progression_system == null:
+		return
+
+	if not cue_progression_system.cue_progression_changed.is_connected(_on_cue_progression_changed):
+		cue_progression_system.cue_progression_changed.connect(_on_cue_progression_changed)
+	if table != null and table.oath_system != null and not table.oath_system.oaths_changed.is_connected(_on_oaths_runtime_changed):
+		table.oath_system.oaths_changed.connect(_on_oaths_runtime_changed)
+	cue_progression_system.setup(progression_system)
+	_apply_cue_progression_snapshot(cue_progression_system.get_cue_progression_snapshot())
+
+
+func _apply_cue_progression_snapshot(snapshot: Dictionary) -> void:
+	if table == null:
+		return
+	latest_cue_progression_snapshot = snapshot.duplicate(true)
+	var base_modifier_snapshot := _get_cue_modifier_snapshot_from_progression_snapshot(snapshot)
+	var modifier_snapshot := _get_runtime_cue_modifier_snapshot(base_modifier_snapshot)
+	if table.has_method("set_cue_modifier_snapshot"):
+		table.set_cue_modifier_snapshot(modifier_snapshot)
+	if table.table_event_system != null:
+		table.table_event_system.set_cue_modifier_snapshot(modifier_snapshot)
+	if table.quartermaster_system != null:
+		table.quartermaster_system.set_cue_modifier_snapshot(modifier_snapshot)
+	if table.oath_system != null:
+		table.oath_system.set_cue_modifier_snapshot(modifier_snapshot)
+	if table.passage_system != null:
+		table.passage_system.set_cue_modifier_snapshot(modifier_snapshot)
+	if table.run_stats_system != null:
+		table.run_stats_system.set_cue_loadout_snapshot(snapshot)
+		table.run_stats_system.set_cue_modifier_snapshot(modifier_snapshot)
+	if table.cue_controller != null:
+		table.cue_controller.set_cue_loadout_snapshot(snapshot)
+	if pause_menu != null and table.oath_system != null:
+		pause_menu.set_oath_debug_snapshot(table.oath_system.get_oath_snapshot(), modifier_snapshot)
+
+
+func _get_cue_modifier_snapshot_from_progression_snapshot(snapshot: Dictionary) -> Dictionary:
+	var modifier_value: Variant = snapshot.get("active_modifiers", {})
+	if modifier_value is Dictionary:
+		return (modifier_value as Dictionary).duplicate(true)
+	if cue_progression_system != null:
+		return cue_progression_system.get_active_cue_modifier_snapshot(true)
+	return {}
+
+
+func _get_runtime_cue_modifier_snapshot(base_modifier_snapshot: Dictionary) -> Dictionary:
+	var runtime_snapshot := base_modifier_snapshot.duplicate(true)
+	runtime_snapshot["suppressed_by_oath"] = false
+	runtime_snapshot["suppression_reason"] = ""
+	runtime_snapshot["suppression_label"] = ""
+	runtime_snapshot["suppression_remaining_text"] = ""
+	if table == null or table.oath_system == null:
+		return runtime_snapshot
+
+	var suppression_snapshot: Dictionary = table.oath_system.get_cue_modifier_suppression_snapshot()
+	if not bool(suppression_snapshot.get("suppressed", false)):
+		return runtime_snapshot
+
+	runtime_snapshot["modifiers_enabled"] = false
+	runtime_snapshot["suppressed_by_oath"] = true
+	runtime_snapshot["suppression_reason"] = str(suppression_snapshot.get("reason", "Cue bonuses are silenced."))
+	runtime_snapshot["suppression_label"] = str(suppression_snapshot.get("label", "Oath of Humility"))
+	runtime_snapshot["suppression_remaining_text"] = str(suppression_snapshot.get("remaining_text", ""))
+	runtime_snapshot["unsuppressed_active_effect_summary"] = str(base_modifier_snapshot.get("active_effect_summary", "None"))
+	runtime_snapshot["active_effect_summary"] = "Silenced by Oath"
+	return runtime_snapshot
+
+
+func _refresh_runtime_cue_modifier_snapshot() -> void:
+	if latest_cue_progression_snapshot.is_empty():
+		if cue_progression_system == null:
+			return
+		latest_cue_progression_snapshot = cue_progression_system.get_cue_progression_snapshot()
+	_apply_cue_progression_snapshot(latest_cue_progression_snapshot)
 
 
 func _input(event: InputEvent) -> void:
@@ -325,6 +417,53 @@ func _on_pause_obstacle_collision_draw_toggled(enabled: bool) -> void:
 	hud_feed.add_message(status_text, "event")
 
 
+func _on_pause_debug_oath_activate_requested(oath_id: String) -> void:
+	if table.oath_system.debug_activate_oath(oath_id):
+		hud_feed.add_message("Debug Oath activated: %s." % _get_oath_label(oath_id), "event")
+		return
+
+	var blocker := table.oath_system.get_oath_activation_blocker(oath_id, true)
+	hud_feed.add_message("Debug Oath blocked: %s." % blocker, "event")
+
+
+func _on_pause_debug_oath_clear_requested() -> void:
+	table.oath_system.debug_clear_oaths()
+	hud_feed.add_message("Debug Oaths cleared.", "event")
+
+
+func _on_pause_debug_oath_advance_shot_requested() -> void:
+	if table.oath_system.debug_advance_oath_shot():
+		hud_feed.add_message("Debug Oath timers advanced.", "event")
+	else:
+		hud_feed.add_message("Debug Oath advance skipped: no active Oaths.", "event")
+
+
+func _on_pause_debug_oath_fail_requested(oath_id: String) -> void:
+	if table.oath_system.debug_fail_oath(oath_id):
+		hud_feed.add_message("Debug Oath failed.", "event")
+	else:
+		hud_feed.add_message("Debug Oath fail skipped: no matching active Oath.", "event")
+
+
+func _on_pause_debug_oath_complete_requested(oath_id: String) -> void:
+	if table.oath_system.debug_complete_oath(oath_id):
+		hud_feed.add_message("Debug Oath completed.", "event")
+	else:
+		hud_feed.add_message("Debug Oath complete skipped: no matching active Oath.", "event")
+
+
+func _get_oath_label(oath_id: String) -> String:
+	if table == null or table.oath_system == null:
+		return oath_id
+	for definition_value in table.oath_system.get_available_oath_definitions(true):
+		if not definition_value is Dictionary:
+			continue
+		var definition: Dictionary = definition_value
+		if str(definition.get("id", "")) == oath_id:
+			return str(definition.get("label", oath_id))
+	return oath_id
+
+
 func _on_quartermaster_hud_offer_requested(offer_index: int) -> void:
 	table.quartermaster_system.request_purchase_offer(offer_index)
 
@@ -393,6 +532,14 @@ func _on_back_room_deal_state_changed(snapshot: Dictionary) -> void:
 
 func _on_back_room_deal_status_changed(text: String) -> void:
 	hud_feed.add_message(text, "shop")
+
+
+func _on_cue_progression_changed(snapshot: Dictionary) -> void:
+	_apply_cue_progression_snapshot(snapshot)
+
+
+func _on_oaths_runtime_changed(_snapshot: Dictionary) -> void:
+	_refresh_runtime_cue_modifier_snapshot()
 
 
 func _on_quartermaster_placement_started(item_name: String) -> void:

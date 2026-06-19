@@ -17,6 +17,7 @@ const PENALTY_REMOVE_BALLS := "remove_balls"
 const STATUS_ACTIVE := "active"
 const STATUS_COMPLETED := "completed"
 const STATUS_FAILED := "failed"
+const CUE_MODIFIER_OATH_PASSAGE_PENALTY_REDUCTION_FLAT := "oath_passage_penalty_reduction_flat"
 
 const OATH_DEFINITIONS := {
 	OATH_OF_URGENCY: {
@@ -59,11 +60,14 @@ const OATH_DEFINITIONS := {
 	OATH_OF_HUMILITY: {
 		"id": OATH_OF_HUMILITY,
 		"label": "Oath of Humility",
-		"description": "Future cue bonuses will be disabled temporarily.",
-		"failure_condition": "No first-pass behavior. Cue upgrades do not exist yet.",
-		"visible": false,
-		"functional": false,
-		"placeholder": true,
+		"description": "The Kraken demands skill without aid. Cue bonuses are disabled for 10 shots.",
+		"failure_condition": "No failure condition. The oath completes when the shot counter expires.",
+		"duration_shots": 10,
+		"effects": {
+			"cue_modifiers_suppressed": true,
+		},
+		"visible": true,
+		"functional": true,
 	},
 }
 
@@ -74,6 +78,7 @@ var failed_oaths_count := 0
 var activated_oaths_count := 0
 var last_status_text := ""
 var last_penalty_text := ""
+var cue_modifier_snapshot: Dictionary = {}
 
 
 func setup(table_ref: BilliardsTable) -> void:
@@ -130,10 +135,34 @@ func debug_activate_oath(oath_id: String) -> bool:
 
 
 func debug_fail_oath(oath_id: String) -> bool:
-	if not active_oaths.has(oath_id):
+	var target_oath_id := _get_debug_target_active_oath_id(oath_id)
+	if target_oath_id.is_empty():
 		return false
-	_fail_active_oath(oath_id, "Debug failure")
+	_fail_active_oath(target_oath_id, "Debug failure")
 	return true
+
+
+func debug_complete_oath(oath_id: String = "") -> bool:
+	var target_oath_id := _get_debug_target_active_oath_id(oath_id)
+	if target_oath_id.is_empty():
+		return false
+	_complete_active_oath(target_oath_id, "Debug completion")
+	return true
+
+
+func debug_advance_oath_shot() -> bool:
+	if active_oaths.is_empty():
+		return false
+
+	var advanced_any := false
+	var oath_ids := active_oaths.keys().duplicate()
+	for oath_id_value in oath_ids:
+		var oath_id := str(oath_id_value)
+		if not active_oaths.has(oath_id):
+			continue
+		_advance_oath_on_shot(oath_id)
+		advanced_any = true
+	return advanced_any
 
 
 func debug_clear_oaths() -> void:
@@ -141,6 +170,38 @@ func debug_clear_oaths() -> void:
 	last_status_text = "Oaths cleared."
 	status_changed.emit(last_status_text)
 	_emit_oaths_changed()
+
+
+func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
+	var next_snapshot := snapshot.duplicate(true)
+	if cue_modifier_snapshot == next_snapshot:
+		return
+	cue_modifier_snapshot = next_snapshot
+	_emit_oaths_changed()
+
+
+func are_cue_modifiers_suppressed() -> bool:
+	return active_oaths.has(OATH_OF_HUMILITY)
+
+
+func get_cue_modifier_suppression_snapshot() -> Dictionary:
+	if not are_cue_modifiers_suppressed():
+		return {
+			"suppressed": false,
+			"label": "",
+			"remaining_text": "",
+			"reason": "",
+		}
+
+	var state: Dictionary = active_oaths.get(OATH_OF_HUMILITY, {})
+	var oath_snapshot := _make_oath_state_snapshot(state)
+	return {
+		"suppressed": true,
+		"oath_id": OATH_OF_HUMILITY,
+		"label": str(oath_snapshot.get("label", "Oath of Humility")),
+		"remaining_text": str(oath_snapshot.get("remaining_text", "")),
+		"reason": "Cue bonuses are silenced by Oath of Humility.",
+	}
 
 
 func get_quartermaster_access_blocker() -> String:
@@ -159,6 +220,8 @@ func is_quartermaster_locked() -> bool:
 
 func get_oath_snapshot() -> Dictionary:
 	var active_snapshots := _get_active_oath_snapshots()
+	var penalty_modifier_snapshot := get_oath_passage_penalty_modifier_snapshot()
+	var cue_suppression_snapshot := get_cue_modifier_suppression_snapshot()
 	return {
 		"available_oaths": get_available_oath_definitions(false),
 		"active_oaths": active_snapshots,
@@ -166,11 +229,31 @@ func get_oath_snapshot() -> Dictionary:
 		"active_oaths_summary": _format_active_oaths_summary(active_snapshots),
 		"quartermaster_locked": is_quartermaster_locked(),
 		"quartermaster_blocker": get_quartermaster_access_blocker(),
+		"cue_modifiers_suppressed": bool(cue_suppression_snapshot.get("suppressed", false)),
+		"cue_modifier_suppression": cue_suppression_snapshot,
 		"completed_oaths_count": completed_oaths_count,
 		"failed_oaths_count": failed_oaths_count,
 		"activated_oaths_count": activated_oaths_count,
+		"oath_passage_penalty_reduction_flat": int(penalty_modifier_snapshot.get("reduction_flat", 0)),
+		"oath_passage_penalty_reduction_summary": str(penalty_modifier_snapshot.get("summary", "0")),
+		"active_cue_modifiers_summary": str(penalty_modifier_snapshot.get("active_cue_modifiers_summary", "None")),
 		"last_status_text": last_status_text,
 		"last_penalty_text": last_penalty_text,
+	}
+
+
+func get_oath_passage_penalty_modifier_snapshot() -> Dictionary:
+	var reduction := _get_oath_passage_penalty_reduction_flat()
+	if not bool(cue_modifier_snapshot.get("modifiers_enabled", true)):
+		return {
+			"reduction_flat": reduction,
+			"summary": "disabled",
+			"active_cue_modifiers_summary": _get_active_cue_modifier_summary(),
+		}
+	return {
+		"reduction_flat": reduction,
+		"summary": str(reduction),
+		"active_cue_modifiers_summary": _get_active_cue_modifier_summary(),
 	}
 
 
@@ -246,6 +329,14 @@ func _advance_oath_on_shot(oath_id: String) -> void:
 				_complete_active_oath(oath_id, "Shot counter expired")
 			else:
 				_emit_oaths_changed()
+		OATH_OF_HUMILITY:
+			var humility_remaining := maxi(int(state.get("shots_remaining", 0)), 0)
+			state["shots_remaining"] = maxi(humility_remaining - 1, 0)
+			active_oaths[oath_id] = state
+			if int(state["shots_remaining"]) <= 0:
+				_complete_active_oath(oath_id, "Shot counter expired")
+			else:
+				_emit_oaths_changed()
 		_:
 			active_oaths[oath_id] = state
 			_emit_oaths_changed()
@@ -303,8 +394,10 @@ func _apply_oath_penalty(state: Dictionary) -> String:
 	match penalty_type:
 		PENALTY_PASSAGE:
 			if table != null and table.passage_system != null and table.passage_system.has_method("add_passage_pressure"):
-				table.passage_system.add_passage_pressure(amount)
-				return "Passage +%s." % amount
+				var passage_amount := _get_effective_passage_penalty_amount(amount)
+				if passage_amount > 0:
+					table.passage_system.add_passage_pressure(passage_amount)
+				return "Passage +%s." % passage_amount
 			return "Passage penalty unavailable."
 		PENALTY_REMOVE_BALLS:
 			if table != null and table.has_method("remove_oath_penalty_object_balls"):
@@ -386,10 +479,33 @@ func _format_oath_penalty_text(definition: Dictionary) -> String:
 
 	match penalty_type:
 		PENALTY_PASSAGE:
-			return "+%s Passage" % amount
+			return "+%s Passage" % _get_effective_passage_penalty_amount(amount)
 		PENALTY_REMOVE_BALLS:
 			return "Lose %s eligible balls" % amount
 	return "Unknown penalty"
+
+
+func _get_effective_passage_penalty_amount(base_amount: int) -> int:
+	return maxi(maxi(base_amount, 0) - _get_oath_passage_penalty_reduction_flat(), 0)
+
+
+func _get_oath_passage_penalty_reduction_flat() -> int:
+	return maxi(roundi(_get_cue_modifier_value(CUE_MODIFIER_OATH_PASSAGE_PENALTY_REDUCTION_FLAT, 0.0)), 0)
+
+
+func _get_cue_modifier_value(modifier_key: String, fallback: float = 0.0) -> float:
+	if not bool(cue_modifier_snapshot.get("modifiers_enabled", true)):
+		return fallback
+	var modifiers_value: Variant = cue_modifier_snapshot.get("modifiers", {})
+	if not modifiers_value is Dictionary:
+		return fallback
+	var modifiers: Dictionary = modifiers_value as Dictionary
+	return float(modifiers.get(modifier_key, fallback))
+
+
+func _get_active_cue_modifier_summary() -> String:
+	var summary := str(cue_modifier_snapshot.get("active_effect_summary", "None"))
+	return "None" if summary.is_empty() else summary
 
 
 func _get_oath_definition(oath_id: String) -> Dictionary:
@@ -406,6 +522,17 @@ func _get_oath_activation_blocker(oath_id: String, allow_hidden: bool = false) -
 		return "%s already active" % str(definition.get("label", "Oath"))
 	if not allow_hidden and not bool(definition.get("visible", true)):
 		return "%s is not available yet" % str(definition.get("label", "Oath"))
+	return ""
+
+
+func _get_debug_target_active_oath_id(preferred_oath_id: String = "") -> String:
+	var preferred := str(preferred_oath_id)
+	if not preferred.is_empty() and active_oaths.has(preferred):
+		return preferred
+	for oath_id_value in active_oaths.keys():
+		var oath_id := str(oath_id_value)
+		if active_oaths.has(oath_id):
+			return oath_id
 	return ""
 
 

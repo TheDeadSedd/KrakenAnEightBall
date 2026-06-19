@@ -22,6 +22,27 @@ const CUE_RECOIL_PULLBACK_RATIO := 0.34
 const CUE_GRAB_BACK_PADDING_X := 34.0
 const CUE_GRAB_FRONT_PADDING_X := 10.0
 const CUE_GRAB_PADDING_Y := 28.0
+const DEFAULT_CUE_MODULATE := Color(1.0, 1.0, 1.0, 1.0)
+const BLACKWOOD_CUE_MODULATE := Color(0.56, 0.42, 0.30, 1.0)
+const BRASS_TIP_COLOR := Color(1.0, 0.74, 0.28, 0.84)
+const WAYFINDER_WRAP_COLOR := Color(0.16, 0.86, 0.82, 0.62)
+const BONE_FERRULE_COLOR := Color(0.92, 0.86, 0.70, 0.78)
+const LUCKY_CHALK_COLOR := Color(1.0, 0.92, 0.36, 0.86)
+const SLOT_BODY := "body"
+const SLOT_TIP := "tip"
+const SLOT_GRIP := "grip"
+const SLOT_FERRULE := "ferrule"
+const SLOT_CHALK := "chalk"
+const PART_WEATHERED_BODY := "weathered_cue_body"
+const PART_BLACKWOOD_BODY := "blackwood_cue"
+const PART_PLAIN_TIP := "plain_tip"
+const PART_BRASS_TIP := "brass_tip"
+const PART_SAILCLOTH_GRIP := "sailcloth_grip"
+const PART_WAYFINDER_WRAP := "wayfinder_wrap"
+const PART_PLAIN_FERRULE := "plain_ferrule"
+const PART_BONE_FERRULE := "bone_ferrule"
+const PART_PLAIN_CHALK := "plain_chalk"
+const PART_LUCKY_CHALK := "lucky_chalk"
 
 @onready var cue_sprite: Sprite2D = $CueSprite
 
@@ -31,6 +52,12 @@ var release_start_pullback := 0.0
 var release_power_ratio := 0.0
 var release_position := Vector2.ZERO
 var release_rotation := 0.0
+var cue_loadout_snapshot: Dictionary = {}
+var equipped_cue_part_ids: Dictionary = {}
+var tip_accent_polygon: Polygon2D
+var grip_accent_polygon: Polygon2D
+var ferrule_accent_polygon: Polygon2D
+var chalk_glint_polygon: Polygon2D
 
 
 func setup() -> void:
@@ -41,6 +68,10 @@ func setup() -> void:
 	var cue_scale: float = CUE_SPRITE_LENGTH / CUE_TEXTURE_REGION.size.x
 	cue_sprite.scale = Vector2.ONE * cue_scale
 	cue_sprite.z_index = 12
+	_cache_equipped_cue_part_ids()
+	if not Engine.is_editor_hint():
+		_ensure_cue_accent_nodes()
+	_apply_cue_loadout_visuals()
 
 
 func update_cue(
@@ -100,6 +131,13 @@ func stop_recoil() -> void:
 
 func get_rotation_angle() -> float:
 	return rotation
+
+
+func set_cue_loadout_snapshot(snapshot: Dictionary) -> void:
+	cue_loadout_snapshot = snapshot.duplicate(true)
+	_cache_equipped_cue_part_ids()
+	_ensure_cue_accent_nodes()
+	_apply_cue_loadout_visuals()
 
 
 func _update_cue_transform(
@@ -213,3 +251,125 @@ func _position_cue_sprite(pullback: float) -> void:
 		-(CUE_GAP + pullback + cue_length),
 		-cue_width * 0.5
 	)
+	_update_cue_accent_geometry(cue_length, cue_width)
+
+
+func _cache_equipped_cue_part_ids() -> void:
+	equipped_cue_part_ids = {
+		SLOT_BODY: PART_WEATHERED_BODY,
+		SLOT_TIP: PART_PLAIN_TIP,
+		SLOT_GRIP: PART_SAILCLOTH_GRIP,
+		SLOT_FERRULE: PART_PLAIN_FERRULE,
+		SLOT_CHALK: PART_PLAIN_CHALK,
+	}
+
+	var by_slot_value: Variant = cue_loadout_snapshot.get("equipped_loadout_by_slot", {})
+	if by_slot_value is Dictionary:
+		var by_slot: Dictionary = by_slot_value as Dictionary
+		for slot_type_value in by_slot.keys():
+			var slot_type := str(slot_type_value)
+			var entry_value: Variant = by_slot.get(slot_type_value, {})
+			if not entry_value is Dictionary:
+				continue
+			var entry: Dictionary = entry_value as Dictionary
+			var part_id := str(entry.get("part_id", ""))
+			if not part_id.is_empty():
+				equipped_cue_part_ids[slot_type] = part_id
+		return
+
+	var loadout_value: Variant = cue_loadout_snapshot.get("equipped_loadout", [])
+	if not loadout_value is Array:
+		return
+	for entry_value in loadout_value:
+		if not entry_value is Dictionary:
+			continue
+		var entry: Dictionary = entry_value as Dictionary
+		var slot_type := str(entry.get("slot_type", ""))
+		var part_id := str(entry.get("part_id", ""))
+		if slot_type.is_empty() or part_id.is_empty():
+			continue
+		equipped_cue_part_ids[slot_type] = part_id
+
+
+func _ensure_cue_accent_nodes() -> void:
+	if tip_accent_polygon == null:
+		tip_accent_polygon = _make_cue_accent_polygon("TipAccent", BRASS_TIP_COLOR)
+	if grip_accent_polygon == null:
+		grip_accent_polygon = _make_cue_accent_polygon("GripAccent", WAYFINDER_WRAP_COLOR)
+	if ferrule_accent_polygon == null:
+		ferrule_accent_polygon = _make_cue_accent_polygon("FerruleAccent", BONE_FERRULE_COLOR)
+	if chalk_glint_polygon == null:
+		chalk_glint_polygon = _make_cue_accent_polygon("ChalkGlint", LUCKY_CHALK_COLOR)
+
+
+func _make_cue_accent_polygon(node_name: String, accent_color: Color) -> Polygon2D:
+	var polygon_node := Polygon2D.new()
+	polygon_node.name = node_name
+	polygon_node.color = accent_color
+	polygon_node.z_index = 13
+	polygon_node.visible = false
+	add_child(polygon_node)
+	return polygon_node
+
+
+func _apply_cue_loadout_visuals() -> void:
+	if cue_sprite != null:
+		var body_id := _get_equipped_cue_part_id(SLOT_BODY, PART_WEATHERED_BODY)
+		cue_sprite.modulate = BLACKWOOD_CUE_MODULATE if body_id == PART_BLACKWOOD_BODY else DEFAULT_CUE_MODULATE
+
+	if tip_accent_polygon != null:
+		tip_accent_polygon.visible = _get_equipped_cue_part_id(SLOT_TIP, PART_PLAIN_TIP) == PART_BRASS_TIP
+	if grip_accent_polygon != null:
+		grip_accent_polygon.visible = _get_equipped_cue_part_id(SLOT_GRIP, PART_SAILCLOTH_GRIP) == PART_WAYFINDER_WRAP
+	if ferrule_accent_polygon != null:
+		ferrule_accent_polygon.visible = _get_equipped_cue_part_id(SLOT_FERRULE, PART_PLAIN_FERRULE) == PART_BONE_FERRULE
+	if chalk_glint_polygon != null:
+		chalk_glint_polygon.visible = _get_equipped_cue_part_id(SLOT_CHALK, PART_PLAIN_CHALK) == PART_LUCKY_CHALK
+
+	_update_cue_accent_geometry()
+
+
+func _get_equipped_cue_part_id(slot_type: String, fallback: String) -> String:
+	return str(equipped_cue_part_ids.get(slot_type, fallback))
+
+
+func _update_cue_accent_geometry(cue_length: float = -1.0, cue_width: float = -1.0) -> void:
+	if cue_sprite == null:
+		return
+	if tip_accent_polygon == null or grip_accent_polygon == null or ferrule_accent_polygon == null or chalk_glint_polygon == null:
+		return
+	if cue_length <= 0.0 or cue_width <= 0.0:
+		var cue_scale: float = cue_sprite.scale.x
+		cue_width = CUE_TEXTURE_REGION.size.y * cue_scale
+		cue_length = CUE_TEXTURE_REGION.size.x * cue_scale
+
+	var left_x := cue_sprite.position.x
+	var right_x := cue_sprite.position.x + cue_length
+	var top_y := cue_sprite.position.y
+	var center_y := top_y + cue_width * 0.5
+	var core_top := center_y - cue_width * 0.18
+	var core_height := cue_width * 0.36
+
+	_set_rect_polygon(tip_accent_polygon, Rect2(right_x - 8.0, core_top, 5.0, core_height))
+	_set_rect_polygon(ferrule_accent_polygon, Rect2(right_x - 21.0, core_top - 2.0, 9.0, core_height + 4.0))
+	_set_rect_polygon(grip_accent_polygon, Rect2(left_x + cue_length * 0.34, top_y + cue_width * 0.24, 42.0, cue_width * 0.52))
+
+	var glint_center := Vector2(right_x - 16.0, center_y - cue_width * 0.24)
+	var glint_radius := 5.0
+	chalk_glint_polygon.polygon = PackedVector2Array([
+		glint_center + Vector2(0.0, -glint_radius),
+		glint_center + Vector2(glint_radius, 0.0),
+		glint_center + Vector2(0.0, glint_radius),
+		glint_center + Vector2(-glint_radius, 0.0),
+	])
+
+
+func _set_rect_polygon(polygon_node: Polygon2D, rect: Rect2) -> void:
+	if polygon_node == null:
+		return
+	polygon_node.polygon = PackedVector2Array([
+		rect.position,
+		rect.position + Vector2(rect.size.x, 0.0),
+		rect.position + rect.size,
+		rect.position + Vector2(0.0, rect.size.y),
+	])

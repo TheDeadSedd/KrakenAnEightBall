@@ -12,6 +12,11 @@ signal debug_spawn_wood_debris_requested
 signal debug_clear_debris_requested
 signal debug_obstacle_collision_toggled(enabled: bool)
 signal debug_obstacle_collision_draw_toggled(enabled: bool)
+signal debug_oath_activate_requested(oath_id: String)
+signal debug_oath_clear_requested
+signal debug_oath_advance_shot_requested
+signal debug_oath_fail_requested(oath_id: String)
+signal debug_oath_complete_requested(oath_id: String)
 signal quartermaster_cancel_placement_requested
 
 const PANEL_CORE_PERFORMANCE := "core_performance"
@@ -34,6 +39,13 @@ const EVENT_TEST_SPAWN_WOOD_DEBRIS_TEXT := "Spawn Wood Debris"
 const EVENT_TEST_CLEAR_DEBRIS_TEXT := "Clear Debris"
 const EVENT_TEST_OBSTACLE_COLLISION_TEXT := "Enable Debris Collision"
 const EVENT_TEST_OBSTACLE_COLLISION_DRAW_TEXT := "Show Debris Collision Shape"
+const OATH_TEST_SECTION_TITLE := "Oath Testing"
+const OATH_TESTING_SELECTOR_ITEMS := [
+	{"label": "Oath of Urgency", "oath_id": OathSystem.OATH_OF_URGENCY},
+	{"label": "Oath of Isolation", "oath_id": OathSystem.OATH_OF_ISOLATION},
+	{"label": "Oath of Sacrifice", "oath_id": OathSystem.OATH_OF_SACRIFICE},
+	{"label": "Oath of Humility", "oath_id": OathSystem.OATH_OF_HUMILITY},
+]
 const DEV_OPTIONS_TITLE_TEXT := "Dev Options"
 const RUN_STATS_TITLE_TEXT := "Run Stats"
 const RUN_STATS_SUBTITLE_TEXT := "Current Run Ledger"
@@ -48,13 +60,24 @@ const DEBUG_CONTRABAND_SELECTOR_ITEMS := [
 ]
 const OPTIONS_MENU_SCRIPT := preload("res://scripts/OptionsMenu.gd")
 const CONFIRM_PANEL_SIZE := Vector2(430.0, 220.0)
-const RUN_STATS_PANEL_SIZE := Vector2(590.0, 860.0)
+const RUN_STATS_PANEL_SIZE := Vector2(590.0, 1080.0)
 const RUN_STATS_ROWS := [
 	{"label": "Doubloons Earned", "key": "doubloons_earned"},
 	{"label": "Doubloons Lost", "key": "doubloons_lost"},
 	{"label": "Passage Remaining", "key": "remaining_passage"},
 	{"label": "Kraken Wants", "key": "current_kraken_request"},
+	{"label": "Request Reward Bonus", "key": "request_reward_multiplier_bonus_summary"},
 	{"label": "Active Oaths", "key": "active_oaths_summary"},
+	{"label": "Oath Penalty Cut", "key": "oath_passage_penalty_reduction_summary"},
+	{"label": "Cue", "key": "cue_body"},
+	{"label": "Tip", "key": "cue_tip"},
+	{"label": "Grip", "key": "cue_grip"},
+	{"label": "Ferrule", "key": "cue_ferrule"},
+	{"label": "Chalk", "key": "cue_chalk"},
+	{"label": "Cue Mods", "key": "active_cue_modifiers_summary"},
+	{"label": "Cue Power Bonus", "key": "cue_power_bonus_summary"},
+	{"label": "Loose Contraband", "key": "loose_cargo_contraband_chance_summary"},
+	{"label": "QM Shot Cooldown", "key": "quartermaster_refresh_decay_summary"},
 	{"label": "Shots Taken", "key": "shots_taken"},
 	{"label": "Balls Sunk", "key": "balls_sunk"},
 	{"label": "Highest Pocket Streak", "key": "highest_pocket_streak"},
@@ -103,6 +126,14 @@ var spawn_wood_debris_button: Button
 var clear_debris_button: Button
 var obstacle_collision_check_box: CheckBox
 var obstacle_collision_debug_check_box: CheckBox
+var oath_testing_section_label: Label
+var oath_testing_selector: OptionButton
+var oath_activate_button: Button
+var oath_clear_button: Button
+var oath_advance_shot_button: Button
+var oath_fail_button: Button
+var oath_complete_button: Button
+var oath_testing_readout_label: Label
 var run_stats_button: Button
 var run_stats_panel: PanelContainer
 var run_stats_back_button: Button
@@ -111,6 +142,8 @@ var latest_run_stats_snapshot: Dictionary = {}
 var run_stats_purchase_history_label: Label
 var dev_options_button: Button
 var dev_options_title_label: Label
+var dev_options_scroll_container: ScrollContainer
+var dev_options_scroll_content: VBoxContainer
 var dev_options_back_button: Button
 var options_button: Button
 var options_panel: OptionsMenu
@@ -137,6 +170,7 @@ func _ready() -> void:
 	_ensure_dev_options_controls()
 	_ensure_end_run_controls()
 	_ensure_event_test_controls()
+	_ensure_oath_testing_controls()
 	_connect_debug_panel_toggles()
 	_show_pause_panel()
 
@@ -175,6 +209,16 @@ func _connect_debug_panel_toggles() -> void:
 		obstacle_collision_check_box.toggled.connect(_on_obstacle_collision_toggled)
 	if not obstacle_collision_debug_check_box.toggled.is_connected(_on_obstacle_collision_draw_toggled):
 		obstacle_collision_debug_check_box.toggled.connect(_on_obstacle_collision_draw_toggled)
+	if not oath_activate_button.pressed.is_connected(_on_oath_activate_pressed):
+		oath_activate_button.pressed.connect(_on_oath_activate_pressed)
+	if not oath_clear_button.pressed.is_connected(_on_oath_clear_pressed):
+		oath_clear_button.pressed.connect(_on_oath_clear_pressed)
+	if not oath_advance_shot_button.pressed.is_connected(_on_oath_advance_shot_pressed):
+		oath_advance_shot_button.pressed.connect(_on_oath_advance_shot_pressed)
+	if not oath_fail_button.pressed.is_connected(_on_oath_fail_pressed):
+		oath_fail_button.pressed.connect(_on_oath_fail_pressed)
+	if not oath_complete_button.pressed.is_connected(_on_oath_complete_pressed):
+		oath_complete_button.pressed.connect(_on_oath_complete_pressed)
 	if not core_performance_check_box.toggled.is_connected(_on_core_performance_panel_toggled):
 		core_performance_check_box.toggled.connect(_on_core_performance_panel_toggled)
 	if not aim_preview_check_box.toggled.is_connected(_on_aim_preview_panel_toggled):
@@ -246,6 +290,20 @@ func set_debug_panel_states(panel_states: Dictionary) -> void:
 func set_run_stats_snapshot(snapshot: Dictionary) -> void:
 	latest_run_stats_snapshot = snapshot.duplicate(true)
 	_update_run_stats_values()
+
+
+func set_oath_debug_snapshot(oath_snapshot: Dictionary, cue_modifier_snapshot: Dictionary = {}) -> void:
+	if oath_testing_readout_label == null:
+		return
+
+	var active_summary := str(oath_snapshot.get("active_oaths_summary", "None sworn."))
+	var suppressed := bool(oath_snapshot.get("cue_modifiers_suppressed", false))
+	var modifiers_enabled := bool(cue_modifier_snapshot.get("modifiers_enabled", true))
+	oath_testing_readout_label.text = "Active: %s\nCue suppressed: %s\nFinal modifiers enabled: %s" % [
+		active_summary,
+		"true" if suppressed else "false",
+		"true" if modifiers_enabled else "false",
+	]
 
 
 func set_debris_collision_debug_state(enabled: bool) -> void:
@@ -394,6 +452,7 @@ func _make_run_stats_value_label() -> Label:
 
 
 func _ensure_dev_options_controls() -> void:
+	debug_section.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	if dev_options_button == null:
 		dev_options_button = _make_pause_button("Dev Options", "DevOptionsButton")
 		menu_stack.add_child(dev_options_button)
@@ -412,13 +471,32 @@ func _ensure_dev_options_controls() -> void:
 		debug_section.add_child(dev_options_title_label)
 		debug_section.move_child(dev_options_title_label, 0)
 
+	if dev_options_scroll_container == null:
+		dev_options_scroll_container = ScrollContainer.new()
+		dev_options_scroll_container.name = "DevOptionsScroll"
+		dev_options_scroll_container.custom_minimum_size = Vector2(0.0, 500.0)
+		dev_options_scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		dev_options_scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		dev_options_scroll_container.mouse_filter = Control.MOUSE_FILTER_STOP
+		debug_section.add_child(dev_options_scroll_container)
+		debug_section.move_child(dev_options_scroll_container, 1)
+
+	if dev_options_scroll_content == null:
+		dev_options_scroll_content = VBoxContainer.new()
+		dev_options_scroll_content.name = "DevOptionsScrollContent"
+		dev_options_scroll_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		dev_options_scroll_content.add_theme_constant_override("separation", 8)
+		dev_options_scroll_container.add_child(dev_options_scroll_content)
+
+	_move_dev_options_controls_into_scroll()
+
 	if dev_options_back_button == null:
 		dev_options_back_button = _make_pause_button("Back", "DevOptionsBackButton")
 		dev_options_back_button.custom_minimum_size = Vector2(0.0, 42.0)
 		dev_options_back_button.add_theme_font_size_override("font_size", 18)
 		debug_section.add_child(dev_options_back_button)
-		debug_section.move_child(dev_options_back_button, 1)
 		dev_options_back_button.pressed.connect(_on_dev_options_back_pressed)
+	debug_section.move_child(dev_options_back_button, min(2, debug_section.get_child_count() - 1))
 
 
 func _ensure_end_run_controls() -> void:
@@ -541,6 +619,70 @@ func _ensure_event_test_controls() -> void:
 		obstacle_collision_debug_check_box.set_pressed_no_signal(false)
 		debug_section.add_child(obstacle_collision_debug_check_box)
 		debug_section.move_child(obstacle_collision_debug_check_box, 10)
+	_move_dev_options_controls_into_scroll()
+
+
+func _ensure_oath_testing_controls() -> void:
+	if oath_testing_section_label == null:
+		oath_testing_section_label = Label.new()
+		oath_testing_section_label.text = OATH_TEST_SECTION_TITLE
+		_apply_debug_section_label_style(oath_testing_section_label)
+		debug_section.add_child(oath_testing_section_label)
+
+	if oath_testing_selector == null:
+		oath_testing_selector = _make_oath_testing_selector()
+		debug_section.add_child(oath_testing_selector)
+
+	if oath_activate_button == null:
+		oath_activate_button = _make_event_test_button("Activate Selected Oath", "ActivateSelectedOathButton")
+		debug_section.add_child(oath_activate_button)
+
+	if oath_advance_shot_button == null:
+		oath_advance_shot_button = _make_event_test_button("Advance Oath Shot", "AdvanceOathShotButton")
+		oath_advance_shot_button.tooltip_text = "Debug-only: decrements Oath timers without taking a gameplay shot."
+		debug_section.add_child(oath_advance_shot_button)
+
+	if oath_fail_button == null:
+		oath_fail_button = _make_event_test_button("Fail Active Oath", "FailActiveOathButton")
+		debug_section.add_child(oath_fail_button)
+
+	if oath_complete_button == null:
+		oath_complete_button = _make_event_test_button("Complete Active Oath", "CompleteActiveOathButton")
+		debug_section.add_child(oath_complete_button)
+
+	if oath_clear_button == null:
+		oath_clear_button = _make_event_test_button("Clear Active Oaths", "ClearActiveOathsButton")
+		debug_section.add_child(oath_clear_button)
+
+	if oath_testing_readout_label == null:
+		oath_testing_readout_label = Label.new()
+		oath_testing_readout_label.name = "OathTestingReadout"
+		oath_testing_readout_label.custom_minimum_size = Vector2(260.0, 72.0)
+		oath_testing_readout_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		oath_testing_readout_label.add_theme_color_override("font_color", Color(0.78, 0.88, 0.84, 0.96))
+		oath_testing_readout_label.add_theme_color_override("font_outline_color", Color(0.02, 0.03, 0.03, 0.82))
+		oath_testing_readout_label.add_theme_constant_override("outline_size", 1)
+		oath_testing_readout_label.add_theme_font_override("font", core_performance_check_box.get_theme_font("font"))
+		oath_testing_readout_label.add_theme_font_size_override("font_size", 13)
+		debug_section.add_child(oath_testing_readout_label)
+		set_oath_debug_snapshot({})
+	_move_dev_options_controls_into_scroll()
+
+
+func _move_dev_options_controls_into_scroll() -> void:
+	if dev_options_scroll_content == null or dev_options_scroll_container == null:
+		return
+
+	var children := debug_section.get_children().duplicate()
+	for child in children:
+		if child == dev_options_title_label:
+			continue
+		if child == dev_options_scroll_container:
+			continue
+		if child == dev_options_back_button:
+			continue
+		debug_section.remove_child(child)
+		dev_options_scroll_content.add_child(child)
 
 
 func _make_event_test_check_box(text: String) -> CheckBox:
@@ -567,6 +709,20 @@ func _make_loose_cargo_contraband_selector() -> OptionButton:
 	return selector
 
 
+func _make_oath_testing_selector() -> OptionButton:
+	var selector := OptionButton.new()
+	selector.name = "OathTestingSelector"
+	selector.mouse_filter = Control.MOUSE_FILTER_STOP
+	selector.focus_mode = Control.FOCUS_ALL
+	selector.custom_minimum_size = Vector2(260.0, 34.0)
+	selector.tooltip_text = "Debug-only Oath selection."
+	selector.add_theme_color_override("font_color", Color(0.9, 0.95, 0.97, 1.0))
+	selector.add_theme_font_override("font", core_performance_check_box.get_theme_font("font"))
+	selector.add_theme_font_size_override("font_size", 14)
+	_populate_oath_testing_selector(selector)
+	return selector
+
+
 func _make_event_test_button(text: String, button_name: String) -> Button:
 	var button := Button.new()
 	button.name = button_name
@@ -590,6 +746,16 @@ func _populate_loose_cargo_contraband_selector(selector: OptionButton) -> void:
 	selector.select(0)
 
 
+func _populate_oath_testing_selector(selector: OptionButton) -> void:
+	selector.clear()
+	for item_value in OATH_TESTING_SELECTOR_ITEMS:
+		var item: Dictionary = item_value
+		var item_index := selector.get_item_count()
+		selector.add_item(str(item.get("label", "Oath")))
+		selector.set_item_metadata(item_index, str(item.get("oath_id", "")))
+	selector.select(0)
+
+
 func _get_selected_loose_cargo_contraband_kind() -> String:
 	if loose_cargo_contraband_selector == null:
 		return DEBUG_CONTRABAND_KIND_RANDOM
@@ -597,6 +763,15 @@ func _get_selected_loose_cargo_contraband_kind() -> String:
 	if selected_index < 0 or selected_index >= loose_cargo_contraband_selector.get_item_count():
 		return DEBUG_CONTRABAND_KIND_RANDOM
 	return str(loose_cargo_contraband_selector.get_item_metadata(selected_index))
+
+
+func _get_selected_debug_oath_id() -> String:
+	if oath_testing_selector == null:
+		return OathSystem.OATH_OF_URGENCY
+	var selected_index := oath_testing_selector.selected
+	if selected_index < 0 or selected_index >= oath_testing_selector.get_item_count():
+		return OathSystem.OATH_OF_URGENCY
+	return str(oath_testing_selector.get_item_metadata(selected_index))
 
 
 func _apply_debug_section_label_style(label: Label) -> void:
@@ -750,6 +925,12 @@ func _format_run_stats_value(stat_key: String, value: Variant) -> String:
 		"active_oaths_summary":
 			var oath_text := str(value)
 			return "None sworn." if oath_text.is_empty() else oath_text
+		"cue_body", "cue_tip", "cue_grip", "cue_ferrule", "cue_chalk":
+			var cue_text := str(value)
+			return "Unknown" if cue_text.is_empty() else cue_text
+		"active_cue_modifiers_summary", "cue_power_bonus_summary", "loose_cargo_contraband_chance_summary", "quartermaster_refresh_decay_summary", "oath_passage_penalty_reduction_summary", "request_reward_multiplier_bonus_summary":
+			var modifier_text := str(value)
+			return "None" if modifier_text.is_empty() else modifier_text
 	return str(maxi(int(value), 0))
 
 
@@ -897,6 +1078,26 @@ func _on_obstacle_collision_toggled(enabled: bool) -> void:
 
 func _on_obstacle_collision_draw_toggled(enabled: bool) -> void:
 	debug_obstacle_collision_draw_toggled.emit(enabled)
+
+
+func _on_oath_activate_pressed() -> void:
+	debug_oath_activate_requested.emit(_get_selected_debug_oath_id())
+
+
+func _on_oath_clear_pressed() -> void:
+	debug_oath_clear_requested.emit()
+
+
+func _on_oath_advance_shot_pressed() -> void:
+	debug_oath_advance_shot_requested.emit()
+
+
+func _on_oath_fail_pressed() -> void:
+	debug_oath_fail_requested.emit(_get_selected_debug_oath_id())
+
+
+func _on_oath_complete_pressed() -> void:
+	debug_oath_complete_requested.emit(_get_selected_debug_oath_id())
 
 
 func _on_core_performance_panel_toggled(enabled: bool) -> void:

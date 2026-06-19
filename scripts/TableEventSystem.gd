@@ -51,6 +51,7 @@ const LOOSE_CARGO_CONTRABAND_FALLBACK_KINDS := [
 	SpawnSystem.CARGO_REPLACEMENT_TREASURE,
 	SpawnSystem.CARGO_REPLACEMENT_WAYFINDER,
 ]
+const CUE_MODIFIER_LOOSE_CARGO_CONTRABAND_CHANCE_BONUS := "loose_cargo_contraband_chance_bonus"
 const DEBUG_LOOSE_CARGO_CONTRABAND_RANDOM := "random"
 const DEBUG_LOOSE_CARGO_CONTRABAND_KINDS := [
 	DEBUG_LOOSE_CARGO_CONTRABAND_RANDOM,
@@ -204,6 +205,7 @@ var last_loose_cargo_contraband_replacement_index := -1
 var last_loose_cargo_contraband_replacement_kind := ""
 var debug_force_loose_cargo_contraband := false
 var debug_loose_cargo_contraband_kind := DEBUG_LOOSE_CARGO_CONTRABAND_RANDOM
+var cue_modifier_snapshot: Dictionary = {}
 
 
 func setup(table_ref) -> void:
@@ -323,6 +325,11 @@ func set_debug_loose_cargo_contraband_kind(kind: String) -> void:
 	_emit_state()
 
 
+func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
+	cue_modifier_snapshot = snapshot.duplicate(true)
+	_emit_state()
+
+
 func request_purchase_offer(offer_index: int) -> bool:
 	var blocker: String = _get_offer_purchase_blocker(offer_index)
 	if not blocker.is_empty():
@@ -415,7 +422,20 @@ func get_event_display_name(event_id: String) -> String:
 	return _get_event_name(event_id)
 
 
+func get_loose_cargo_contraband_chance_snapshot() -> Dictionary:
+	var base_chance := _get_base_loose_cargo_contraband_chance()
+	var cue_bonus := _get_loose_cargo_contraband_cue_bonus()
+	var final_chance := _get_effective_loose_cargo_contraband_chance()
+	return {
+		"base_chance": base_chance,
+		"cue_bonus": cue_bonus,
+		"final_chance": final_chance,
+		"active_cue_modifiers_summary": _get_active_cue_modifier_summary(),
+	}
+
+
 func get_debug_snapshot() -> Dictionary:
+	var contraband_chance_snapshot := get_loose_cargo_contraband_chance_snapshot()
 	return {
 		"enabled": enabled,
 		"automatic_ball_drops_gated": should_disable_automatic_ball_drops(),
@@ -446,6 +466,10 @@ func get_debug_snapshot() -> Dictionary:
 		"loose_cargo_cost": loose_cargo_cost,
 		"loose_cargo_ball_count": loose_cargo_ball_count,
 		"loose_cargo_contraband_chance": loose_cargo_contraband_chance,
+		"loose_cargo_contraband_base_chance": float(contraband_chance_snapshot.get("base_chance", 0.0)),
+		"loose_cargo_contraband_cue_bonus": float(contraband_chance_snapshot.get("cue_bonus", 0.0)),
+		"loose_cargo_contraband_final_chance": float(contraband_chance_snapshot.get("final_chance", 0.0)),
+		"active_cue_modifiers_summary": str(contraband_chance_snapshot.get("active_cue_modifiers_summary", "None")),
 		"loose_cargo_treasure_chance": loose_cargo_treasure_chance,
 		"cargo_treasure_stowaways_found": cargo_treasure_stowaways_found,
 		"last_cargo_treasure_event_id": last_cargo_treasure_event_id,
@@ -575,7 +599,7 @@ func _queue_loose_cargo_event() -> Array:
 
 func _roll_loose_cargo_replacement() -> Dictionary:
 	var safe_spawn_count := maxi(loose_cargo_ball_count, 0)
-	var contraband_chance := clampf(loose_cargo_contraband_chance, 0.0, 1.0)
+	var contraband_chance := _get_effective_loose_cargo_contraband_chance()
 	var treasure_chance := clampf(loose_cargo_treasure_chance, 0.0, 1.0 - contraband_chance)
 	var replacement := {
 		"index": -1,
@@ -732,6 +756,37 @@ func _sanitize_debug_loose_cargo_contraband_kind(kind: String) -> String:
 	if DEBUG_LOOSE_CARGO_CONTRABAND_KINDS.has(kind):
 		return kind
 	return DEBUG_LOOSE_CARGO_CONTRABAND_RANDOM
+
+
+func _get_base_loose_cargo_contraband_chance() -> float:
+	return clampf(loose_cargo_contraband_chance, 0.0, 1.0)
+
+
+func _get_loose_cargo_contraband_cue_bonus() -> float:
+	return maxf(_get_cue_modifier_value(CUE_MODIFIER_LOOSE_CARGO_CONTRABAND_CHANCE_BONUS, 0.0), 0.0)
+
+
+func _get_effective_loose_cargo_contraband_chance() -> float:
+	return clampf(
+		_get_base_loose_cargo_contraband_chance() + _get_loose_cargo_contraband_cue_bonus(),
+		0.0,
+		1.0
+	)
+
+
+func _get_cue_modifier_value(modifier_key: String, fallback: float = 0.0) -> float:
+	if not bool(cue_modifier_snapshot.get("modifiers_enabled", true)):
+		return fallback
+	var modifiers_value: Variant = cue_modifier_snapshot.get("modifiers", {})
+	if not modifiers_value is Dictionary:
+		return fallback
+	var modifiers: Dictionary = modifiers_value as Dictionary
+	return float(modifiers.get(modifier_key, fallback))
+
+
+func _get_active_cue_modifier_summary() -> String:
+	var summary := str(cue_modifier_snapshot.get("active_effect_summary", "None"))
+	return "None" if summary.is_empty() else summary
 
 
 func _get_loose_cargo_contraband_kind_label(kind: String) -> String:

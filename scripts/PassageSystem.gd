@@ -14,6 +14,7 @@ const REQUEST_POCKET_STREAK_X3 := EventMetadata.EVENT_POCKET_STREAK_X3
 const REQUEST_POWDER_ROUTE := "POWDER_ROUTE"
 const REQUEST_CANNON_CHAIN := "CANNON_CHAIN"
 const REQUEST_TREASURE_SNARE := "TREASURE_SNARE"
+const CUE_MODIFIER_PASSAGE_REQUEST_REWARD_MULTIPLIER_BONUS := "passage_request_reward_multiplier_bonus"
 
 const REQUEST_POOL := [
 	{
@@ -92,6 +93,7 @@ var current_request_reroll_cost := 10
 var remaining_passage := 10000
 var completed := false
 var voyage_marks_awarded := 0
+var cue_modifier_snapshot: Dictionary = {}
 
 
 func _ready() -> void:
@@ -116,6 +118,9 @@ func get_passage_snapshot() -> Dictionary:
 	var request := _get_active_request()
 	var request_id := str(request.get("id", ""))
 	var metadata := EventMetadata.get_event_metadata(request_id)
+	var base_reward := _get_base_request_reward(request)
+	var effective_reward := _get_effective_request_reward(base_reward)
+	var reward_modifier_snapshot := get_request_reward_modifier_snapshot()
 	return {
 		"passage_required": maxi(passage_required, 0),
 		"remaining_passage": maxi(remaining_passage, 0),
@@ -132,10 +137,30 @@ func get_passage_snapshot() -> Dictionary:
 		"current_request_id": request_id,
 		"current_request_label": str(metadata.get("label", request.get("label", ""))),
 		"current_request_description": str(metadata.get("description", "Complete this requested scoring feat.")),
-		"current_request_reward": maxi(int(request.get("reward", 0)), 0),
+		"current_request_base_reward": base_reward,
+		"current_request_reward": effective_reward,
+		"request_reward_multiplier": float(reward_modifier_snapshot.get("multiplier", 1.0)),
+		"request_reward_multiplier_bonus": float(reward_modifier_snapshot.get("bonus", 0.0)),
+		"request_reward_multiplier_bonus_summary": str(reward_modifier_snapshot.get("summary", "+0%")),
 		"current_request_tier": str(request.get("tier", "")),
 		"run_completed": completed,
 		"voyage_marks_awarded": voyage_marks_awarded,
+	}
+
+
+func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
+	cue_modifier_snapshot = snapshot.duplicate(true)
+	_recalculate_remaining_passage()
+
+
+func get_request_reward_modifier_snapshot() -> Dictionary:
+	var bonus := _get_request_reward_multiplier_bonus()
+	var multiplier := _get_request_reward_multiplier()
+	return {
+		"bonus": bonus,
+		"multiplier": multiplier,
+		"summary": _format_multiplier_bonus_percent(bonus),
+		"active_cue_modifiers_summary": _get_active_cue_modifier_summary(),
 	}
 
 
@@ -215,7 +240,11 @@ func _make_request_snapshot(request: Dictionary) -> Dictionary:
 	snapshot["event_type"] = str(snapshot.get("event_type", ""))
 	snapshot["label"] = str(metadata.get("label", snapshot.get("label", "")))
 	snapshot["description"] = str(metadata.get("description", "Complete this requested scoring feat."))
-	snapshot["reward"] = maxi(int(snapshot.get("reward", 0)), 0)
+	var base_reward := _get_base_request_reward(snapshot)
+	snapshot["base_reward"] = base_reward
+	snapshot["reward"] = _get_effective_request_reward(base_reward)
+	snapshot["reward_multiplier"] = _get_request_reward_multiplier()
+	snapshot["reward_multiplier_bonus"] = _get_request_reward_multiplier_bonus()
 	snapshot["tier"] = str(snapshot.get("tier", ""))
 	return snapshot
 
@@ -288,6 +317,44 @@ func _get_request_reroll_min_cost() -> int:
 
 func _get_request_reroll_completion_decay() -> int:
 	return maxi(request_reroll_completion_decay, 0)
+
+
+func _get_base_request_reward(request: Dictionary) -> int:
+	if request.has("base_reward"):
+		return maxi(int(request.get("base_reward", 0)), 0)
+	return maxi(int(request.get("reward", 0)), 0)
+
+
+func _get_effective_request_reward(base_reward: int) -> int:
+	var multiplier := _get_request_reward_multiplier()
+	return maxi(roundi(float(maxi(base_reward, 0)) * multiplier), 0)
+
+
+func _get_request_reward_multiplier() -> float:
+	return maxf(1.0 + _get_request_reward_multiplier_bonus(), 0.0)
+
+
+func _get_request_reward_multiplier_bonus() -> float:
+	return maxf(_get_cue_modifier_value(CUE_MODIFIER_PASSAGE_REQUEST_REWARD_MULTIPLIER_BONUS, 0.0), 0.0)
+
+
+func _get_cue_modifier_value(modifier_key: String, fallback: float = 0.0) -> float:
+	if not bool(cue_modifier_snapshot.get("modifiers_enabled", true)):
+		return fallback
+	var modifiers_value: Variant = cue_modifier_snapshot.get("modifiers", {})
+	if not modifiers_value is Dictionary:
+		return fallback
+	var modifiers: Dictionary = modifiers_value as Dictionary
+	return float(modifiers.get(modifier_key, fallback))
+
+
+func _get_active_cue_modifier_summary() -> String:
+	var summary := str(cue_modifier_snapshot.get("active_effect_summary", "None"))
+	return "None" if summary.is_empty() else summary
+
+
+func _format_multiplier_bonus_percent(value: float) -> String:
+	return "+%.0f%%" % (maxf(value, 0.0) * 100.0)
 
 
 func _get_next_request_reroll_cost(paid_cost: int) -> int:

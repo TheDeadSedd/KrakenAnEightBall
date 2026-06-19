@@ -15,7 +15,9 @@ const PRESENTATION_OVERLAY_SCRIPT := preload("res://scripts/MainMenuPresentation
 const OPTIONS_MENU_SCRIPT := preload("res://scripts/OptionsMenu.gd")
 const RUN_HISTORY_SCRIPT := preload("res://scripts/RunHistorySystem.gd")
 const PROGRESSION_SCRIPT := preload("res://scripts/ProgressionSystem.gd")
+const CUE_PROGRESSION_SCRIPT := preload("res://scripts/CueProgressionSystem.gd")
 const HISTORY_PANEL_SIZE := Vector2(780.0, 610.0)
+const CUE_LOCKER_PANEL_SIZE := Vector2(900.0, 720.0)
 const HISTORY_EMPTY_TEXT := "No voyages logged yet."
 
 var background_layer: TextureRect
@@ -29,11 +31,13 @@ var status_label: Label
 var kraken_favor_label: Label
 var start_button: Button
 var options_button: Button
+var cue_locker_button: Button
 var run_history_button: Button
 var quit_button: Button
 var options_panel: OptionsMenu
 var run_history_system: RunHistorySystem
 var progression_system: ProgressionSystem
+var cue_progression_system: CueProgressionSystem
 var run_history_panel: PanelContainer
 var run_history_list: VBoxContainer
 var run_history_empty_label: Label
@@ -42,6 +46,12 @@ var run_history_clear_confirm_panel: PanelContainer
 var run_history_clear_confirm_yes_button: Button
 var run_history_clear_confirm_cancel_button: Button
 var run_history_back_button: Button
+var cue_locker_panel: PanelContainer
+var cue_locker_favor_label: Label
+var cue_locker_loadout_label: Label
+var cue_locker_status_label: Label
+var cue_locker_list: VBoxContainer
+var cue_locker_back_button: Button
 
 
 func _ready() -> void:
@@ -55,6 +65,12 @@ func _ready() -> void:
 	progression_system = PROGRESSION_SCRIPT.new()
 	progression_system.name = "ProgressionSystem"
 	add_child(progression_system)
+	cue_progression_system = CUE_PROGRESSION_SCRIPT.new()
+	cue_progression_system.name = "CueProgressionSystem"
+	add_child(cue_progression_system)
+	cue_progression_system.cue_progression_changed.connect(_on_cue_progression_changed)
+	cue_progression_system.status_changed.connect(_on_cue_progression_status_changed)
+	cue_progression_system.setup(progression_system)
 	_build_scene_layers()
 	_build_interface()
 	_update_menu_layout()
@@ -148,10 +164,12 @@ func _build_interface() -> void:
 	stack.add_child(_make_gap(10.0))
 	start_button = _make_menu_button("Start Run")
 	options_button = _make_menu_button("Options")
+	cue_locker_button = _make_menu_button("Cue Locker")
 	run_history_button = _make_menu_button("Run History")
 	quit_button = _make_menu_button("Quit")
 	stack.add_child(start_button)
 	stack.add_child(options_button)
+	stack.add_child(cue_locker_button)
 	stack.add_child(run_history_button)
 	stack.add_child(quit_button)
 
@@ -178,6 +196,7 @@ func _build_interface() -> void:
 
 	start_button.pressed.connect(_on_start_pressed)
 	options_button.pressed.connect(_on_options_pressed)
+	cue_locker_button.pressed.connect(_on_cue_locker_pressed)
 	run_history_button.pressed.connect(_on_run_history_pressed)
 	quit_button.pressed.connect(_on_quit_pressed)
 
@@ -188,6 +207,7 @@ func _build_interface() -> void:
 	add_child(options_panel)
 
 	_build_run_history_panel()
+	_build_cue_locker_panel()
 
 
 func _set_full_rect(control: Control) -> void:
@@ -411,13 +431,95 @@ func _build_run_history_panel() -> void:
 	run_history_back_button.pressed.connect(_on_run_history_back_pressed)
 
 
+func _build_cue_locker_panel() -> void:
+	cue_locker_panel = PanelContainer.new()
+	cue_locker_panel.name = "CueLockerPanel"
+	cue_locker_panel.visible = false
+	cue_locker_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	cue_locker_panel.add_theme_stylebox_override("panel", _make_panel_style())
+	add_child(cue_locker_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 30)
+	margin.add_theme_constant_override("margin_top", 26)
+	margin.add_theme_constant_override("margin_right", 30)
+	margin.add_theme_constant_override("margin_bottom", 24)
+	cue_locker_panel.add_child(margin)
+
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 12)
+	margin.add_child(stack)
+
+	var title_label := Label.new()
+	title_label.text = "Cue Locker"
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_label.add_theme_font_override("font", UI_FONT)
+	title_label.add_theme_font_size_override("font_size", 38)
+	title_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.48, 1.0))
+	title_label.add_theme_color_override("font_outline_color", Color(0.03, 0.018, 0.012, 0.95))
+	title_label.add_theme_constant_override("outline_size", 4)
+	stack.add_child(title_label)
+
+	cue_locker_favor_label = Label.new()
+	cue_locker_favor_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cue_locker_favor_label.add_theme_font_override("font", UI_FONT)
+	cue_locker_favor_label.add_theme_font_size_override("font_size", 22)
+	cue_locker_favor_label.add_theme_color_override("font_color", Color(1.0, 0.84, 0.36, 0.96))
+	cue_locker_favor_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.74))
+	cue_locker_favor_label.add_theme_constant_override("outline_size", 2)
+	stack.add_child(cue_locker_favor_label)
+
+	cue_locker_loadout_label = Label.new()
+	cue_locker_loadout_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cue_locker_loadout_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cue_locker_loadout_label.add_theme_font_override("font", UI_FONT)
+	cue_locker_loadout_label.add_theme_font_size_override("font_size", 17)
+	cue_locker_loadout_label.add_theme_color_override("font_color", Color(0.78, 0.92, 0.90, 0.94))
+	cue_locker_loadout_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.72))
+	cue_locker_loadout_label.add_theme_constant_override("outline_size", 2)
+	stack.add_child(cue_locker_loadout_label)
+
+	cue_locker_status_label = Label.new()
+	cue_locker_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	cue_locker_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cue_locker_status_label.add_theme_font_override("font", UI_FONT)
+	cue_locker_status_label.add_theme_font_size_override("font_size", 16)
+	cue_locker_status_label.add_theme_color_override("font_color", Color(0.86, 0.82, 0.66, 0.94))
+	cue_locker_status_label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.72))
+	cue_locker_status_label.add_theme_constant_override("outline_size", 2)
+	stack.add_child(cue_locker_status_label)
+
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(805.0, 420.0)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.mouse_filter = Control.MOUSE_FILTER_STOP
+	stack.add_child(scroll)
+
+	cue_locker_list = VBoxContainer.new()
+	cue_locker_list.add_theme_constant_override("separation", 10)
+	cue_locker_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(cue_locker_list)
+
+	var action_row := HBoxContainer.new()
+	action_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	action_row.add_theme_constant_override("separation", 18)
+	stack.add_child(action_row)
+
+	cue_locker_back_button = _make_menu_button("Back")
+	cue_locker_back_button.custom_minimum_size = Vector2(190.0, 48.0)
+	cue_locker_back_button.add_theme_font_size_override("font_size", 24)
+	action_row.add_child(cue_locker_back_button)
+	cue_locker_back_button.pressed.connect(_on_cue_locker_back_pressed)
+	_refresh_cue_locker()
+
+
 func _update_menu_layout() -> void:
 	if menu_panel == null:
 		return
 
 	var viewport_size: Vector2 = size
 	var panel_width: float = clampf(viewport_size.x * 0.28, 390.0, 520.0)
-	var panel_height: float = clampf(viewport_size.y * 0.60, 560.0, 700.0)
+	var panel_height: float = clampf(viewport_size.y * 0.66, 640.0, 760.0)
 	menu_panel.anchor_left = 0.5
 	menu_panel.anchor_right = 0.5
 	menu_panel.anchor_top = 0.5
@@ -450,6 +552,18 @@ func _update_menu_layout() -> void:
 		run_history_panel.offset_right = history_width * 0.5
 		run_history_panel.offset_top = -history_height * 0.5
 		run_history_panel.offset_bottom = history_height * 0.5
+
+	if cue_locker_panel != null:
+		var locker_width: float = clampf(viewport_size.x * 0.56, CUE_LOCKER_PANEL_SIZE.x, 1040.0)
+		var locker_height: float = clampf(viewport_size.y * 0.74, CUE_LOCKER_PANEL_SIZE.y, 820.0)
+		cue_locker_panel.anchor_left = 0.5
+		cue_locker_panel.anchor_right = 0.5
+		cue_locker_panel.anchor_top = 0.5
+		cue_locker_panel.anchor_bottom = 0.5
+		cue_locker_panel.offset_left = -locker_width * 0.5
+		cue_locker_panel.offset_right = locker_width * 0.5
+		cue_locker_panel.offset_top = -locker_height * 0.5
+		cue_locker_panel.offset_bottom = locker_height * 0.5
 
 
 func _rebuild_run_history_list() -> void:
@@ -487,13 +601,146 @@ func _set_run_history_clear_confirm_visible(is_visible: bool) -> void:
 
 
 func _update_progression_display() -> void:
-	if progression_system != null:
-		progression_system.load_progression()
 	var total_favor := 0
 	if progression_system != null:
 		total_favor = maxi(int(progression_system.get_progression_snapshot().get("total_kraken_favor", 0)), 0)
 	if kraken_favor_label != null:
 		kraken_favor_label.text = "Kraken Favor: %s" % total_favor
+
+
+func _refresh_cue_locker() -> void:
+	if cue_progression_system == null or cue_locker_list == null:
+		return
+
+	var snapshot: Dictionary = cue_progression_system.get_cue_progression_snapshot()
+	var favor_total := maxi(int(snapshot.get("kraken_favor", 0)), 0)
+	if cue_locker_favor_label != null:
+		cue_locker_favor_label.text = "Kraken Favor: %s" % favor_total
+	if cue_locker_loadout_label != null:
+		cue_locker_loadout_label.text = _format_cue_loadout(snapshot.get("equipped_loadout", []))
+	if cue_locker_status_label != null:
+		var status_text := str(snapshot.get("last_status_text", ""))
+		cue_locker_status_label.text = "Choose what the locker remembers." if status_text.is_empty() else status_text
+
+	_clear_cue_locker_list()
+	var slots_value: Variant = snapshot.get("slots", [])
+	if not slots_value is Array:
+		return
+	for slot_value in slots_value:
+		if not slot_value is Dictionary:
+			continue
+		var slot: Dictionary = slot_value
+		cue_locker_list.add_child(_make_cue_slot_label(str(slot.get("slot_label", "Cue Part"))))
+		var parts_value: Variant = slot.get("parts", [])
+		if not parts_value is Array:
+			continue
+		for part_value in parts_value:
+			if part_value is Dictionary:
+				cue_locker_list.add_child(_make_cue_part_row(part_value as Dictionary))
+
+
+func _clear_cue_locker_list() -> void:
+	if cue_locker_list == null:
+		return
+	for child in cue_locker_list.get_children():
+		cue_locker_list.remove_child(child)
+		child.queue_free()
+
+
+func _make_cue_slot_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", 22)
+	label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.48, 1.0))
+	label.add_theme_color_override("font_outline_color", Color(0.03, 0.018, 0.012, 0.95))
+	label.add_theme_constant_override("outline_size", 3)
+	return label
+
+
+func _make_cue_part_row(part: Dictionary) -> Control:
+	var row_panel := PanelContainer.new()
+	row_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	row_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row_panel.add_theme_stylebox_override("panel", _make_history_row_style())
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	row_panel.add_child(margin)
+
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 14)
+	margin.add_child(row)
+
+	var text_stack := VBoxContainer.new()
+	text_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_stack.add_theme_constant_override("separation", 3)
+	row.add_child(text_stack)
+
+	var part_name := str(part.get("display_name", "Cue Part"))
+	var unlocked := bool(part.get("unlocked", false))
+	var equipped := bool(part.get("equipped", false))
+	var status_suffix := ""
+	if equipped:
+		status_suffix = "  Equipped"
+	elif unlocked:
+		status_suffix = "  Unlocked"
+
+	var name_label := _make_history_label("%s%s" % [part_name, status_suffix], 18, Color(1.0, 0.88, 0.48, 1.0))
+	text_stack.add_child(name_label)
+	text_stack.add_child(_make_history_label(str(part.get("description", "")), 15, Color(0.88, 0.86, 0.76, 0.96)))
+
+	var cost := maxi(int(part.get("cost", 0)), 0)
+	var detail_text := "Cost %s Favor" % cost
+	text_stack.add_child(_make_history_label(detail_text, 14, Color(0.74, 0.88, 0.82, 0.90)))
+
+	var action_button := _make_secondary_menu_button(_get_cue_part_action_text(part))
+	action_button.custom_minimum_size = Vector2(150.0, 42.0)
+	action_button.disabled = _is_cue_part_action_disabled(part)
+	row.add_child(action_button)
+
+	var part_id := str(part.get("id", ""))
+	if not unlocked:
+		action_button.pressed.connect(_on_cue_part_unlock_pressed.bind(part_id))
+	elif not equipped:
+		action_button.pressed.connect(_on_cue_part_equip_pressed.bind(part_id))
+	return row_panel
+
+
+func _get_cue_part_action_text(part: Dictionary) -> String:
+	if bool(part.get("equipped", false)):
+		return "Equipped"
+	if bool(part.get("unlocked", false)):
+		return "Equip"
+	return "Unlock: %s" % maxi(int(part.get("cost", 0)), 0)
+
+
+func _is_cue_part_action_disabled(part: Dictionary) -> bool:
+	if bool(part.get("equipped", false)):
+		return true
+	if bool(part.get("unlocked", false)):
+		return false
+	return not bool(part.get("affordable", false))
+
+
+func _format_cue_loadout(value: Variant) -> String:
+	if not value is Array:
+		return "Equipped: Weathered Cue"
+	var pieces: Array[String] = []
+	for loadout_value in value:
+		if not loadout_value is Dictionary:
+			continue
+		var loadout: Dictionary = loadout_value
+		pieces.append("%s: %s" % [
+			str(loadout.get("slot_label", "Slot")),
+			str(loadout.get("display_name", "Cue Part")),
+		])
+	if pieces.is_empty():
+		return "Equipped: Weathered Cue"
+	return "Equipped  " + "   ".join(pieces)
 
 
 func _make_run_history_row(record: Dictionary) -> Control:
@@ -596,6 +843,8 @@ func _on_options_pressed() -> void:
 	menu_panel.visible = false
 	if run_history_panel != null:
 		run_history_panel.visible = false
+	if cue_locker_panel != null:
+		cue_locker_panel.visible = false
 	options_panel.visible = true
 	options_panel.refresh_from_audio_settings()
 	options_panel.grab_default_focus()
@@ -609,10 +858,60 @@ func _on_options_back_requested() -> void:
 	options_button.grab_focus()
 
 
+func _on_cue_locker_pressed() -> void:
+	menu_panel.visible = false
+	if options_panel != null:
+		options_panel.visible = false
+	if run_history_panel != null:
+		run_history_panel.visible = false
+	_refresh_cue_locker()
+	cue_locker_panel.visible = true
+	cue_locker_back_button.grab_focus()
+
+
+func _on_cue_locker_back_pressed() -> void:
+	cue_locker_panel.visible = false
+	menu_panel.visible = true
+	_update_progression_display()
+	status_label.text = "The locker shuts with a salt-stiff click."
+	cue_locker_button.grab_focus()
+
+
+func _on_cue_part_unlock_pressed(part_id: String) -> void:
+	if cue_progression_system == null:
+		return
+	cue_progression_system.request_unlock_part(part_id)
+	_update_progression_display()
+	_refresh_cue_locker()
+
+
+func _on_cue_part_equip_pressed(part_id: String) -> void:
+	if cue_progression_system == null:
+		return
+	cue_progression_system.request_equip_part(part_id)
+	_refresh_cue_locker()
+
+
+func _on_cue_progression_changed(_snapshot: Dictionary) -> void:
+	_update_progression_display()
+	if cue_locker_panel != null and cue_locker_panel.visible:
+		_refresh_cue_locker()
+
+
+func _on_cue_progression_status_changed(text: String) -> void:
+	if text.is_empty():
+		return
+	status_label.text = text
+	if cue_locker_status_label != null:
+		cue_locker_status_label.text = text
+
+
 func _on_run_history_pressed() -> void:
 	menu_panel.visible = false
 	if options_panel != null:
 		options_panel.visible = false
+	if cue_locker_panel != null:
+		cue_locker_panel.visible = false
 	_update_progression_display()
 	_rebuild_run_history_list()
 	run_history_panel.visible = true

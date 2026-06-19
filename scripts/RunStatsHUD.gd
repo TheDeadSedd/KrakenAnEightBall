@@ -6,15 +6,26 @@ class_name RunStatsHUD
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 
 const BUTTON_SIZE := Vector2(56.0, 42.0)
-const PANEL_SIZE := Vector2(400.0, 705.0)
+const PANEL_SIZE := Vector2(420.0, 995.0)
 const PANEL_OFFSET := Vector2(0.0, 50.0)
-const ROOT_SIZE := Vector2(430.0, 785.0)
+const ROOT_SIZE := Vector2(450.0, 1085.0)
 const ROWS := [
 	{"label": "Doubloons Earned", "key": "doubloons_earned"},
 	{"label": "Doubloons Lost", "key": "doubloons_lost"},
 	{"label": "Passage Remaining", "key": "remaining_passage"},
 	{"label": "Kraken Wants", "key": "current_kraken_request"},
+	{"label": "Request Reward Bonus", "key": "request_reward_multiplier_bonus_summary"},
 	{"label": "Active Oaths", "key": "active_oaths_summary"},
+	{"label": "Oath Penalty Cut", "key": "oath_passage_penalty_reduction_summary"},
+	{"label": "Cue", "key": "cue_body"},
+	{"label": "Tip", "key": "cue_tip"},
+	{"label": "Grip", "key": "cue_grip"},
+	{"label": "Ferrule", "key": "cue_ferrule"},
+	{"label": "Chalk", "key": "cue_chalk"},
+	{"label": "Cue Mods", "key": "active_cue_modifiers_summary"},
+	{"label": "Cue Power Bonus", "key": "cue_power_bonus_summary"},
+	{"label": "Loose Contraband", "key": "loose_cargo_contraband_chance_summary"},
+	{"label": "QM Shot Cooldown", "key": "quartermaster_refresh_decay_summary"},
 	{"label": "Shots Taken", "key": "shots_taken"},
 	{"label": "Balls Sunk", "key": "balls_sunk"},
 	{"label": "Highest Pocket Streak", "key": "highest_pocket_streak"},
@@ -268,6 +279,12 @@ func _format_value(stat_key: String, value: Variant) -> String:
 		"active_oaths_summary":
 			var oath_text := str(value)
 			return "None sworn." if oath_text.is_empty() else oath_text
+		"cue_body", "cue_tip", "cue_grip", "cue_ferrule", "cue_chalk":
+			var cue_text := str(value)
+			return "Unknown" if cue_text.is_empty() else cue_text
+		"active_cue_modifiers_summary", "cue_power_bonus_summary", "loose_cargo_contraband_chance_summary", "quartermaster_refresh_decay_summary", "oath_passage_penalty_reduction_summary", "request_reward_multiplier_bonus_summary":
+			var modifier_text := str(value)
+			return "None" if modifier_text.is_empty() else modifier_text
 	return str(maxi(int(value), 0))
 
 

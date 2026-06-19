@@ -92,6 +92,7 @@ const SPECIAL_BALL_PENALTY_REMOVAL_TIME := 0.18
 const MAX_DRAG_DISTANCE := 210.0
 const MIN_SHOT_DISTANCE := 12.0
 const SHOT_POWER := 9.4
+const CUE_MODIFIER_CUE_SHOT_POWER_MULTIPLIER_BONUS := "cue_shot_power_multiplier_bonus"
 const CUE_AIM_DEADZONE_RADIUS := 20.0
 const EARLY_CUE_RECLAIM_DELAY := 0.35
 const EARLY_CUE_RECLAIM_LOW_SPEED := 85.0
@@ -193,6 +194,7 @@ var perf_physics_process_ms := 0.0
 var perf_ball_collision_ms := 0.0
 var perf_rail_collision_ms := 0.0
 var perf_pocket_check_ms := 0.0
+var cue_modifier_snapshot: Dictionary = {}
 #endregion
 
 
@@ -809,6 +811,43 @@ func is_cue_drag_active() -> bool:
 	return is_dragging
 
 
+func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
+	cue_modifier_snapshot = snapshot.duplicate(true)
+	if is_dragging:
+		_mark_aim_preview_dirty()
+
+
+func get_effective_shot_power() -> float:
+	return SHOT_POWER * _get_cue_shot_power_multiplier()
+
+
+func get_cue_shot_power_modifier_snapshot() -> Dictionary:
+	if not bool(cue_modifier_snapshot.get("modifiers_enabled", true)):
+		return {
+			"base_power": SHOT_POWER,
+			"bonus": 0.0,
+			"multiplier": 1.0,
+			"effective_power": SHOT_POWER,
+			"summary": "disabled",
+			"suppressed": true,
+			"suppression_label": str(cue_modifier_snapshot.get("suppression_label", "Oath of Humility")),
+			"suppression_remaining_text": str(cue_modifier_snapshot.get("suppression_remaining_text", "")),
+		}
+
+	var bonus := _get_cue_shot_power_multiplier_bonus()
+	var multiplier := _get_cue_shot_power_multiplier()
+	return {
+		"base_power": SHOT_POWER,
+		"bonus": bonus,
+		"multiplier": multiplier,
+		"effective_power": SHOT_POWER * multiplier,
+		"summary": _format_multiplier_bonus_percent(bonus),
+		"suppressed": false,
+		"suppression_label": "",
+		"suppression_remaining_text": "",
+	}
+
+
 func _try_start_drag(mouse_position: Vector2) -> void:
 	if not _can_start_aiming():
 		return
@@ -848,9 +887,10 @@ func _release_shot(_mouse_position: Vector2) -> void:
 		queue_redraw()
 		return
 
+	var effective_shot_power := get_effective_shot_power()
 	if release_direction != Vector2.ZERO:
-		aim_preview.start_path_comparison(cue_ball.global_position, drag_vector * SHOT_POWER)
-	cue_ball.velocity = drag_vector * SHOT_POWER
+		aim_preview.start_path_comparison(cue_ball.global_position, drag_vector * effective_shot_power)
+	cue_ball.velocity = drag_vector * effective_shot_power
 	var release_rotation: float = release_direction.angle() if release_direction != Vector2.ZERO else cue_controller.get_rotation_angle()
 	cue_controller.begin_recoil(cue_ball.global_position, release_rotation, release_pullback)
 	_print_shot_power_debug(drag_vector, release_position)
@@ -913,15 +953,16 @@ func _clear_aim_preview_now() -> void:
 
 
 func _refresh_aim_preview() -> void:
+	var effective_shot_power := get_effective_shot_power()
 	if not is_dragging or not _can_release_current_shot():
-		aim_preview.update_preview(false, Vector2.ZERO, Vector2.ZERO, SHOT_POWER, 0.0)
+		aim_preview.update_preview(false, Vector2.ZERO, Vector2.ZERO, effective_shot_power, 0.0)
 		treasure_ball_system.handle_aim_perception_snapshot(aim_preview.get_treasure_perception_snapshot())
 		embezzler_system.handle_aim_perception_snapshot(aim_preview.get_embezzler_perception_snapshot())
 		return
 
 	var drag_vector: Vector2 = _get_drag_vector(drag_mouse_position)
 	var power_ratio: float = clamp(drag_vector.length() / MAX_DRAG_DISTANCE, 0.0, 1.0)
-	aim_preview.update_preview(true, cue_ball.global_position, drag_vector, SHOT_POWER, power_ratio)
+	aim_preview.update_preview(true, cue_ball.global_position, drag_vector, effective_shot_power, power_ratio)
 	treasure_ball_system.handle_aim_perception_snapshot(aim_preview.get_treasure_perception_snapshot())
 	embezzler_system.handle_aim_perception_snapshot(aim_preview.get_embezzler_perception_snapshot())
 
@@ -938,6 +979,28 @@ func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) ->
 		]
 	)
 #endregion
+
+
+func _get_cue_shot_power_multiplier() -> float:
+	return maxf(1.0 + _get_cue_shot_power_multiplier_bonus(), 0.0)
+
+
+func _get_cue_shot_power_multiplier_bonus() -> float:
+	return maxf(_get_cue_modifier_value(CUE_MODIFIER_CUE_SHOT_POWER_MULTIPLIER_BONUS, 0.0), 0.0)
+
+
+func _get_cue_modifier_value(modifier_key: String, fallback: float = 0.0) -> float:
+	if not bool(cue_modifier_snapshot.get("modifiers_enabled", true)):
+		return fallback
+	var modifiers_value: Variant = cue_modifier_snapshot.get("modifiers", {})
+	if not modifiers_value is Dictionary:
+		return fallback
+	var modifiers: Dictionary = modifiers_value as Dictionary
+	return float(modifiers.get(modifier_key, fallback))
+
+
+func _format_multiplier_bonus_percent(value: float) -> String:
+	return "+%.0f%%" % (maxf(value, 0.0) * 100.0)
 
 
 #region Shot State / Pocket Consequences

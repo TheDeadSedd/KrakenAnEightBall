@@ -30,6 +30,8 @@ var intervention_purchase_order: Array = []
 var intervention_purchase_summaries: Dictionary = {}
 var passage_snapshot: Dictionary = {}
 var oath_snapshot: Dictionary = {}
+var cue_loadout_snapshot: Dictionary = {}
+var cue_modifier_snapshot: Dictionary = {}
 
 
 func _ready() -> void:
@@ -67,12 +69,34 @@ func get_run_stats_snapshot() -> Dictionary:
 		"passage_required": int(passage_snapshot.get("passage_required", 0)),
 		"remaining_passage": int(passage_snapshot.get("remaining_passage", 0)),
 		"current_kraken_request": str(passage_snapshot.get("current_request_label", "")),
+		"request_reward_multiplier_bonus_summary": str(passage_snapshot.get("request_reward_multiplier_bonus_summary", "+0%")),
 		"passage_completed": bool(passage_snapshot.get("run_completed", false)),
 		"voyage_marks_awarded": int(passage_snapshot.get("voyage_marks_awarded", 0)),
 		"active_oaths_summary": str(oath_snapshot.get("active_oaths_summary", "None sworn.")),
 		"active_oath_count": int(oath_snapshot.get("active_oath_count", 0)),
+		"oath_passage_penalty_reduction_summary": _get_oath_passage_penalty_reduction_summary(),
+		"cue_loadout": cue_loadout_snapshot.duplicate(true),
+		"cue_body": _get_cue_loadout_part_name("body", "Weathered Cue"),
+		"cue_tip": _get_cue_loadout_part_name("tip", "Plain Tip"),
+		"cue_grip": _get_cue_loadout_part_name("grip", "Sailcloth Grip"),
+		"cue_ferrule": _get_cue_loadout_part_name("ferrule", "Plain Ferrule"),
+		"cue_chalk": _get_cue_loadout_part_name("chalk", "Plain Chalk"),
+		"active_cue_modifiers_summary": _get_active_cue_modifier_summary(),
+		"cue_power_bonus_summary": _get_cue_power_bonus_summary(),
+		"loose_cargo_contraband_chance_summary": _get_loose_cargo_contraband_chance_summary(),
+		"quartermaster_refresh_decay_summary": _get_quartermaster_refresh_decay_summary(),
 		"intervention_purchase_history": _get_intervention_purchase_history_snapshot(),
 	}
+
+
+func set_cue_loadout_snapshot(snapshot: Dictionary) -> void:
+	cue_loadout_snapshot = snapshot.duplicate(true)
+	_emit_stats_changed()
+
+
+func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
+	cue_modifier_snapshot = snapshot.duplicate(true)
+	_emit_stats_changed()
 
 
 func _process(delta: float) -> void:
@@ -265,3 +289,79 @@ func _get_intervention_name(event_id: String) -> String:
 	if table != null and table.table_event_system != null and table.table_event_system.has_method("get_event_display_name"):
 		return str(table.table_event_system.get_event_display_name(event_id))
 	return event_id.capitalize()
+
+
+func _get_cue_loadout_part_name(slot_type: String, fallback: String) -> String:
+	var by_slot_value: Variant = cue_loadout_snapshot.get("equipped_loadout_by_slot", {})
+	if by_slot_value is Dictionary:
+		var by_slot: Dictionary = by_slot_value as Dictionary
+		var entry_value: Variant = by_slot.get(slot_type, {})
+		if entry_value is Dictionary:
+			var entry: Dictionary = entry_value as Dictionary
+			var slot_display_name := str(entry.get("display_name", ""))
+			if not slot_display_name.is_empty():
+				return slot_display_name
+
+	var loadout_value: Variant = cue_loadout_snapshot.get("equipped_loadout", [])
+	if loadout_value is Array:
+		for entry_value in loadout_value:
+			if not entry_value is Dictionary:
+				continue
+			var loadout_entry: Dictionary = entry_value as Dictionary
+			if str(loadout_entry.get("slot_type", "")) != slot_type:
+				continue
+			var loadout_display_name := str(loadout_entry.get("display_name", ""))
+			if not loadout_display_name.is_empty():
+				return loadout_display_name
+	return fallback
+
+
+func _get_active_cue_modifier_summary() -> String:
+	var summary := str(cue_modifier_snapshot.get("active_effect_summary", "None"))
+	return "None" if summary.is_empty() else summary
+
+
+func _get_cue_power_bonus_summary() -> String:
+	if table == null or not table.has_method("get_cue_shot_power_modifier_snapshot"):
+		return "Unknown"
+	var modifier_snapshot: Dictionary = table.get_cue_shot_power_modifier_snapshot()
+	return str(modifier_snapshot.get("summary", "+0%"))
+
+
+func _get_loose_cargo_contraband_chance_summary() -> String:
+	if table == null or table.table_event_system == null:
+		return "Unknown"
+	var chance_snapshot: Dictionary = table.table_event_system.get_loose_cargo_contraband_chance_snapshot()
+	var base_chance := float(chance_snapshot.get("base_chance", 0.0))
+	var cue_bonus := float(chance_snapshot.get("cue_bonus", 0.0))
+	var final_chance := float(chance_snapshot.get("final_chance", base_chance))
+	if cue_bonus <= 0.0:
+		return _format_percent(base_chance)
+	return "%s + %s = %s" % [
+		_format_percent(base_chance),
+		_format_percent(cue_bonus),
+		_format_percent(final_chance),
+	]
+
+
+func _get_quartermaster_refresh_decay_summary() -> String:
+	if table == null or table.quartermaster_system == null:
+		return "Unknown"
+	var decay_snapshot: Dictionary = table.quartermaster_system.get_refresh_decay_snapshot()
+	var base_decay := maxi(int(decay_snapshot.get("base_decay", 0)), 0)
+	var cue_bonus := maxi(int(decay_snapshot.get("cue_bonus", 0)), 0)
+	var final_decay := maxi(int(decay_snapshot.get("final_decay", base_decay)), 0)
+	if cue_bonus <= 0:
+		return str(base_decay)
+	return "%s + %s = %s" % [base_decay, cue_bonus, final_decay]
+
+
+func _get_oath_passage_penalty_reduction_summary() -> String:
+	if table == null or table.oath_system == null:
+		return "Unknown"
+	var modifier_snapshot: Dictionary = table.oath_system.get_oath_passage_penalty_modifier_snapshot()
+	return str(modifier_snapshot.get("summary", "0"))
+
+
+func _format_percent(value: float) -> String:
+	return "%.1f%%" % (clampf(value, 0.0, 1.0) * 100.0)
