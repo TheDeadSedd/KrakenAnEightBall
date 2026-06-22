@@ -53,6 +53,9 @@ KNOWN_CATEGORY_HINTS = {
     "scenes/Table.tscn": ["Physics", "Systems"],
     "scripts/AimPreview.gd": ["Physics", "UI", "Performance Concerns"],
     "scripts/AnchorBallSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns", "In Progress"],
+    "scripts/AudioSettings.gd": ["Systems", "UI"],
+    "scripts/BackRoomDealPanel.gd": ["UI", "Systems", "In Progress"],
+    "scripts/BackRoomDealSystem.gd": ["Systems", "UI", "In Progress"],
     "scripts/BallAudioSystem.gd": ["Systems", "Performance Concerns", "In Progress"],
     "scripts/BallDropMeter.gd": ["UI", "Systems", "Needs Review"],
     "scripts/BallDropSystem.gd": ["Mechanics", "Systems", "UI", "Performance Concerns", "In Progress"],
@@ -61,33 +64,50 @@ KNOWN_CATEGORY_HINTS = {
     "scripts/BoundarySystem.gd": ["Physics", "Systems", "Performance Concerns"],
     "scripts/CannonBallSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns", "In Progress"],
     "scripts/CueController.gd": ["Mechanics", "UI"],
+    "scripts/CueProgressionSystem.gd": ["Systems", "UI", "In Progress"],
     "scripts/DebugPanel.gd": ["UI", "Debug Tools", "Performance Concerns", "In Progress"],
     "scripts/DebugOverlay.gd": ["UI", "Debug Tools"],
     "scripts/EmbezzlerSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns", "In Progress"],
+    "scripts/EventMetadata.gd": ["Mechanics", "Systems"],
     "scripts/GameplayMusicSystem.gd": ["Systems", "UI", "In Progress"],
     "scripts/HudFeed.gd": ["UI", "Systems", "Performance Concerns", "In Progress"],
+    "scripts/ItemIconDraw.gd": ["UI", "Systems"],
     "scripts/Main.gd": ["Systems", "UI"],
     "scripts/MainMenu.gd": ["Systems", "UI", "In Progress"],
+    "scripts/MainMenuCueLockerPanel.gd": ["UI", "Systems", "In Progress"],
     "scripts/MainMenuPresentationOverlay.gd": ["UI", "Performance Concerns", "In Progress"],
+    "scripts/MainMenuRunHistoryPanel.gd": ["UI", "Systems", "In Progress"],
+    "scripts/OathHUD.gd": ["UI", "Systems", "In Progress"],
+    "scripts/OathSystem.gd": ["Systems", "Mechanics", "Debug Tools", "In Progress"],
+    "scripts/OptionsMenu.gd": ["UI", "Systems"],
     "scripts/PauseMenu.gd": ["UI", "Systems", "Debug Tools", "In Progress"],
+    "scripts/PassageHUD.gd": ["UI", "Systems", "In Progress"],
+    "scripts/PassageSystem.gd": ["Mechanics", "Systems", "In Progress"],
     "scripts/PocketSystem.gd": ["Physics", "Systems", "Performance Concerns"],
     "scripts/PocketStreakPresenter.gd": ["UI", "Systems", "Performance Concerns", "In Progress"],
     "scripts/PocketStreakSystem.gd": ["Mechanics", "Systems", "UI", "In Progress"],
     "scripts/PowderKegSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns"],
+    "scripts/ProgressionSystem.gd": ["Systems", "UI", "In Progress"],
     "scripts/QuartermasterHUD.gd": ["UI", "Systems", "Performance Concerns", "In Progress"],
     "scripts/QuartermasterOfferRefreshEffect.gd": ["UI", "Performance Concerns", "In Progress"],
     "scripts/QuartermasterSystem.gd": ["Systems", "UI", "In Progress"],
     "scripts/ReserveDeploymentPresenter.gd": ["UI", "Systems", "Performance Concerns", "In Progress"],
     "scripts/ReserveSlotsUI.gd": ["UI", "Systems", "In Progress"],
     "scripts/ReserveSystem.gd": ["Systems", "UI", "In Progress"],
+    "scripts/RunHistorySystem.gd": ["Systems", "UI", "In Progress"],
+    "scripts/RunLedgerHUD.gd": ["UI", "Systems", "In Progress"],
+    "scripts/RunStatsHUD.gd": ["UI", "Systems", "In Progress"],
+    "scripts/RunStatsSystem.gd": ["Systems", "UI", "In Progress"],
     "scripts/ScoreSystem.gd": ["Mechanics", "Systems", "UI", "In Progress"],
     "scripts/ShotEventSystem.gd": ["Mechanics", "Systems"],
     "scripts/SpawnSystem.gd": ["Mechanics", "Systems", "In Progress"],
     "scripts/Table.gd": ["Mechanics", "Physics", "Systems", "Performance Concerns"],
+    "scripts/TableDecorRandomizer.gd": ["UI", "Systems"],
     "scripts/TableEventMenu.gd": ["UI", "Systems", "In Progress"],
     "scripts/TableEventMeter.gd": ["UI", "Systems", "In Progress"],
     "scripts/TableEventSystem.gd": ["Mechanics", "Systems", "UI", "Performance Concerns", "In Progress"],
     "scripts/TableImpactShakeSystem.gd": ["UI", "Systems", "Performance Concerns", "In Progress"],
+    "scripts/TableObstacleSystem.gd": ["Physics", "Systems", "Debug Tools", "Performance Concerns", "In Progress"],
     "scripts/TreasureBallSystem.gd": ["Anomaly Balls", "Systems", "Performance Concerns", "In Progress"],
     "scripts/WayfinderSystem.gd": ["Anomaly Balls", "Systems"],
     "scripts/WayfinderCurrentPresenter.gd": ["UI", "Systems", "Performance Concerns", "In Progress"],
@@ -101,34 +121,40 @@ AGENT_DEFINITIONS = {
         "responsibility": "Tracks core play loops, shot lifecycle, scoring hooks, shot-event history, ball identity, and moment-to-moment billiards feel.",
         "watch_keywords": ["table", "ball", "cue", "shot", "score", "spawn", "event", "placement", "intervention", "streak"],
         "notes": [
-            "Current loop: better shots create Doubloons, Kraken Intervention opportunities, player-chosen Table Events, more balls/anomalies, more interactions, and an escalating table state.",
-            "Kraken Intervention is the active progression spine; automatic BallDrop rewards are retired/gated.",
+            "Current loop: better shots create Doubloons, completed Kraken Requests, Passage reduction, Kraken Intervention opportunities, player-chosen Table Events, more balls/anomalies, more interactions, and successful Passage rewards.",
+            "Passage is the current run objective; Kraken Intervention is the active chosen-chaos economy; automatic BallDrop rewards are retired/gated.",
             "Early cue reclaim is shot-lifecycle coordination in Table.gd and should stay lightweight.",
             "Cue/eight-ball sinks are penalties now, not run-ending conditions.",
-            "ShotEventSystem.gd now tracks foundational, skilled, heroic, and legendary events through causal shot history.",
+            "ShotEventSystem.gd now tracks foundational, skilled, heroic, legendary, and sink-moment events through causal shot history.",
             "PocketStreakSystem.gd tracks same-pocket streak bonuses separately from MULTI_SINK.",
+            "RunStatsSystem.gd tracks current-run stats only; RunHistorySystem.gd persists finalized records.",
             "Preserve cue feel, shot feel, pocket feel, and scoring values during cleanup.",
             "Automatic score-triggered BallDrop rewards are retired/gated; BallDropSystem is mostly legacy/debug support plus cue/eight-ball penalty handling.",
         ],
         "questions": [
             "Which new shot-event thresholds need tuning after longer playtests?",
-            "Which Kraken Intervention costs/weights/thresholds need playtest tuning?",
+            "Which Kraken Intervention costs/weights/thresholds and Passage request rewards need playtest tuning?",
         ],
     },
     "systems_agent": {
         "display": "Systems Agent",
         "responsibility": "Tracks module boundaries, ownership rules, scene wiring, and coordinator responsibilities.",
-        "watch_keywords": ["system", "table", "spawn", "pocket", "boundary", "main", "agent", "quartermaster", "reserve", "placement", "menu", "audio", "intervention", "broadside", "current"],
+        "watch_keywords": ["system", "table", "spawn", "pocket", "boundary", "main", "agent", "quartermaster", "reserve", "placement", "menu", "audio", "intervention", "broadside", "current", "passage", "oath", "progression", "history", "locker"],
         "notes": [
             "Table.gd should coordinate systems without absorbing new feature logic.",
             "Scene-authored geometry remains the source of truth.",
-            "MainMenu.gd owns title-screen presentation and scene transition without becoming a gameplay app shell.",
+            "MainMenu.gd owns title-screen presentation and top-level panel orchestration; Run History and Cue Locker presentation live in focused panel scripts.",
+            "OptionsMenu.gd and AudioSettings.gd own reusable options/audio settings instead of the former menu shell behavior.",
+            "PassageSystem.gd owns current-run Passage and Kraken Requests; EventMetadata.gd owns reusable request/event descriptions.",
+            "OathSystem.gd owns Oath definitions, timers, penalties, Quartermaster lock state, and cue modifier suppression.",
+            "ProgressionSystem.gd owns persistent Kraken Favor; CueProgressionSystem.gd owns cue definitions/equipment/effect snapshots.",
             "TableEventSystem.gd owns Kraken Intervention thresholds, pending readiness, weighted offers, purchases, and event routing.",
             "Broadside Attack is the first authored staged intervention milestone and should remain a readable pirate artillery scenario.",
-            "QuartermasterSystem.gd owns rotating offers; QuartermasterHUD.gd owns live side-rail shop presentation; ReserveSystem.gd owns slot data; BallPlacementSystem.gd owns item-agnostic placement.",
+            "QuartermasterSystem.gd owns rotating offers and paid refresh; QuartermasterHUD.gd owns live side-rail shop presentation; BackRoomDealSystem.gd owns Back Room economy; ReserveSystem.gd owns slot data; BallPlacementSystem.gd owns item-agnostic placement.",
             "BallAudioSystem.gd owns pooled event-driven collision SFX instead of burying audio in physics.",
             "GameplayMusicSystem.gd owns low-volume looping gameplay music separate from SFX; music should support atmosphere without covering collision/event readability.",
             "TableImpactShakeSystem.gd owns presentation-only fake-3D table shake so gameplay geometry and HUD stay stable.",
+            "TableObstacleSystem.gd owns debris spawning/debug and custom authored-polygon collision; it should not become general Table physics.",
             "Coalesce repeated input/event work in the owning coordinator instead of letting systems rebuild many times per frame.",
             "Prefer event/state-driven updates over continuous rescans when systems can track meaningful changes safely.",
         ],
@@ -146,7 +172,7 @@ AGENT_DEFINITIONS = {
             "Wayfinder Current is the cursed-tide extension of Wayfinder behavior: temporary possession, transferable guided momentum, transfer-on-hit propagation, and current-caused scoring support.",
             "Anchor's old continuous field identity is retired; current Anchor behavior is curse-seed selection, chains, cue-control-gated tightening, warning, spread, and collapse.",
             "Cannon Ball has debug/Table Event drop paths, collision tuning, Powder Keg launch, Broadside launch use, heavy-impact shake, and high-speed heat presence.",
-            "Treasure Ball is a debug-spawn perception-grace/hiding/scuttle experiment; it reacts to being watched, not just exact first-hit targeting.",
+            "Treasure Ball is a perception-grace/hiding/scuttle experiment that can appear through rare cargo/contraband discovery and awards a large Doubloon payout when sunk.",
             "Treasure should feel like a cautious sneaky thief, not a shortest-path optimizer, and remains separate from the Embezzler.",
             "Embezzler is capped and debug-spawnable; it copies Doubloon value, tracks a secret pocket, uses once-per-shot hide-or-run decisions, and resolves capture/escape.",
         ],
@@ -158,13 +184,18 @@ AGENT_DEFINITIONS = {
     "ui_agent": {
         "display": "UI Agent",
         "responsibility": "Tracks HUD, title screen, pause menu, modular debug panels, score popups, callouts, cue presentation, shop/reserve UI, and player-facing text.",
-        "watch_keywords": ["debug", "score", "ui", "main", "menu", "pause", "quartermaster", "reserve", "cue", "popup", "label", "scene", "shake", "hud", "feed", "meter", "streak"],
+        "watch_keywords": ["debug", "score", "ui", "main", "menu", "pause", "quartermaster", "reserve", "cue", "popup", "label", "scene", "shake", "hud", "feed", "meter", "streak", "passage", "oath", "history", "locker"],
         "notes": [
             "MainMenu.tscn uses layered artwork with lightweight moon glow, star, shimmer, and fog overlays.",
+            "MainMenu.gd now orchestrates focused Options, Run History, and Cue Locker panels rather than owning all row/card logic.",
+            "OptionsMenu.gd is real UI with Master/Music/SFX sliders and pause/main-menu return contexts.",
+            "PassageHUD.gd owns Passage/Kraken Wants presentation and request tooltip/reroll UI.",
+            "OathHUD.gd owns compact active-Oath indicator/tooltip presentation.",
+            "RunStatsHUD.gd owns the live ledger overlay; RunLedgerHUD.gd owns the BALLS/SUNK HUD cluster.",
             "TableEventMeter.gd owns the horizontal bottom-center Kraken Intervention meter and ready icon.",
-            "TableEventMenu.gd owns the compact Request Kraken Intervention menu and offer cards.",
+            "TableEventMenu.gd owns the compact Request Kraken Intervention menu, offer cards, and Oath choice panel for single-offer replacement.",
             "HudFeed.gd owns the bottom-left rolling captain's-log feed with hover review and multiline wrapping.",
-            "QuartermasterHUD.gd owns the live right-side side-rail shop; PauseMenu.gd no longer owns the active shop purchasing flow.",
+            "QuartermasterHUD.gd owns the live right-side side-rail shop; BackRoomDealPanel.gd owns Back Room option presentation; PauseMenu.gd no longer owns the active shop purchasing flow.",
             "PauseMenu.gd owns menu shell behavior, modular debug-panel toggles, and temporary Event Test Button checkboxes while gameplay is paused.",
             "DebugPanel.gd owns draggable pause-safe panel shells; DebugOverlay.gd formats visible panel content and the full F3 overlay.",
             "ReserveSlotsUI.gd owns icon-only table-frame slots; ReserveDeploymentPresenter.gd owns cursor icon/tether presentation.",
@@ -181,7 +212,7 @@ AGENT_DEFINITIONS = {
     "performance_agent": {
         "display": "Performance Agent",
         "responsibility": "Tracks visual cost, broad-phase health, trail redraws, particle load, and stress-test readiness.",
-        "watch_keywords": ["performance", "debug", "trail", "particle", "anchor", "powder", "treasure", "embezzler", "boundary", "pocket", "aim", "shake", "audio", "quartermaster", "reserve", "menu", "intervention", "streak", "current", "feed"],
+        "watch_keywords": ["performance", "debug", "trail", "particle", "anchor", "powder", "treasure", "embezzler", "boundary", "pocket", "aim", "shake", "audio", "quartermaster", "reserve", "menu", "intervention", "streak", "current", "feed", "obstacle", "debris", "oath"],
         "notes": [
             "Do not solve chaos by preventing chaos; degrade visuals first.",
             "High ball counts and large earned chain reactions are intended.",
@@ -197,6 +228,8 @@ AGENT_DEFINITIONS = {
             "Wayfinder Current is intentionally uncapped in affected-ball count for now, but keeps radius, lifetime, transfer-depth, and eligibility safeguards.",
             "Pocket Streak whirlpool/threat tells are localized presentation-only effects with no suction/pull by deliberate design.",
             "Quartermaster stock refresh is event-driven; Reserve and placement presentation should avoid continuous scans.",
+            "TableObstacleSystem.gd should keep authored-polygon collision cheap through moving-ball filtering, cached transforms, and broadphase rejection.",
+            "Hover-only HUD/UI should respect cue-drag suppression so active aiming owns mouse hover behavior.",
             "Main menu atmosphere is draw-only/lightweight and should stay presentation-only.",
             "AimPreview.gd uses broad-phase filtering, rebuild coalescing, and debug counters to keep swept prediction affordable without lying about grazes.",
         ],
@@ -208,11 +241,14 @@ AGENT_DEFINITIONS = {
     "lore_agent": {
         "display": "Lore/Theme Agent",
         "responsibility": "Tracks pirate/kraken tone, anomaly fantasy, callout language, and presentation consistency.",
-        "watch_keywords": ["agents", "notes", "stack", "score", "spawn", "main", "menu", "quartermaster", "reserve"],
+        "watch_keywords": ["agents", "notes", "stack", "score", "spawn", "main", "menu", "quartermaster", "reserve", "passage", "oath", "favor", "cue"],
         "notes": [
             "Tone is pirate arcade chaos with readable eldritch flair and a little mischievous weirdness.",
             "The title screen leans pirate arcade adventure and dangerous ocean night, not oppressive cosmic horror.",
+            "Passage fantasy: the Kraken intends to take the ship, and the player bargains for safe passage with wealth and skill.",
             "Kraken Intervention should feel like bargaining with the table for dangerous aid and choosing intentional chaos.",
+            "Oaths should feel like risky promises sworn to the Kraken, not ordinary UI reroll buttons.",
+            "Kraken Favor is the persistent proof that the Kraken remembers successful voyages.",
             "Broadside Attack should feel authored and nautical: warning beat, Powder Keg lanes, then Cannon Balls from a cursed gun deck.",
             "Wayfinder Current should feel like a cursed tide possessing nearby balls with transferable guided momentum.",
             "Pocket Streak X4+ should feel like a hungry pocket waking up without adding real suction yet.",
@@ -227,11 +263,11 @@ AGENT_DEFINITIONS = {
     "cleanup_agent": {
         "display": "Cleanup Agent",
         "responsibility": "Tracks stale comments, unclear names, ownership drift, temporary debug leftovers, and documentation freshness.",
-        "watch_keywords": ["agent", "debug", "system", "table", "spawn", "score", "shot", "quartermaster", "reserve", "menu", "audio"],
+        "watch_keywords": ["agent", "debug", "system", "table", "spawn", "score", "shot", "quartermaster", "reserve", "menu", "audio", "passage", "oath", "cue", "history"],
         "notes": [
             "Cleanup should preserve gameplay behavior and avoid opportunistic physics retuning.",
             "AGENTS.md, NOTES.md, STACK.md, and project_brain should be refreshed after major playable milestones.",
-            "Generated docs should reflect Kraken Intervention/Table Events, Broadside Attack, Wayfinder Current, Pocket Streak, HudFeed, live Quartermaster HUD, gameplay music, Anchor curse seeds, Embezzler, score stacks, and expanded shot events.",
+            "Generated docs should reflect Passage, Oaths, Kraken Intervention/Table Events, Quartermaster Refresh, Back Room Deals, Run Stats/History, Kraken Favor, Cue Locker/modifiers, debris, Broadside Attack, Wayfinder Current, Pocket Streak, HudFeed, live Quartermaster HUD, gameplay music, Anchor curse seeds, Treasure payout/discovery, Embezzler, score stacks, and expanded shot events.",
         ],
         "questions": [
             "Which debug toggles should remain long-term?",
@@ -391,12 +427,18 @@ def guess_owner(rel_path: str) -> str:
     name = Path(rel_path).name
     exact_owners = {
         "AnchorBallSystem.gd": "anomaly_ball_agent",
+        "AudioSettings.gd": "systems_agent",
+        "BackRoomDealPanel.gd": "ui_agent",
+        "BackRoomDealSystem.gd": "systems_agent",
         "CannonBallSystem.gd": "anomaly_ball_agent",
+        "CueProgressionSystem.gd": "systems_agent",
         "EmbezzlerSystem.gd": "anomaly_ball_agent",
+        "EventMetadata.gd": "systems_agent",
         "PowderKegSystem.gd": "anomaly_ball_agent",
         "TreasureBallSystem.gd": "anomaly_ball_agent",
         "WayfinderSystem.gd": "anomaly_ball_agent",
         "WayfinderCurrentPresenter.gd": "ui_agent",
+        "ItemIconDraw.gd": "ui_agent",
         "Ball.gd": "mechanics_agent",
         "BallAudioSystem.gd": "systems_agent",
         "BallPlacementSystem.gd": "systems_agent",
@@ -416,8 +458,15 @@ def guess_owner(rel_path: str) -> str:
         "GameplayMusicSystem.gd": "systems_agent",
         "Main.gd": "systems_agent",
         "MainMenu.gd": "ui_agent",
+        "MainMenuCueLockerPanel.gd": "ui_agent",
         "MainMenuPresentationOverlay.gd": "ui_agent",
+        "MainMenuRunHistoryPanel.gd": "ui_agent",
+        "OathHUD.gd": "ui_agent",
+        "OathSystem.gd": "systems_agent",
+        "OptionsMenu.gd": "ui_agent",
         "PauseMenu.gd": "ui_agent",
+        "PassageHUD.gd": "ui_agent",
+        "PassageSystem.gd": "systems_agent",
         "DebugOverlay.gd": "ui_agent",
         "DebugPanel.gd": "ui_agent",
         "BallDropMeter.gd": "ui_agent",
@@ -428,8 +477,15 @@ def guess_owner(rel_path: str) -> str:
         "QuartermasterOfferRefreshEffect.gd": "ui_agent",
         "ReserveDeploymentPresenter.gd": "ui_agent",
         "ReserveSlotsUI.gd": "ui_agent",
+        "ProgressionSystem.gd": "systems_agent",
+        "RunHistorySystem.gd": "systems_agent",
+        "RunLedgerHUD.gd": "ui_agent",
+        "RunStatsHUD.gd": "ui_agent",
+        "RunStatsSystem.gd": "systems_agent",
         "ScoreSystem.gd": "ui_agent",
         "BallDropSystem.gd": "systems_agent",
+        "TableDecorRandomizer.gd": "ui_agent",
+        "TableObstacleSystem.gd": "systems_agent",
         "AGENTS.md": "cleanup_agent",
     }
     if name in exact_owners:
@@ -452,6 +508,46 @@ def guess_summary(rel_path: str) -> str:
     lowered = rel_path.lower()
     if name == "Table.gd":
         return "High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics."
+    if name == "PassageSystem.gd":
+        return "Owns current-run Passage requirement, active Kraken Request, request rewards/completion, request rerolls, Passage pressure, and successful-run completion state."
+    if name == "PassageHUD.gd":
+        return "Compact live Passage/Kraken Wants HUD presenter with request tooltip and request reroll forwarding."
+    if name == "EventMetadata.gd":
+        return "Central event/request metadata registry for labels and descriptions used by Passage tooltips and future reusable references."
+    if name == "OathSystem.gd":
+        return "Owns data-driven Oath definitions, active Oath state, shot timers, completion/failure, Quartermaster lock state, cue modifier suppression, and debug helpers."
+    if name == "OathHUD.gd":
+        return "Compact active-Oath HUD indicator and tooltip presenter using OathSystem snapshots."
+    if name == "ProgressionSystem.gd":
+        return "Persistent Kraken Favor owner for user://progression.json, successful-Passage reward calculation, safe Favor spending/adding, and cue progression data storage."
+    if name == "CueProgressionSystem.gd":
+        return "Owns cue part definitions, unlock/equip validation, equipped loadout snapshots, effect definitions, and active cue modifier snapshots."
+    if name == "RunStatsSystem.gd":
+        return "Current-run ledger system for money split, sunk/active counts, run time, Passage/Oath/cue snapshots, economy counters, and shared Run Stats row metadata."
+    if name == "RunStatsHUD.gd":
+        return "Live top-left Run Stats button and compact ledger overlay presenter."
+    if name == "RunLedgerHUD.gd":
+        return "Compact lower-HUD BALLS/SUNK counter cluster presenter."
+    if name == "RunHistorySystem.gd":
+        return "Persistent finalized run history owner for user://run_history.json, record normalization, duplicate-save prevention, clearing, and 25-record retention."
+    if name == "MainMenuRunHistoryPanel.gd":
+        return "Main Menu Run History panel UI presenter for list rows, empty state, Back, Clear History, and confirmation."
+    if name == "MainMenuCueLockerPanel.gd":
+        return "Main Menu Cue Locker panel UI presenter for Favor, equipped loadout, grouped cue parts, unlock/equip controls, and Back."
+    if name == "OptionsMenu.gd":
+        return "Reusable Options panel presenter with Audio sliders and context-aware Back behavior for main menu and pause menu."
+    if name == "AudioSettings.gd":
+        return "Audio settings owner for user://settings.cfg, Master/Music/SFX bus lookup, volume conversion, and runtime bus volume application."
+    if name == "BackRoomDealSystem.gd":
+        return "Back Room Deal data/economy owner for unlock threshold, cost, special-ball deal definitions, availability checks, spending, and Reserve insertion."
+    if name == "BackRoomDealPanel.gd":
+        return "Compact Back Room Deal panel presenter for title/flavor, deal rows, unavailable reasons, close/cancel, and selected deal emission."
+    if name == "ItemIconDraw.gd":
+        return "Shared presentation-only compact item/ball preview drawing helpers for shop, Reserve, Back Room, and related HUD surfaces."
+    if name == "TableObstacleSystem.gd":
+        return "Owns TableObstacle spawning/clearing, debug placement, authored collision polygon extraction/cache, broadphase, custom ball collision, debug draw, and counters."
+    if name == "TableDecorRandomizer.gd":
+        return "Presentation-only table decor variant randomizer for authored prop visuals."
     if name == "Ball.gd":
         return "Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags."
     if name == "SpawnSystem.gd":
@@ -459,9 +555,9 @@ def guess_summary(rel_path: str) -> str:
     if name == "BallPlacementSystem.gd":
         return "Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects."
     if name == "QuartermasterSystem.gd":
-        return "Owns Quartermaster inventory, prices, affordability, active rotating offers, event-driven offer refresh, and purchase-to-Reserve state."
+        return "Owns Quartermaster inventory, prices, affordability, active rotating offers, paid event-driven refresh scaling/shot decay, access blockers, and purchase-to-Reserve state."
     if name == "QuartermasterHUD.gd":
-        return "Live right-side Quartermaster side-rail shop presentation with item slots, costs, hover tooltips, affordability tinting, and cue-safe clicks."
+        return "Live right-side Quartermaster side-rail shop presentation with item slots, refresh/Back Room buttons, costs, hover tooltips, affordability tinting, and cue-safe clicks."
     if name == "QuartermasterOfferRefreshEffect.gd":
         return "Presentation-only fresh-stock glow/shimmer effect for newly refreshed Quartermaster offers."
     if name == "ReserveSystem.gd":
@@ -475,11 +571,11 @@ def guess_summary(rel_path: str) -> str:
     if name == "BallDropMeter.gd":
         return "Retired/legacy vertical HUD meter for the old automatic BallDrop loop; current progression UI is TableEventMeter."
     if name == "TableEventSystem.gd":
-        return "Owns Kraken Intervention shot-earned threshold tracking, pending readiness, weighted offers, purchases, debug triggers, and player-chosen Table Event execution routing."
+        return "Owns Kraken Intervention shot-earned threshold tracking, pending readiness, weighted offers, Oath-backed single-slot replacement, purchases, cargo discovery, debug triggers, and player-chosen Table Event execution routing."
     if name == "TableEventMeter.gd":
         return "Horizontal bottom-center KRAKEN INTERVENTION meter with shot progress, percent text, pulse feedback, and ready icon."
     if name == "TableEventMenu.gd":
-        return "Compact Request Kraken Intervention menu with three weighted offer cards, affordability, rarity display, hover, close, and purchase forwarding."
+        return "Compact Request Kraken Intervention menu with weighted offer cards, Oath choice replacement panel, affordability, rarity display, hover, close, and purchase/replacement forwarding."
     if name == "HudFeed.gd":
         return "Bottom-left rolling captain's-log feed with fading stack, hover-scroll review, history, and multiline wrapped entries."
     if name == "PocketStreakSystem.gd":
@@ -491,9 +587,9 @@ def guess_summary(rel_path: str) -> str:
     if name == "TableImpactShakeSystem.gd":
         return "Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts."
     if name == "ScoreSystem.gd":
-        return "Converts shot-event history into Doubloons and evolving pocket-side score stack presentation."
+        return "Converts shot-event history into Doubloons, Treasure/Embezzler payout awards, and evolving pocket-side score stack presentation."
     if name == "ShotEventSystem.gd":
-        return "Tracks causal per-shot foundational, skilled, heroic, and legendary scoring events for sunk balls."
+        return "Tracks causal per-shot foundational, skilled, heroic, legendary, and sink-moment scoring events for sunk balls."
     if name == "WayfinderSystem.gd":
         return "Handles Wayfinder activation, guided redirects, temporary Wayfinder Current carriers, transfer-on-hit guided momentum, and current-caused scoring snapshots."
     if name == "WayfinderCurrentPresenter.gd":
@@ -505,7 +601,7 @@ def guess_summary(rel_path: str) -> str:
     if name == "CannonBallSystem.gd":
         return "Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence."
     if name == "TreasureBallSystem.gd":
-        return "Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting."
+        return "Treasure Ball system for identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting; payout/discovery live in scoring/event systems."
     if name == "EmbezzlerSystem.gd":
         return "Embezzler anomaly system for copied Doubloon storage, secret target pocket, willingness, once-per-shot hide-or-run decisions, escape commitment, pocket roll, capture payout, escape cleanup, visuals, and debug counters."
     if name == "DebugOverlay.gd":
@@ -577,11 +673,11 @@ def build_readme() -> str:
             "Current snapshot:",
             "",
             "- Kraken An Eight Ball is a systemic arcade-chaos billiards prototype.",
-            "- The current loop is better shots -> more Doubloons -> Kraken Intervention opportunities -> player-chosen Table Events -> more balls/anomalies/chaos -> survive the escalating table.",
-            "- Kraken Intervention is the active progression spine; automatic score-triggered BallDrop rewards are retired/gated.",
+            "- The current loop is better shots -> Doubloons and Kraken Requests -> Passage reduction -> Kraken Intervention / Quartermaster / Oath choices -> more balls/anomalies/chaos -> successful Passage and Kraken Favor.",
+            "- Passage is the current run objective; Kraken Intervention is the active chosen-chaos economy; automatic score-triggered BallDrop rewards are retired/gated.",
             "- BallDropSystem is mostly penalty handling, legacy support, and debug plumbing.",
-            "- Main Menu, pooled collision audio, gameplay music, live Quartermaster HUD, Reserve slots/deployment, HudFeed, modular debug panels, evolving score stacks, Pocket Streaks, Anchor curse seeds, Embezzler, Broadside Attack, Wayfinder Current, and expanded shot-event tiers are active modern systems.",
-            "- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, Treasure perception grace/hiding, Embezzler hide-or-run pressure, Pocket Streak whirlpools, and Wayfinder Current readability pulses remain important active systems.",
+            "- Passage, Oaths, Run Stats/History, Kraken Favor, Cue Locker/modifiers, Options, Back Room Deals, table debris, Main Menu, pooled collision audio, gameplay music, live Quartermaster HUD, Reserve slots/deployment, HudFeed, modular debug panels, evolving score stacks, Pocket Streaks, Anchor curse seeds, Treasure payout/discovery, Embezzler, Broadside Attack, Wayfinder Current, and expanded shot-event tiers are active modern systems.",
+            "- Early cue reclaim, cue-drag hover suppression, fake-3D presentation, Cannon heat/impact presence, Treasure perception grace/hiding, Embezzler hide-or-run pressure, Pocket Streak whirlpools, authored debris collision, and Wayfinder Current readability pulses remain important active systems.",
             "- Generated reports are a project map only; `AGENTS.md` and the real scripts/scenes remain authoritative.",
             "",
             "Important rules:",
@@ -647,38 +743,46 @@ def build_project_index(files: list[FileInfo], changed_paths: list[str]) -> str:
         "## Current Game State",
         "",
         "- Kraken An Eight Ball is a systemic arcade-chaos billiards prototype with multiple active escalation systems.",
-        "- Core loop: better shots -> more Doubloons -> Kraken Intervention opportunities -> player-chosen Table Events -> more balls/anomalies/chaos -> stronger scoring opportunities -> survive the escalating table state.",
+        "- Core loop: better shots -> Doubloons and Kraken Requests -> Passage reduction -> Kraken Intervention / Quartermaster / Oath choices -> more balls/anomalies/chaos -> stronger scoring opportunities -> successful Passage and Kraken Favor.",
         "- `MainMenu.tscn` / `MainMenu.gd` now provide an atmospheric layered title screen with lightweight animated overlays.",
-        "- `TableEventSystem.gd` owns the active Kraken Intervention economy: shot-earned threshold, pending readiness after cue control, weighted offers, purchases, and event routing.",
+        "- `PassageSystem.gd` owns the current-run Passage objective and active Kraken Requests.",
+        "- `OathSystem.gd` owns data-driven Oaths, active timers, penalties/restrictions, Quartermaster lock state, and cue modifier suppression.",
+        "- `TableEventSystem.gd` owns the active Kraken Intervention economy: shot-earned threshold, pending readiness after cue control, weighted offers, Oath-backed single-slot replacement, purchases, cargo discovery, and event routing.",
         "- Kraken Intervention replaces invisible automatic reward spawning with economic agency, intentional chaos, and tactical risk/reward decisions.",
         "- `TableEventMeter.gd` and `TableEventMenu.gd` present the horizontal KRAKEN INTERVENTION meter and compact Request Kraken Intervention choice menu.",
         "- Automatic score-triggered BallDrop rewards are retired/gated. `BallDropSystem.gd` is mostly penalty handling, legacy support, and debug plumbing.",
         "- Current Table Events include Cheap Cargo, Loose Cargo, Powder Cache, Wayfinder's Favor, Cannon Warning, Broadside Attack, and Wayfinder Current.",
+        "- Loose Cargo Contraband uses one event-level roll and a weighted table; Lucky Chalk can raise the chance through cue modifiers.",
         "- Broadside Attack is the first authored staged intervention milestone: warning beat, Powder Keg lanes, then delayed Cannon Balls from a cursed gun deck.",
         "- Wayfinder Current is the cursed-tide intervention: temporary possession with transferable guided momentum and current-caused scoring support.",
-        "- `QuartermasterSystem.gd` owns three rotating tactical offers; `QuartermasterHUD.gd` presents them as a live side-rail shop; successful buys spend Doubloons and fill `ReserveSystem.gd` slots.",
+        "- `QuartermasterSystem.gd` owns three rotating tactical offers and paid stock refresh; `QuartermasterHUD.gd` presents them as a live side-rail shop; successful buys spend Doubloons and fill `ReserveSystem.gd` slots.",
+        "- `BackRoomDealSystem.gd` owns expensive specific-item procurement into Reserve after refresh pressure climbs high enough.",
         "- Reserve deployment uses `BallPlacementSystem.gd`, with `ReserveSlotsUI.gd` and `ReserveDeploymentPresenter.gd` handling icon-only slots and tethered presentation.",
+        "- `RunStatsSystem.gd` owns current-run stats; `RunHistorySystem.gd` persists finalized records; `ProgressionSystem.gd` persists Kraken Favor and cue progression data.",
+        "- `CueProgressionSystem.gd` owns cue definitions, unlock/equip state, effect definitions, and generic active modifier snapshots.",
         "- `BallAudioSystem.gd` owns pooled event-driven ball-to-ball collision sounds with spam filtering.",
         "- `GameplayMusicSystem.gd` owns low-volume looping gameplay music, separate from SFX and quieter than collision/event readability.",
         "- `PocketStreakSystem.gd` and `PocketStreakPresenter.gd` own same-pocket streak scoring, queued X2/X3/X4+ presentation, audio, whirlpool visuals, and psychological threat tells with deliberately no gameplay suction.",
         "- `HudFeed.gd` owns the rolling bottom-left captain's-log feed with fading, hover review, and multiline wrapping.",
-        "- `DebugOverlay.gd` supports modular draggable panels, pause-safe interaction, and requested-section hidden-work gating.",
-        "- `ShotEventSystem.gd` tracks foundational, skilled, heroic, and legendary scoring-event tiers for `ScoreSystem.gd` rewards.",
-        "- `ScoreSystem.gd` routes implemented reward tiers into evolving pocket-side score stacks with count-up totals, tier colors/glows, lane management, and yield/fade behavior.",
+        "- `DebugOverlay.gd` supports modular draggable panels, pause-safe interaction, scrollable Dev Options, and requested-section hidden-work gating.",
+        "- `ShotEventSystem.gd` tracks foundational, skilled, heroic, legendary, and sink-moment scoring-event tiers for `ScoreSystem.gd` rewards.",
+        "- `ScoreSystem.gd` routes implemented reward tiers and Treasure/Embezzler payouts into evolving pocket-side score stacks with count-up totals, tier colors/glows, lane management, and yield/fade behavior.",
         "- Early cue reclaim lets players regain control after the cue ball stops under safe motion conditions.",
         "- `TableImpactShakeSystem.gd` owns fake-3D presentation-only impact shake for Powder Keg and Cannon events.",
+        "- `TableObstacleSystem.gd` owns debug-spawned wood debris and custom authored-polygon collision support.",
         "- Anchor's old continuous pull field is retired; current Anchor gameplay is state/event-driven curse seeds, chains, warning, spread, and collapse.",
-        "- Cannon Ball is a debug-spawn delayed-chaos future-problem anomaly with heat presence and heavy-impact behavior.",
-        "- Treasure Ball is a debug-spawn perception grace/hiding experiment that reacts to being watched by the aim guide.",
+        "- Cannon Ball is a debug/Event/Contraband heavy-iron anomaly with heat presence and heavy-impact behavior.",
+        "- Treasure Ball is a rare discovery/perception grace/hiding experiment that reacts to being watched by the aim guide and awards a large payout when sunk.",
         "- Embezzler is a separate capped/debug-spawn greed anomaly that copies Doubloon value, hides or runs once per shot, tries to escape through a secret pocket, and pays out if caught.",
         "- Optimization philosophy: support chaos gracefully, coalesce repeated work, and degrade visuals before limiting gameplay.",
         "",
         "## Next Major Goal",
         "",
-        "- Continue stabilizing the Kraken Intervention/Table Event economy: threshold feel, event costs, offer weights, signature-event readability, and debug clarity.",
+        "- Continue stabilizing the Passage-centered run loop: request clarity/rewards, Passage pacing, completion summaries, Kraken Favor cadence, and cue progression readability.",
+        "- Continue tuning the supporting economy: Kraken Intervention threshold feel, event costs, offer weights, Quartermaster refresh pressure, Back Room timing, and Oath risk readability.",
         "- Tune new scoring-event thresholds only through focused passes; do not casually change score values during UI/docs/cleanup work.",
         "- Future Table Events can expand the intervention pool, but event execution should remain in focused owners rather than growing Table.gd.",
-        "- Future Quartermaster work can add more stock rules, rerolls, or unlocks, but the current event-driven rotating-offer and live HUD spine should stay small.",
+        "- Future Quartermaster and cue progression work can add more stock rules, rerolls, unlocks, or modifiers, but current data owners should stay small and data-driven.",
         "- Cue-ball and eight-ball sinks cost 25 Doubloons; cue-ball sinks remove one eligible object ball, while eight-ball sinks try to transform one eligible object ball into an Anchor curse seed.",
         "- System boundary: `TableEventSystem.gd` decides intervention opportunities/purchases, then `SpawnSystem.gd` and anomaly systems perform consequences while `Table.gd` coordinates only.",
         "",
@@ -919,8 +1023,8 @@ def risks_for_agent(agent_id: str) -> list[str]:
         "anomaly_ball_agent": [
             "Anchor curse-seed behavior is tuned by feel and should be adjusted incrementally without restoring continuous field pull.",
             "Future anomalies should avoid hidden coupling through Table.gd.",
-            "Treasure rewards and regular spawn odds are not implemented yet.",
-            "Embezzler spawn odds and anomaly special interactions are not implemented yet.",
+            "Treasure payout and cargo/contraband discovery are implemented; keep Treasure distinct from Embezzler cashout/escape behavior.",
+            "Embezzler is capped and can appear through debug/contraband paths; broader spawn odds and special interactions are still future work.",
             "Wayfinder Current affected-ball count is intentionally uncapped for now; tune radius/readability before adding hard caps.",
         ],
         "ui_agent": [

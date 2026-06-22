@@ -2,13 +2,14 @@ extends Control
 class_name BallDropMeter
 
 # index:title Ball Drop Meter
-# index:category UI / Systems / In Progress
-# index:status In Progress
+# index:category UI / Systems / Legacy
+# index:status Retired
 # index:owner ui_agent
-# index:notes Vertical right-side meter for score progress toward the next earned ball drop.
+# index:notes Retired vertical meter for the old automatic BallDrop loop.
 
-# Player-facing progress display only. BallDropSystem owns the real state,
-# signals, thresholds, and earned-drop decisions.
+# Legacy progress display only. The active player-facing progression meter is
+# TableEventMeter / Kraken Intervention; BallDropSystem remains backstage
+# legacy/gated support plus cue/eight-ball penalty plumbing.
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const PANEL_COLOR := Color(0.035, 0.052, 0.052, 0.82)
 const PANEL_FLASH_COLOR := Color(0.32, 0.22, 0.07, 0.92)

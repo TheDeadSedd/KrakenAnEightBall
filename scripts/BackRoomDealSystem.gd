@@ -167,6 +167,9 @@ func _get_deal_blocker() -> String:
 		return "Back Room not ready"
 	if not _is_unlocked():
 		return "Refresh cost must reach %s" % _get_unlock_refresh_cost()
+	var quartermaster_blocker: String = table.quartermaster_system.get_quartermaster_access_blocker()
+	if not quartermaster_blocker.is_empty():
+		return quartermaster_blocker
 	if table.reserve_system.is_full():
 		return "Reserve slots full"
 	if not table.score_system.can_afford_doubloons(_get_deal_cost()):

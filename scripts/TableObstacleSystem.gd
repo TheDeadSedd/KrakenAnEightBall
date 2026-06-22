@@ -475,7 +475,7 @@ func _get_or_create_obstacles_holder() -> Node2D:
 	if table == null:
 		return null
 
-	var holder := table.get_node_or_null("Obstacles") as Node2D
+	var holder: Node2D = table.get_node_or_null("Obstacles") as Node2D
 	if holder == null:
 		holder = Node2D.new()
 		holder.name = "Obstacles"
@@ -511,7 +511,7 @@ func _get_debug_spawn_position() -> Vector2:
 
 
 func _get_debris_spawn_rect() -> Rect2:
-	var source_rect := table.playfield_rect
+	var source_rect: Rect2 = table.playfield_rect
 	if source_rect.size == Vector2.ZERO:
 		source_rect = BilliardsTable.SPAWN_REFERENCE_RECT
 

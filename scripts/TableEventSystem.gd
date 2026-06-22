@@ -170,7 +170,7 @@ const EVENT_DATA := {
 @export_range(0.1, 2.5, 0.05) var broadside_stage_delay := 0.75
 @export_range(80.0, 900.0, 10.0) var broadside_cannon_launch_speed := 420.0
 
-var table
+var table: BilliardsTable
 var shot_active := false
 var current_shot_doubloons := 0
 var pending_event_available := false
@@ -213,7 +213,7 @@ var debug_loose_cargo_contraband_kind := DEBUG_LOOSE_CARGO_CONTRABAND_RANDOM
 var cue_modifier_snapshot: Dictionary = {}
 
 
-func setup(table_ref) -> void:
+func setup(table_ref: BilliardsTable) -> void:
 	table = table_ref
 	offer_rng.seed = OFFER_RNG_SEED
 	cargo_stowaway_rng.seed = CARGO_STOWAWAY_RNG_SEED
@@ -373,7 +373,7 @@ func request_purchase_offer(offer_index: int) -> bool:
 
 
 func request_reroll_offer_with_oath(offer_index: int, oath_id: String = OathSystem.OATH_OF_URGENCY) -> bool:
-	var blocker := _get_offer_reroll_blocker(offer_index, oath_id)
+	var blocker: String = _get_offer_reroll_blocker(offer_index, oath_id)
 	if not blocker.is_empty():
 		denied_offer_oath_rerolls += 1
 		last_blocker_reason = blocker
@@ -392,8 +392,8 @@ func request_reroll_offer_with_oath(offer_index: int, oath_id: String = OathSyst
 		return false
 
 	_ensure_offer_slots()
-	var previous_event_id := str(active_offer_ids[offer_index])
-	var replacement_event_id := _pick_reroll_replacement_event_id(offer_index)
+	var previous_event_id: String = str(active_offer_ids[offer_index])
+	var replacement_event_id: String = _pick_reroll_replacement_event_id(offer_index)
 	if replacement_event_id.is_empty():
 		denied_offer_oath_rerolls += 1
 		last_blocker_reason = "No replacement omen available"
@@ -902,7 +902,7 @@ func _get_offer_reroll_base_blocker(offer_index: int) -> String:
 		return "Unknown Table Event offer"
 
 	_ensure_offer_slots()
-	var event_id := str(active_offer_ids[offer_index])
+	var event_id: String = str(active_offer_ids[offer_index])
 	if event_id.is_empty():
 		return "No event in this slot yet"
 	if _get_oath_system() == null:
@@ -933,7 +933,7 @@ func _get_oath_system() -> OathSystem:
 
 
 func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
-	var reroll_blocker := _get_offer_reroll_choice_blocker(offer_index)
+	var reroll_blocker: String = _get_offer_reroll_choice_blocker(offer_index)
 	if event_id.is_empty():
 		return {
 			"id": EMPTY_OFFER_ID,
@@ -1206,12 +1206,12 @@ func _pick_reroll_replacement_event_id(offer_index: int) -> String:
 	if not _is_valid_offer_index(offer_index):
 		return EMPTY_OFFER_ID
 
-	var current_event_id := str(active_offer_ids[offer_index])
-	var preferred_candidates := _get_reroll_replacement_candidates(offer_index, true)
+	var current_event_id: String = str(active_offer_ids[offer_index])
+	var preferred_candidates: Array = _get_reroll_replacement_candidates(offer_index, true)
 	if not preferred_candidates.is_empty():
 		return _pick_weighted_event_from_candidates(preferred_candidates)
 
-	var fallback_candidates := _get_reroll_replacement_candidates(offer_index, false)
+	var fallback_candidates: Array = _get_reroll_replacement_candidates(offer_index, false)
 	if not fallback_candidates.is_empty():
 		return _pick_weighted_event_from_candidates(fallback_candidates)
 	if not current_event_id.is_empty():

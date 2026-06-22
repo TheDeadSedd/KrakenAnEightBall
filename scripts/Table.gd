@@ -6,6 +6,7 @@ signal status_text_changed(text: String)
 signal game_finished(text: String)
 signal run_ball_counts_changed(active_ball_count: int, balls_sunk_count: int)
 signal shot_taken(count: int)
+signal shot_finished(count: int)
 signal gameplay_mouse_lock_changed(locked: bool)
 
 #region Data Containers
@@ -69,8 +70,10 @@ const KRAKEN_ART_ALPHA := 0.18
 const READY_STATUS_TEXT := "The Kraken waits with payment."
 const LOADING_STATUS_TEXT := "Loading table..."
 
-# Legacy pre-BallDrop reward triggers. Keep disabled for normal gameplay so
-# earned drops flow only through ScoreSystem -> BallDropSystem -> SpawnSystem.
+# Legacy pre-BallDrop reward triggers. Keep disabled for normal gameplay.
+# The active score-to-chaos path is ScoreSystem -> TableEventSystem /
+# Kraken Intervention -> SpawnSystem; BallDrop remains legacy/gated support
+# plus cue/eight-ball penalty plumbing.
 const LEGACY_NON_SCORE_REWARD_DROPS_ENABLED := false
 const MULTI_POCKET_BONUS_THRESHOLD := 2
 const CHAIN_EVENT_SPEED_GAIN_MIN := 6.0
@@ -1463,6 +1466,7 @@ func _try_finish_shot() -> void:
 	shot_event_system.finish_shot()
 	pocket_streak_system.finish_shot()
 	table_event_system.finish_shot()
+	shot_finished.emit(shots_taken_count)
 	if should_advance_anchor_chains:
 		_handle_cue_control_regained_after_shot()
 

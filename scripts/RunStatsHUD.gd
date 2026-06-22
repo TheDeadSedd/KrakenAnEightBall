@@ -11,38 +11,6 @@ const CLOSE_TOOLTIP_TEXT := "Close"
 const PANEL_SIZE := Vector2(420.0, 995.0)
 const PANEL_OFFSET := Vector2(0.0, 50.0)
 const ROOT_SIZE := Vector2(450.0, 1085.0)
-const ROWS := [
-	{"label": "Doubloons Earned", "key": "doubloons_earned"},
-	{"label": "Doubloons Lost", "key": "doubloons_lost"},
-	{"label": "Passage Remaining", "key": "remaining_passage"},
-	{"label": "Kraken Wants", "key": "current_kraken_request"},
-	{"label": "Request Reward Bonus", "key": "request_reward_multiplier_bonus_summary"},
-	{"label": "Active Oaths", "key": "active_oaths_summary"},
-	{"label": "Oath Penalty Cut", "key": "oath_passage_penalty_reduction_summary"},
-	{"label": "Cue", "key": "cue_body"},
-	{"label": "Tip", "key": "cue_tip"},
-	{"label": "Grip", "key": "cue_grip"},
-	{"label": "Ferrule", "key": "cue_ferrule"},
-	{"label": "Chalk", "key": "cue_chalk"},
-	{"label": "Cue Mods", "key": "active_cue_modifiers_summary"},
-	{"label": "Cue Power Bonus", "key": "cue_power_bonus_summary"},
-	{"label": "Loose Contraband", "key": "loose_cargo_contraband_chance_summary"},
-	{"label": "QM Shot Cooldown", "key": "quartermaster_refresh_decay_summary"},
-	{"label": "Shots Taken", "key": "shots_taken"},
-	{"label": "Balls Sunk", "key": "balls_sunk"},
-	{"label": "Highest Pocket Streak", "key": "highest_pocket_streak"},
-	{"label": "Interventions Triggered", "key": "interventions_triggered"},
-	{"label": "Shop Refreshes", "key": "quartermaster_refreshes_used"},
-	{"label": "Refresh Doubloons", "key": "quartermaster_refresh_doubloons_spent"},
-	{"label": "Back Room Deals", "key": "back_room_deals_made"},
-	{"label": "Back Room Doubloons", "key": "back_room_deal_doubloons_spent"},
-	{"label": "Request Rerolls", "key": "kraken_request_rerolls_used"},
-	{"label": "Reroll Passage Added", "key": "passage_added_by_request_rerolls"},
-	{"label": "Contraband Found", "key": "contraband_found"},
-	{"label": "Treasure Claimed", "key": "treasure_claimed"},
-	{"label": "Current Ball Count", "key": "current_ball_count"},
-	{"label": "Run Time", "key": "run_time_seconds"},
-]
 
 var run_stats_system: RunStatsSystem
 var ledger_button: Button
@@ -202,7 +170,7 @@ func _build_panel() -> void:
 	stats_grid.add_theme_constant_override("v_separation", 5)
 	stack.add_child(stats_grid)
 
-	for row_value in ROWS:
+	for row_value in RunStatsSystem.get_run_stats_rows():
 		var row: Dictionary = row_value
 		var stat_key := str(row.get("key", ""))
 		stats_grid.add_child(_make_name_label(str(row.get("label", ""))))
@@ -276,7 +244,7 @@ func _update_values() -> void:
 	if value_labels.is_empty():
 		return
 
-	for row_value in ROWS:
+	for row_value in RunStatsSystem.get_run_stats_rows():
 		var row: Dictionary = row_value
 		var stat_key := str(row.get("key", ""))
 		var value_label: Label = value_labels.get(stat_key) as Label

@@ -6,7 +6,7 @@ Kraken An Eight Ball is a Godot 4 / GDScript pirate-eldritch systemic arcade-cha
 
 The project is now a playable escalation sandbox with multiple interacting systems. The current core loop is:
 
-better shots -> more Doubloons -> Kraken Intervention opportunities -> player-chosen Table Events -> more balls/anomalies/chaos -> better scoring opportunities -> survive an escalating table state.
+better shots -> more Doubloons and scoring feats -> Passage reduction and Kraken Intervention opportunities -> player-chosen Table Events / Quartermaster tools / Oath-backed rerolls -> more balls/anomalies/chaos -> stronger scoring opportunities -> complete Passage and earn persistent Kraken Favor.
 
 Core pillars:
 
@@ -15,11 +15,15 @@ Core pillars:
 - Doubloons scoring driven by trick-shot event history.
 - Pocket-side score celebrations instead of generic center-screen scoring spam.
 - Kraken Intervention, a shot-earned Table Event economy that replaces automatic score-triggered BallDrop rewards with player-chosen chaos.
+- Passage, the current run objective spine: earn enough wealth and satisfy Kraken Requests to bargain safe passage.
+- Data-driven Oaths that can replace individual Kraken Intervention offers and temporarily impose risk/restriction.
 - Pocket Streak scoring and localized pocket wake-up presentation for repeated same-pocket sinks in one shot.
 - Rolling HudFeed captain's-log messages for readable scoring, penalty, anomaly, and intervention history.
-- The Quartermaster tactical shop, rotating offers, reserve slots, and reusable ball placement flow.
+- The Quartermaster tactical shop, rotating offers, paid stock refresh, Back Room Deals, reserve slots, and reusable ball placement flow.
+- Current-run Run Stats, persistent Run History, persistent Kraken Favor, Cue Locker unlocks/equipment, and cue modifier plumbing.
 - Active anomaly balls: Wayfinder Ball, Powder Keg, Anchor curse seeds, Cannon Ball, Treasure Ball, and Embezzler experiments.
 - Expanded foundational, skilled, heroic, and legendary trick-shot event rewards.
+- Authored wood debris obstacles with custom polygon collision support and debug placement controls.
 - Atmospheric layered main menu presentation with lightweight draw-only motion.
 - Pooled event-driven billiards collision audio that scales with chaos.
 - Modular draggable debug panels with pause-safe interaction and hidden-work gating.
@@ -99,11 +103,27 @@ Does not own shop inventory, Reserve slot contents, Doubloon spending, score pro
 
 ### `scripts/QuartermasterSystem.gd`
 
-Owns Quartermaster shop inventory, item IDs, prices, descriptions, affordability checks, purchase state, active rotating offer slots, deterministic/event-driven stock refresh, and shop debug snapshots/counters.
+Owns Quartermaster shop inventory, item IDs, prices, descriptions, affordability checks, purchase state, active rotating offer slots, paid deterministic/event-driven stock refresh, refresh cost scaling/shot decay, Quartermaster access blockers such as Oath of Isolation, and shop debug snapshots/counters.
 
-Current economy flow is Quartermaster buy -> first open Reserve slot fills. Purchases are allowed only when the player can afford the item and Reserve has space. A successful purchase spends Doubloons, fills the first empty Reserve slot, and refreshes only the purchased offer slot.
+Current economy flow is Quartermaster buy -> first open Reserve slot fills. Purchases are allowed only when the player can afford the item, Quartermaster is available, and Reserve has space. A successful purchase spends Doubloons, fills the first empty Reserve slot, and refreshes only the purchased offer slot.
 
-Does not place balls directly, emit `doubloons_awarded`, advance Kraken Intervention or legacy BallDrop progress, own placement validation, or own Reserve deployment presentation. No passive stock timers should be introduced unless explicitly requested; offer refresh should stay event-driven.
+Quartermaster Refresh is run-local economic pressure: base cost 10 Doubloons, cost doubles after each refresh, and shot decay lowers the current refresh cost toward the base. Cue modifiers may alter the decay amount through generic modifier snapshots, not equipped-item checks.
+
+Does not place balls directly, emit `doubloons_awarded`, advance Kraken Intervention or legacy BallDrop progress, own Back Room Deal purchase validation, own placement validation, or own Reserve deployment presentation. No passive stock timers should be introduced unless explicitly requested; offer refresh should stay event-driven.
+
+### `scripts/BackRoomDealSystem.gd`
+
+Owns Back Room Deal data/economy: unlock threshold, deal cost, selectable special-ball definitions, affordability/availability checks, Embezzler cap checks, Reserve-full checks, purchase validation, spending, and Reserve insertion.
+
+Current first-pass deals unlock when Quartermaster refresh cost reaches 80, cost 250 Doubloons, and can procure Wayfinder Ball, Powder Keg, Treasure Ball, Cannon Ball, or Embezzler when available. Oath of Isolation blocks Back Room use because it makes Quartermaster unavailable; it does not erase unlock progress.
+
+Does not own Back Room panel presentation, normal Quartermaster stock generation, normal stock refresh math, scoring, Kraken Intervention progress, placement validation, or spawned-ball behavior.
+
+### `scripts/BackRoomDealPanel.gd`
+
+Owns the compact Back Room Deal panel presentation: title/flavor, option rows, cost/unavailable text, dimmed states, close/cancel behavior, and selected deal ID emission.
+
+Does not own deal definitions, costs, spending, Reserve insertion, Embezzler cap logic, or Quartermaster refresh behavior. `BackRoomDealSystem.gd` remains the data/economy owner.
 
 ### `scripts/QuartermasterOfferRefreshEffect.gd`
 
@@ -113,11 +133,17 @@ Does not own stock selection, prices, affordability, Reserve behavior, spending,
 
 ### `scripts/QuartermasterHUD.gd`
 
-Owns the active live-gameplay Quartermaster side-rail shop presentation: compact right-side square item slots, cost text, hover tooltip content, affordability tinting, refresh shimmer, shared item icon drawing, and cue-input-safe click routing into `QuartermasterSystem.gd`.
+Owns the active live-gameplay Quartermaster side-rail shop presentation: compact right-side square item slots, cost text, refresh button/cost state, Back Room entry button, hover tooltip content, affordability tinting, refresh shimmer, shared item icon drawing, and cue-input-safe click routing into `QuartermasterSystem.gd`.
 
-This replaces the old active pause-menu purchasing presentation. Tooltips should stay lightweight and only appear on hover; item descriptions should not become permanent inventory-panel text again. Empty HUD space should pass through to gameplay, hover should not interrupt an active cue drag, and clicks on actual item slots should intentionally consume UI input.
+This replaces the old active shop purchasing presentation that once lived in `PauseMenu.gd`. Tooltips should stay lightweight and only appear on hover; item descriptions should not become permanent inventory-panel text again. Empty HUD space should pass through to gameplay, hover should not interrupt an active cue drag, and clicks on actual item slots should intentionally consume UI input.
 
-Does not own offer inventory, prices, stock refresh, Doubloon spending, Reserve slot mutation, placement validation, or event economy. `QuartermasterSystem.gd` remains the shop/economy owner.
+Does not own offer inventory, prices, stock refresh math, Back Room definitions/purchases, Doubloon spending, Reserve slot mutation, placement validation, or event economy. `QuartermasterSystem.gd` remains the shop/economy owner, and `BackRoomDealSystem.gd` remains the Back Room economy owner.
+
+### `scripts/ItemIconDraw.gd`
+
+Owns shared presentation-only drawing helpers for compact item/ball previews used by Quartermaster, Reserve, Back Room, and related HUD surfaces.
+
+Does not own item definitions, prices, spawn behavior, Reserve contents, or gameplay identity. It should stay visual-only and small.
 
 ### `scripts/ReserveSystem.gd`
 
@@ -195,6 +221,14 @@ Owns scene-authored boundary loading from `Table/Boundaries`, cached rail/jaw `C
 
 Does not own ball physics tuning, authored node placement, pocket checks, or procedural/fallback table geometry.
 
+### `scripts/TableObstacleSystem.gd`
+
+Owns first-pass table obstacle/debris support: the `Table/Obstacles` holder, `TableObstacle.tscn` spawning/clearing, debug placement across the playable felt, authored `CollisionPolygon2D` extraction, cached transformed polygon collision data, broadphase rejection, custom ball-vs-polygon bounce resolution, collision debug drawing, and obstacle performance counters.
+
+Obstacle collision uses custom billiards physics data, not Godot physics simulation. Collision polygons are read from authored obstacle scenes, transformed/cached, and checked against moving balls only.
+
+Does not own Table Event spawning rules, score rewards, general ball physics constants, rail/pocket behavior, cue feel, or obstacle lifetimes/events beyond debug spawn/clear.
+
 ### `scripts/ShotEventSystem.gd`
 
 Owns passive per-shot event history and causal scoring context.
@@ -202,8 +236,8 @@ Owns passive per-shot event history and causal scoring context.
 Current implemented event tiers:
 
 - Foundational: `BANK`, `CHAIN`, `MULTI_CHAIN`, `ANOMALY_TOUCH`, `MULTI_SINK`.
-- Skilled: `KRAKEN_KICK`, `DOUBLE_BANK`, `THIN_CUT`, `CLUSTER_BREAK`.
-- Heroic: `CROSS_CORNER_BANK`, `FULL_TABLE_KICK`, `POWDER_ROUTE`, `KRAKEN_CURRENT`.
+- Skilled: `KRAKEN_KICK`, `DOUBLE_BANK`, `THIN_CUT`, `CLUSTER_BREAK`, `LAST_GASP`, `POWER_SINK`, `SPLIT_THE_LOOT`.
+- Heroic: `CROSS_CORNER_BANK`, `FULL_TABLE_KICK`, `POWDER_ROUTE`, `KRAKEN_CURRENT`, `LONG_HAUL`.
 - Legendary: `TRIPLE_BANK`, `CANNON_CHAIN`, `TREASURE_SNARE`.
 
 `DEAD_MANS_BANK` and other named future events are not implemented yet.
@@ -212,7 +246,7 @@ Does not award Doubloons, show UI, change gameplay outcomes, or alter physics. I
 
 ### `scripts/ScoreSystem.gd`
 
-Owns Doubloons reward values for all implemented shot-event tiers, running Doubloons total, scoring breakdown debug logs, HUD total signal, and pocket-side score popup presentation.
+Owns Doubloons reward values for all implemented shot-event tiers, Treasure claim payout routing, running Doubloons total, scoring breakdown debug logs, HUD total signal, and pocket-side score popup presentation.
 
 Does not own shot event tracking, pocket capture, physics, anomaly behavior, reward spawning, Kraken Intervention/Table Event economy, shops, progression, or heavy VFX.
 
@@ -225,6 +259,8 @@ Current score presentation notes:
 - Lane management keeps tiers separated near pockets, allows lower-priority/older stacks to yield or fade early, and preserves pocket-side identity.
 - The old special popup path should be reserved only for unknown/future rewards or cases still intentionally outside the stack system.
 - Score values should not change during presentation-only passes.
+
+Treasure claim payout currently uses the normal Doubloon award path so HUD totals, HudFeed, Run Stats, Passage contribution, and other earned-score listeners stay consistent. Avoid double-awarding Treasure sink rewards.
 
 ### `scripts/BallDropSystem.gd`
 
@@ -243,7 +279,7 @@ Does not own object-ball scoring values, score popup presentation, Kraken Interv
 
 ### `scripts/TableEventSystem.gd`
 
-Owns the active Kraken Intervention / Table Event economy: per-shot Doubloon threshold tracking, pending intervention state, cue-control-gated readiness, weighted/rarity-based offer selection, purchase validation/spending, event execution routing, debug event triggers, Table Event debug snapshots, and the default gate that disables old automatic BallDrop reward spawning.
+Owns the active Kraken Intervention / Table Event economy: per-shot Doubloon threshold tracking, pending intervention state, cue-control-gated readiness, weighted/rarity-based offer selection, single-offer replacement/reroll, purchase validation/spending, event execution routing, cargo Treasure/Contraband discovery decisions, debug event triggers, Table Event debug snapshots, and the default gate that disables old automatic BallDrop reward spawning.
 
 This is the chosen-chaos spine: strong shots earn a paid opportunity instead of invisible score-to-spawn plumbing. Keep the fuller design philosophy in the Kraken Intervention boundary below as the canonical wording.
 
@@ -256,6 +292,7 @@ Current flow:
 - The opportunity becomes clickable only after cue control returns / the player has a decision window.
 - The player opens the intervention menu manually and chooses one offer, or closes/cancels and keeps the opportunity.
 - Buying an offer spends Doubloons through the safe spend path and must not refill the meter.
+- Replacing one offer swears a selectable Oath and rerolls only that slot without spending Doubloons, executing the offer, or refilling the meter.
 
 Current offer pool:
 
@@ -276,6 +313,14 @@ Broadside sequencing lives here, while `SpawnSystem.gd`, `PowderKegSystem.gd`, a
 
 Wayfinder Current is also routed from here, but temporary carrier/guidance behavior lives in `WayfinderSystem.gd`. Table Event debug triggers for Broadside and Wayfinder Current may bypass cost/readiness only; they should call the same event behavior and must not refill Kraken Intervention.
 
+Cargo discovery notes:
+
+- Cheap Cargo has a rare Treasure replacement chance.
+- Loose Cargo has one event-level Contraband roll; on success exactly one regular cargo ball is replaced through the weighted Contraband Cargo table.
+- Current Contraband table: Wayfinder Ball 50, Powder Keg 30, Treasure Ball 15, Cannon Ball 4, Embezzler 1.
+- Anchor curse seeds are not Contraband Cargo.
+- Debug force controls must not change the normal 1% Loose Cargo Contraband chance when disabled.
+
 Does not own scoring values, pocket capture, physics, cue feel, anomaly behavior after spawn, Reserve/Quartermaster inventory, or UI drawing. `Table.gd` should coordinate wiring only.
 
 ### `scripts/TableEventMeter.gd`
@@ -286,9 +331,113 @@ Does not own threshold math, offer generation, spending, event execution, scorin
 
 ### `scripts/TableEventMenu.gd`
 
-Owns the compact `Request Kraken Intervention...` choice menu: modal presentation, three weighted unique offer cards, cost/rarity/description/status text, affordability state, hover highlighting, close/cancel behavior, and forwarding selected offer indexes to `TableEventSystem.gd`.
+Owns the compact `Request Kraken Intervention...` choice menu: modal presentation, three weighted unique offer cards, cost/rarity/description/status text, affordability state, hover highlighting, close/cancel behavior, per-offer Replace controls, the compact Oath choice panel for replacement, and forwarding selected offer indexes / replacement choices to `TableEventSystem.gd`.
 
-Does not own offer pool contents, weights, costs, purchase rules, event execution, scoring, physics, or HUD meters. The menu should feel like a tactical ritual/omen choice, not a debug panel or full-screen RPG inventory.
+Does not own offer pool contents, weights, costs, purchase rules, Oath state, event execution, scoring, physics, or HUD meters. The menu should feel like a tactical ritual/omen choice, not a debug panel or full-screen RPG inventory.
+
+### `scripts/EventMetadata.gd`
+
+Owns centralized display metadata for scoring/request events: stable IDs, labels, and short descriptions used by Passage tooltips and future reusable event references.
+
+Does not detect events, award score, or own request rewards. `PassageSystem.gd` owns request definitions/rewards, while `ShotEventSystem.gd` owns event detection history.
+
+### `scripts/PassageSystem.gd`
+
+Owns the current-run Passage objective: required Passage amount, remaining Passage math, held Doubloons contribution, active Kraken Request selection, request definitions/rewards, request completion detection, request reroll cost/scaling/decay, Passage pressure from Oaths/rerolls, and successful-run completion state.
+
+Current first-pass Passage requirement is 10000. Positive held Doubloons contribute to satisfying Passage, spending still matters because held Doubloons can drop, and completed Kraken Requests reduce Passage by their request reward amount. Blackwood Cue modifies request reward reduction through the generic cue modifier snapshot.
+
+Current request pool: `BANK`, `DOUBLE_BANK`, `LONG_HAUL`, `POWER_SINK`, `POCKET_STREAK_X3`, `POWDER_ROUTE`, `CANNON_CHAIN`, and `TREASURE_SNARE`.
+
+Does not own Doubloon scoring, cue upgrades, persistent progression currency, Run History persistence, scoring event detection, or UI drawing.
+
+### `scripts/PassageHUD.gd`
+
+Owns the compact live Passage / Kraken Wants HUD presentation, active request tooltip, request reward display, and request reroll button forwarding.
+
+Does not own request definitions, reward values, reroll math, Passage completion, scoring detection, or persistent progression.
+
+### `scripts/OathSystem.gd`
+
+Owns data-driven Oath definitions, active Oath state, shot counters, completion/failure lifecycle, Oath penalties/restrictions, Quartermaster access blocker state, cue-modifier suppression state, and debug helpers for Oath testing.
+
+Current functional first-pass Oaths:
+
+- Oath of Urgency: complete any Kraken Request within 3 shots or add Passage pressure.
+- Oath of Isolation: Quartermaster and Back Room access are unavailable for 5 shots.
+- Oath of Humility: cue gameplay modifiers are silenced for 10 shots while cue visuals/equipment remain unchanged.
+
+Oath of Sacrifice exists for debug/future use and can remove eligible object balls when manually failed, but it is not in the normal Intervention replacement choice pool.
+
+Does not own Intervention offer replacement UI, Quartermaster purchase logic, cue equipment persistence, or raw progression save data.
+
+### `scripts/OathHUD.gd`
+
+Owns the compact active-Oath live HUD indicator and tooltip presentation using `OathSystem.gd` snapshots.
+
+Does not own Oath activation, penalties, timers, cue modifier suppression, or Quartermaster access rules. Hover UI must stay silent while cue dragging is active.
+
+### `scripts/RunStatsSystem.gd`
+
+Owns current-run aggregate stats only: Doubloons earned/spent/lost-to-penalties, balls sunk, active ball count, run time, shots taken, highest Pocket Streak, interventions triggered, request completions/rerolls, Quartermaster refreshes, Back Room deals, Contraband found, Treasure claimed, active Oath snapshot, Passage snapshot, cue loadout snapshot, cue modifier readouts, and shared row definitions for Run Stats views.
+
+Does not own persistence, scoring values, UI layout, or run-history saving. `RunHistorySystem.gd` persists finalized run records.
+
+### `scripts/RunStatsHUD.gd`
+
+Owns the live top-left Run Stats button and compact ledger overlay during gameplay.
+
+Does not track stats itself, pause gameplay, mutate run state, or own cue modifier calculations. It reads `RunStatsSystem.gd` snapshots/row metadata.
+
+### `scripts/RunLedgerHUD.gd`
+
+Owns the compact BALLS/SUNK lower-HUD counter cluster presentation.
+
+Does not track active ball count or sunk count itself. It reads lightweight current-run/table snapshots and should remain viewport/HUD anchored rather than moving table geometry.
+
+### `scripts/RunHistorySystem.gd`
+
+Owns persistent finalized run history records in `user://run_history.json`, loading/saving, duplicate finalization protection, backward-compatible record normalization, clearing history, and keeping the most recent 25 runs.
+
+Does not own current-run stats, active gameplay state, Kraken Favor, cue progression, or Run History panel presentation.
+
+### `scripts/MainMenuRunHistoryPanel.gd`
+
+Owns the Main Menu Run History panel presentation: scroll list, row formatting, empty state, Back button, Clear History button, and clear confirmation UI.
+
+Does not read/write raw files directly. It calls `RunHistorySystem.gd`, which remains the persistence owner.
+
+### `scripts/ProgressionSystem.gd`
+
+Owns persistent Kraken Favor in `user://progression.json`, versioned progression save data, safe Favor add/spend operations, successful-Passage reward calculation, duplicate reward prevention, and the stored cue progression data subtree.
+
+Current successful-Passage reward formula starts at 1 Kraken Favor, can add bonuses for 5000+ Doubloons earned, 3+ Kraken Requests completed, 1+ legendary event, and Treasure claimed, and is capped at 5 Favor per run.
+
+Does not own current-run stats, run history, cue part definitions, cue equipment validation, or gameplay modifiers directly.
+
+### `scripts/CueProgressionSystem.gd`
+
+Owns cue part definitions, unlock state, equipped cue loadout, unlock/equip validation, cue progression snapshots, cue visual loadout snapshots, and data-driven cue effect definitions/modifier snapshots.
+
+Current slots: body, tip, grip, ferrule, chalk. Default unlocked loadout is Weathered Cue, Plain Tip, Sailcloth Grip, Plain Ferrule, and Plain Chalk. First unlockables are Blackwood Cue, Brass Tip, Wayfinder Wrap, Bone Ferrule, and Lucky Chalk.
+
+Current cue modifier effects:
+
+- Lucky Chalk: +1% absolute Loose Cargo Contraband chance.
+- Wayfinder Wrap: +1 Quartermaster refresh shot-decay.
+- Bone Ferrule: -25 flat Passage penalty from failed Passage-adding Oaths.
+- Blackwood Cue: +10% Kraken Request Passage reduction.
+- Brass Tip: +5% cue shot launch power, with aim preview using the same effective multiplier.
+
+Oath of Humility suppresses gameplay modifiers through the final active modifier snapshot without changing equipped cue parts or save data.
+
+Does not apply physics, scoring, economy, or Oath behavior directly. Gameplay systems consume generic modifier keys/snapshots and must not hardcode equipped cue part IDs.
+
+### `scripts/MainMenuCueLockerPanel.gd`
+
+Owns the Cue Locker panel presentation: Kraken Favor display, equipped loadout display, grouped cue part sections, lock/unlock/equip states, costs, buttons, and Back signal.
+
+Does not own Kraken Favor persistence, cue definitions, unlock/equip validation, cue effect definitions, or raw save files. It calls `ProgressionSystem.gd` and `CueProgressionSystem.gd`.
 
 ### `scripts/PocketStreakSystem.gd`
 
@@ -314,23 +463,41 @@ The feed is a readable history/log for scoring, penalties, anomalies, Pocket Str
 
 ### `scripts/Main.gd`
 
-Owns small app-shell behavior such as fullscreen toggling and top-level UI wiring.
+Owns small app-shell behavior such as fullscreen toggling, top-level UI/system wiring, run completion/return-to-menu coordination, and distribution of current cue modifier snapshots to systems that consume generic modifier keys.
 
-Does not own table gameplay systems.
+Does not own table gameplay systems, scoring values, cue part definitions, Oath definitions, Passage values, or persistence schemas.
 
 ### `scripts/MainMenu.gd`
 
 Owns title-screen presentation, main menu input, button wiring, and safe transition into the existing gameplay scene.
 
-Current main menu uses layered UI over authored art: `assets/ui/mainmenu_bg.png` for sky/moon/ocean/distant scenery, lightweight animated overlay passes, then `assets/ui/mainmenu_fg.png` for ship/tentacles/foreground waves, then fog and menu UI. Start Run loads `Main.tscn`, Options is placeholder/disabled-style shell behavior, and Quit exits the game.
+Current main menu uses layered UI over authored art: `assets/ui/mainmenu_bg.png` for sky/moon/ocean/distant scenery, lightweight animated overlay passes, then `assets/ui/mainmenu_fg.png` for ship/tentacles/foreground waves, then fog and menu UI. Start Run loads `Main.tscn`, Options opens the shared first-pass Options menu with audio sliders, Cue Locker and Run History open focused progression/history panels, and Quit exits the game. The same Options menu is also reachable from the in-game pause menu.
 
-Does not own gameplay systems, pause menu state, debug systems, physics, scoring, Kraken Intervention/BallDrop systems, Quartermaster/Reserve behavior, or persistent options.
+Does not own gameplay systems, pause menu state, debug systems, physics, scoring, Kraken Intervention/BallDrop systems, Quartermaster/Reserve behavior, raw run-history persistence, raw progression persistence, cue definitions, or audio settings storage.
+
+### `scripts/OptionsMenu.gd`
+
+Owns the reusable first-pass Options menu/panel presentation, including the Audio tab, Master/Music/SFX sliders, percentage labels, and context-aware Back behavior for main menu vs pause menu.
+
+Does not own gameplay audio playback logic, scoring, pause state, or raw bus definitions beyond calling the settings owner.
+
+### `scripts/AudioSettings.gd`
+
+Owns first-pass audio settings persistence in `user://settings.cfg`, audio bus lookups, linear/decibel conversion, and applying Master/Music/SFX slider values to Godot audio buses.
+
+Does not own collision audio behavior, Pocket Streak audio behavior, gameplay music playback, UI layout, or gameplay state.
 
 ### `scripts/MainMenuPresentationOverlay.gd`
 
 Owns draw-only/lightweight title-screen atmosphere overlays: moon glow pulse, star twinkles, ocean shimmer lines, and broad drifting fog bands. It supports layered draw passes so twinkles/shimmer can sit behind foreground silhouettes while fog can sit above them.
 
 Does not own menu buttons, scene loading, gameplay state, shaders, particles, or asset pipelines. Effects should remain cheap, tweakable through exported values, and presentation-only.
+
+### `scripts/TableDecorRandomizer.gd`
+
+Owns presentation-only table decor randomization and should reference only existing decor assets.
+
+Decor should sit above the floor/background but below gameplay/UI readability layers as appropriate. It must not affect collisions, pockets, rails, cue input, scoring, spawn safety, or gameplay logic.
 
 ### `scripts/BallDropMeter.gd`
 
@@ -434,7 +601,7 @@ Current anomaly rules:
 - Cannon Ball qualifying heavy impacts can request short, subtle table-impact shake through `TableImpactShakeSystem.gd`, with cooldown to prevent shake spam.
 - Cannon Ball high-speed heat presence is draw-only in `Ball.gd`, tuned by `CannonBallSystem.gd`, and visually capped so chaos degrades presentation before gameplay.
 - Cannon Ball currently has no regular spawn odds and no Cannon-specific special interactions with Anchor or Wayfinder beyond existing Powder Keg and Table Event drop/launch paths.
-- Treasure Ball is currently debug-spawn only and behaves physically like a normal object ball.
+- Treasure Ball is debug-spawnable and can appear through rare cargo/contraband discovery paths while behaving physically like a normal object ball.
 - Treasure Ball uses AimPreview's existing prediction/spatial-grid work to report when Treasure is inside the aim-line perception corridor and not occluded by a closer ball.
 - Treasure perception is emotional/perceptual, not merely exact first-hit targeting. Treasure should react to being watched by the aim guide or aimed at too closely, even when it is not the first predicted collision target.
 - Treasure Ball can choose a committed hide target behind nearby cover, or a fallback perpendicular flee target when no cover is available.
@@ -445,7 +612,7 @@ Current anomaly rules:
 - Treasure Ball self-propelled movement should feel like a soft-body scuttle: gentle squeezing/nudging is allowed, but self-steering should not build full billiards momentum, shove clusters hard, or coast into pockets after it calms down. External hits still use normal ball physics.
 - Treasure Ball should avoid target-thrashing through short commitment windows and meaningful switch thresholds.
 - Treasure Ball procedural legs are draw-only in `Ball.gd`. They appear only while Treasure is actively fleeing/steering, then fade/retract without adding collision or gameplay effects.
-- Treasure Ball currently has no special scoring, reward payout, or regular spawn odds.
+- Treasure Ball awards a large Doubloon payout when sunk, can appear through rare cargo/contraband discovery paths, and remains a distinct cautious aim-line/hiding identity rather than the Embezzler greed/escape mechanic.
 - Embezzler is currently debug-spawnable and capped at one active Embezzler.
 - Embezzler copies/skims a percentage of positive Doubloons awarded while alive, storing value without reducing the player's awarded score.
 - Embezzler has a secret target pocket visible only through debug information.
@@ -485,7 +652,7 @@ Do not bury Table Event choice/economy decisions inside `ScoreSystem.gd`, and do
 
 - `ShotEventSystem.gd` tracks ordered per-ball shot history.
 - `ScoreSystem.gd` converts sunk-ball histories into Doubloon rewards.
-- Current event tiers are foundational (`BANK`, `CHAIN`, `MULTI_CHAIN`, `ANOMALY_TOUCH`, `MULTI_SINK`), skilled (`KRAKEN_KICK`, `DOUBLE_BANK`, `THIN_CUT`, `CLUSTER_BREAK`), heroic (`CROSS_CORNER_BANK`, `FULL_TABLE_KICK`, `POWDER_ROUTE`, `KRAKEN_CURRENT`), and legendary (`TRIPLE_BANK`, `CANNON_CHAIN`, `TREASURE_SNARE`).
+- Current event tiers are foundational (`BANK`, `CHAIN`, `MULTI_CHAIN`, `ANOMALY_TOUCH`, `MULTI_SINK`), skilled (`KRAKEN_KICK`, `DOUBLE_BANK`, `THIN_CUT`, `CLUSTER_BREAK`, `LAST_GASP`, `POWER_SINK`, `SPLIT_THE_LOOT`), heroic (`CROSS_CORNER_BANK`, `FULL_TABLE_KICK`, `POWDER_ROUTE`, `KRAKEN_CURRENT`, `LONG_HAUL`), and legendary (`TRIPLE_BANK`, `CANNON_CHAIN`, `TREASURE_SNARE`).
 - Sunk-ball scoring should use the ball's own event history, not unrelated global shot events.
 - `MULTI_SINK` applies to the second and later object balls sunk in the same shot, not retroactively to earlier popups.
 - `MULTI_CHAIN` is repeatable and represents additional causal chain depth beyond the first `CHAIN`.
@@ -497,7 +664,9 @@ Do not bury Table Event choice/economy decisions inside `ScoreSystem.gd`, and do
 - Drop/spawn notifications may still use top/center callouts; scoring feedback should not return there unless explicitly requested.
 - Pocket Streak tracks repeated object-ball sinks into the same pocket during one shot. It is separate from `MULTI_SINK`, uses same-pocket scoring context, awards immediately through normal Doubloon flow, and logs compact HudFeed flavor lines.
 - Wayfinder Current can score eligible current-caused sinks through a focused current snapshot path without pretending a normal cue shot is active.
+- Treasure claims award a large Doubloon payout through the normal award flow while preserving double-award safety.
 - Quartermaster and Kraken Intervention spending are not score awarding. Purchases should not emit `doubloons_awarded`, feed Kraken Intervention progress, revive BallDrop progress, or appear as sink-score rewards.
+- Run Stats tracks positive Doubloons earned separately from Doubloons spent and Doubloons lost to penalties. Purchases are spending, not "lost" score.
 - Do not add coin sprays, progression, or large score VFX without permission.
 - Normal gameplay reward drops should come from player-chosen Kraken Intervention/Table Event purchases, not automatic score-triggered BallDrop progress.
 
@@ -509,8 +678,11 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 
 - Quartermaster currently presents three rotating tactical offers selected from the purchasable item pool through the live gameplay-mounted `QuartermasterHUD.gd` side rail.
 - Current purchasable items are Loose Object Ball, Wayfinder Ball, and Powder Keg.
+- Quartermaster Refresh is a paid live-HUD action. It rerolls current offers, scales from 10 Doubloons upward by doubling, and cools down after shots without refreshing.
+- Back Room Deal unlocks from high refresh pressure, is presented separately from normal stock, costs 250 Doubloons, and adds a chosen special item to Reserve when valid.
+- Oath of Isolation makes Quartermaster purchases, refreshes, and Back Room Deals unavailable while active.
 - Buying an offer fills the first empty Reserve slot instead of immediately entering placement mode.
-- The old active pause-menu Quartermaster purchasing flow is retired/hidden; the pause menu only owns shell/debug UI around it.
+- The old active shop purchasing flow inside `PauseMenu.gd` is retired/hidden; the pause menu only owns shell/debug UI around it.
 - Quartermaster tooltips appear on hover and should stay compact. Permanent item-description panels should not return unless specifically requested.
 - Reserve has exactly three slots in the current implementation.
 - Reserve deployment clicks a filled slot, pauses gameplay if needed, enters `BallPlacementSystem.gd`, and keeps the item in the slot until valid confirm.
@@ -527,11 +699,17 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 - Star twinkles and ocean shimmer should render behind ship/tentacle foreground silhouettes; fog can remain above the foreground if it reads naturally.
 - Title-screen overlays must remain lightweight and presentation-only: draw code or simple UI nodes, no heavy shaders or particle systems unless explicitly requested.
 - Start Run should load the existing gameplay scene without turning `Main.gd` into a large app shell.
+- Options is a real reusable menu with Audio sliders and is reachable from main menu and pause.
+- Run History and Cue Locker are focused Main Menu panels with their own presenter scripts.
 - Menu polish should not touch gameplay, pause/debug architecture, scoring, Kraken Intervention, Quartermaster, Reserve, or anomalies.
 
 ## Presentation And HUD Rules
 
 - The player-facing progression meter is the horizontal bottom-center `KRAKEN INTERVENTION` meter, with progress count below/left, percentage to the right, and a nearby ready icon.
+- Passage and Kraken Request information should remain compact and atmospheric, with tooltips sourced from event/request metadata rather than hardcoded HUD text.
+- Active Oaths should show a compact HUD indicator while active, with tooltip details from `OathSystem.gd`.
+- Run Stats can be opened from a small top-left ledger button without pausing gameplay.
+- The BALLS/SUNK run ledger cluster belongs with the lower Kraken Intervention HUD group, not with table geometry.
 - The intervention menu title is `Request Kraken Intervention...`; keep it compact, centered over the playfield, and styled as an ominous tactical choice rather than a full-screen shop.
 - `HudFeed.gd` owns the borderless bottom-left rolling feed. It should read like a captain's log/ship chatter, support multiline wrapping, fade older entries, and allow hover-scroll review.
 - Quartermaster shop presentation is mounted live on the right-side gameplay rail. It should visually match Reserve slot icon language and use hover tooltips instead of permanent descriptions.
@@ -544,9 +722,10 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 ## Debug And Test Controls
 
 - Modular debug panels should remain draggable, pause-safe, and hidden-work gated.
-- The pause/debug menu exposes temporary Event Test Button checkboxes for Wayfinder Current and Broadside Attack. They should be visible near the top of Debug controls, off by default, and debug-only.
+- The pause menu keeps debug controls hidden behind Dev Options. Dev Options content is scrollable so all controls remain reachable.
+- The pause/debug menu exposes temporary Event Test Button checkboxes for Wayfinder Current and Broadside Attack. They should be off by default and debug-only.
 - The right-side `Current` / `Broadside` test buttons call the same event behavior as real Table Events while bypassing only cost/readiness. They must not spend Doubloons, refill Kraken Intervention, alter offer state, or duplicate event logic.
-- Useful current debug surfaces include Table Event threshold/progress/pending/readiness/offers, Pocket Streak multiplier/queue/audio/whirlpool counters, Wayfinder Current carriers/affected/transfers/current-caused sinks, and Pocket Streak audio cooldown/player-pool state.
+- Useful current debug surfaces include Table Event threshold/progress/pending/readiness/offers, Contraband force controls, table debris spawn/collision controls, Oath Testing controls, Pocket Streak multiplier/queue/audio/whirlpool counters, Wayfinder Current carriers/affected/transfers/current-caused sinks, cue modifier suppression readouts, and Pocket Streak audio cooldown/player-pool state.
 - Debug buttons and panels must consume their own intentional clicks without stealing cue dragging outside their active rectangles.
 
 ## Audio Rules
@@ -560,13 +739,14 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 - Collision audio, Pocket Streak audio, UI/menu audio, and music should remain separate enough that one system cannot exhaust or destabilize another.
 - Audio should feel responsive to visible impact timing, but must not change collision math, cue feel, shot velocity, scoring, or anomaly behavior.
 - Add rail, pocket, UI, or anomaly-specific audio only in focused future passes.
+- `AudioSettings.gd` may change bus volumes from Options; it should not change playback logic or route-specific audio ownership.
 
 ## Performance Rules
 
 - Stopped-ball filtering exists and should be preserved.
 - Ball-vs-ball broad-phase spatial grid exists and should be preserved.
 - Rail checks and pocket checks should run only for moving gameplay-active balls.
-- Performance overlay/debug tools exist in `DebugOverlay.gd` and use requested-section snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, `CannonBallSystem.gd`, `TreasureBallSystem.gd`, `EmbezzlerSystem.gd`, `BallDropSystem.gd`, `TableEventSystem.gd`, `PocketStreakSystem.gd`, `PocketStreakPresenter.gd`, `QuartermasterSystem.gd`, and `ReserveSystem.gd`.
+- Performance overlay/debug tools exist in `DebugOverlay.gd` and use requested-section snapshots from `Table.gd`, `BoundarySystem.gd`, `PocketSystem.gd`, `AimPreview.gd`, `WayfinderSystem.gd`, `PowderKegSystem.gd`, `AnchorBallSystem.gd`, `CannonBallSystem.gd`, `TreasureBallSystem.gd`, `EmbezzlerSystem.gd`, `BallDropSystem.gd`, `TableEventSystem.gd`, `PocketStreakSystem.gd`, `PocketStreakPresenter.gd`, `QuartermasterSystem.gd`, `ReserveSystem.gd`, `OathSystem.gd`, `RunStatsSystem.gd`, and `TableObstacleSystem.gd` when relevant.
 - Kraken Intervention should stay shot/event-driven. Do not reintroduce automatic score-triggered drop spawning as hidden per-award churn.
 - Table Event offer generation is weighted/unique and happens at decision moments, not continuously.
 - Wayfinder Current is intentionally chaotic, but still uses localized event triggers, lifetime/transfer-depth safety, conservative eligibility, and draw-only readability hooks.
@@ -583,7 +763,9 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 - Keep physics/gameplay authoritative and correct. Degrade visual effects first under load.
 - Prefer event/state-driven updates over continuous rescanning. Systems should track meaningful state changes when practical instead of rebuilding full-table answers every frame.
 - Quartermaster stock refresh should be deterministic/event-driven rather than timer-driven frame churn.
+- Table obstacle collision should use cached authored polygon data, moving-ball checks, and broadphase rejection before detailed circle-vs-polygon work.
 - Reserve deployment presentation, title-screen atmosphere, fake-3D shake, Treasure legs, Cannon heat, and Quartermaster refresh glow should stay draw-only/lightweight.
+- Hover tooltips and hover-only UI should respect the shared cue-drag suppression state so active cue dragging keeps gameplay mouse ownership.
 - Collision audio should reuse pooled players and filter micro-collisions so SFX scales with chaos.
 - Coalesce repeated work before reducing gameplay ambition or visual fidelity. Input/event spam should mark systems dirty, then a single owner should process the newest state once per frame or once per relevant physics step.
 - Optimization should preserve readability as well as raw performance; a faster effect that hides cause/effect relationships is usually not a good trade.
@@ -647,11 +829,11 @@ Avoid generic filler summaries. The review should reinforce Kraken An Eight Ball
 
 ## Next Major Goal
 
-Continue stabilizing the Kraken Intervention / Table Event economy:
+Continue stabilizing the Passage-centered run loop and its supporting economy:
 
-better shots -> more Doubloons -> earned intervention opportunities -> player-chosen chaos -> stronger scoring opportunities -> survive the escalating table.
+better shots -> more Doubloons and completed Kraken Requests -> Passage reduction -> earned intervention opportunities and table tools -> player-chosen chaos -> stronger scoring opportunities -> successful Passage completion -> Kraken Favor and cue progression.
 
-The first playable intervention loop now exists in `TableEventSystem.gd`, `TableEventMeter.gd`, and `TableEventMenu.gd`. Next passes should focus on event-pool tuning, cost/threshold feel, signature intervention readability, debug clarity, and keeping event execution out of `Table.gd`.
+The first playable Passage, Oath, Quartermaster Refresh, Back Room, Run History, Kraken Favor, Cue Locker, and cue modifier foundations now exist. Next passes should focus on playtest clarity, balance feel, readable progression, and keeping feature logic in focused systems instead of `Table.gd`.
 
 Current Kraken Intervention offers are:
 
@@ -663,7 +845,7 @@ Current Kraken Intervention offers are:
 - Broadside Attack
 - Wayfinder Current
 
-The player-facing meter is now the horizontal bottom-center `KRAKEN INTERVENTION` meter. The old vertical BallDrop meter and automatic reward spawning are retired/gated legacy support unless explicitly re-enabled for a focused test.
+The player-facing intervention meter is the horizontal bottom-center `KRAKEN INTERVENTION` meter, while Passage/Kraken Request state is the run-objective HUD. The old vertical BallDrop meter and automatic reward spawning are retired/gated legacy support unless explicitly re-enabled for a focused test.
 
 Cue ball and eight ball sinking no longer end the game as this loop comes online:
 

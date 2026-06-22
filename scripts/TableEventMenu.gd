@@ -550,7 +550,7 @@ func _refresh_oath_choice_panel() -> void:
 	if table_event_system == null or pending_oath_replace_offer_index < 0:
 		return
 
-	var choices := table_event_system.get_offer_reroll_oath_choices_snapshot(pending_oath_replace_offer_index)
+	var choices: Array = table_event_system.get_offer_reroll_oath_choices_snapshot(pending_oath_replace_offer_index)
 	var choices_by_id: Dictionary = {}
 	for choice_value in choices:
 		if not choice_value is Dictionary:

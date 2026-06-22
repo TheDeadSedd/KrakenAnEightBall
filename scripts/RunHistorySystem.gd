@@ -44,10 +44,15 @@ func save_finalized_run(stats_snapshot: Dictionary, final_doubloons: int) -> boo
 	if current_run_finalized:
 		return false
 
-	current_run_finalized = true
+	var previous_records: Array = records.duplicate(true)
 	records.insert(0, _make_run_record(stats_snapshot, final_doubloons))
 	_trim_records()
-	return _write_history()
+	if not _write_history():
+		records = previous_records
+		return false
+
+	current_run_finalized = true
+	return true
 
 
 func get_records_snapshot() -> Array:
@@ -67,12 +72,15 @@ func clear_history() -> bool:
 
 
 func _make_run_record(stats_snapshot: Dictionary, final_doubloons: int) -> Dictionary:
+	var doubloons_lost_to_penalties := _get_penalty_doubloons_lost(stats_snapshot)
 	return {
 		"timestamp": Time.get_datetime_string_from_system(false, false),
 		"run_duration": maxf(float(stats_snapshot.get("run_time_seconds", 0.0)), 0.0),
 		"final_doubloons": maxi(final_doubloons, 0),
 		"doubloons_earned": maxi(int(stats_snapshot.get("doubloons_earned", 0)), 0),
-		"doubloons_lost": maxi(int(stats_snapshot.get("doubloons_lost", 0)), 0),
+		"doubloons_spent": maxi(int(stats_snapshot.get("doubloons_spent", 0)), 0),
+		"doubloons_lost": doubloons_lost_to_penalties,
+		"doubloons_lost_to_penalties": doubloons_lost_to_penalties,
 		"shots_taken": maxi(int(stats_snapshot.get("shots_taken", 0)), 0),
 		"balls_sunk": maxi(int(stats_snapshot.get("balls_sunk", 0)), 0),
 		"highest_pocket_streak": maxi(int(stats_snapshot.get("highest_pocket_streak", 1)), 1),
@@ -86,6 +94,10 @@ func _make_run_record(stats_snapshot: Dictionary, final_doubloons: int) -> Dicti
 		"kraken_favor_earned": maxi(int(stats_snapshot.get("kraken_favor_earned", 0)), 0),
 		"total_kraken_favor_after_run": maxi(int(stats_snapshot.get("total_kraken_favor_after_run", 0)), 0),
 	}
+
+
+func _get_penalty_doubloons_lost(stats_snapshot: Dictionary) -> int:
+	return maxi(int(stats_snapshot.get("doubloons_lost_to_penalties", stats_snapshot.get("doubloons_lost", 0))), 0)
 
 
 func _trim_records() -> void:

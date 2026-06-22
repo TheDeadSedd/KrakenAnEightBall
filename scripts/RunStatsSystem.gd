@@ -5,10 +5,59 @@ signal run_stats_changed(snapshot: Dictionary)
 
 # Current-run ledger only. No persistence or run-history ownership lives here.
 const RUN_TIME_EMIT_INTERVAL := 0.25
+const RUN_STATS_ROWS := [
+	{"label": "Doubloons Earned", "key": "doubloons_earned"},
+	{"label": "Doubloons Spent", "key": "doubloons_spent"},
+	{"label": "Doubloons Lost", "key": "doubloons_lost"},
+	{"label": "Passage Remaining", "key": "remaining_passage"},
+	{"label": "Kraken Wants", "key": "current_kraken_request"},
+	{"label": "Request Reward Bonus", "key": "request_reward_multiplier_bonus_summary"},
+	{"label": "Active Oaths", "key": "active_oaths_summary"},
+	{"label": "Oath Penalty Cut", "key": "oath_passage_penalty_reduction_summary"},
+	{"label": "Cue", "key": "cue_body"},
+	{"label": "Tip", "key": "cue_tip"},
+	{"label": "Grip", "key": "cue_grip"},
+	{"label": "Ferrule", "key": "cue_ferrule"},
+	{"label": "Chalk", "key": "cue_chalk"},
+	{"label": "Cue Mods", "key": "active_cue_modifiers_summary"},
+	{"label": "Cue Power Bonus", "key": "cue_power_bonus_summary"},
+	{"label": "Loose Contraband", "key": "loose_cargo_contraband_chance_summary"},
+	{"label": "QM Shot Cooldown", "key": "quartermaster_refresh_decay_summary"},
+	{"label": "Shots Taken", "key": "shots_taken"},
+	{"label": "Balls Sunk", "key": "balls_sunk"},
+	{"label": "Highest Pocket Streak", "key": "highest_pocket_streak"},
+	{"label": "Interventions Triggered", "key": "interventions_triggered"},
+	{"label": "Shop Refreshes", "key": "quartermaster_refreshes_used"},
+	{"label": "Refresh Doubloons", "key": "quartermaster_refresh_doubloons_spent"},
+	{"label": "Back Room Deals", "key": "back_room_deals_made"},
+	{"label": "Back Room Doubloons", "key": "back_room_deal_doubloons_spent"},
+	{"label": "Request Rerolls", "key": "kraken_request_rerolls_used"},
+	{"label": "Reroll Passage Added", "key": "passage_added_by_request_rerolls"},
+	{"label": "Contraband Found", "key": "contraband_found"},
+	{"label": "Treasure Claimed", "key": "treasure_claimed"},
+	{"label": "Current Ball Count", "key": "current_ball_count"},
+	{"label": "Run Time", "key": "run_time_seconds"},
+]
+const PASSAGE_COMPLETION_ROWS := [
+	{"label": "Shots Taken", "key": "shots_taken"},
+	{"label": "Doubloons Earned", "key": "doubloons_earned"},
+	{"label": "Doubloons Spent", "key": "doubloons_spent"},
+	{"label": "Doubloons Lost", "key": "doubloons_lost"},
+	{"label": "Balls Sunk", "key": "balls_sunk"},
+	{"label": "Highest Pocket Streak", "key": "highest_pocket_streak"},
+	{"label": "Interventions Triggered", "key": "interventions_triggered"},
+	{"label": "Contraband Found", "key": "contraband_found"},
+	{"label": "Treasure Claimed", "key": "treasure_claimed"},
+	{"label": "Kraken Favor Earned", "key": "kraken_favor_earned"},
+	{"label": "Total Kraken Favor", "key": "total_kraken_favor"},
+	{"label": "Final Ball Count", "key": "current_ball_count"},
+	{"label": "Run Duration", "key": "run_time_seconds"},
+]
 
 var table: BilliardsTable
 var doubloons_earned := 0
-var doubloons_lost := 0
+var doubloons_spent := 0
+var doubloons_lost_to_penalties := 0
 var shots_taken := 0
 var balls_sunk := 0
 var highest_pocket_streak := 1
@@ -49,7 +98,9 @@ func setup(table_ref: BilliardsTable) -> void:
 func get_run_stats_snapshot() -> Dictionary:
 	return {
 		"doubloons_earned": doubloons_earned,
-		"doubloons_lost": doubloons_lost,
+		"doubloons_spent": doubloons_spent,
+		"doubloons_lost": doubloons_lost_to_penalties,
+		"doubloons_lost_to_penalties": doubloons_lost_to_penalties,
 		"shots_taken": shots_taken,
 		"balls_sunk": balls_sunk,
 		"highest_pocket_streak": highest_pocket_streak,
@@ -87,6 +138,14 @@ func get_run_stats_snapshot() -> Dictionary:
 		"quartermaster_refresh_decay_summary": _get_quartermaster_refresh_decay_summary(),
 		"intervention_purchase_history": _get_intervention_purchase_history_snapshot(),
 	}
+
+
+static func get_run_stats_rows() -> Array:
+	return RUN_STATS_ROWS.duplicate(true)
+
+
+static func get_passage_completion_rows() -> Array:
+	return PASSAGE_COMPLETION_ROWS.duplicate(true)
 
 
 func set_cue_loadout_snapshot(snapshot: Dictionary) -> void:
@@ -170,11 +229,17 @@ func _on_doubloons_awarded(amount: int, _new_total: int) -> void:
 	_emit_stats_changed()
 
 
-func _on_doubloons_lost(amount: int, _new_total: int, _reason: String) -> void:
+func _on_doubloons_lost(amount: int, _new_total: int, reason: String) -> void:
 	if amount <= 0:
 		return
 
-	doubloons_lost += amount
+	match reason:
+		"spend":
+			doubloons_spent += amount
+		"penalty":
+			doubloons_lost_to_penalties += amount
+		_:
+			doubloons_lost_to_penalties += amount
 	_emit_stats_changed()
 
 
@@ -194,7 +259,10 @@ func _on_streak_multiplier_reached(multiplier: int) -> void:
 	_emit_stats_changed()
 
 
-func _on_intervention_executed(_event_id: String, _debug_trigger: bool) -> void:
+func _on_intervention_executed(_event_id: String, debug_trigger: bool) -> void:
+	if debug_trigger:
+		return
+
 	interventions_triggered += 1
 	_emit_stats_changed()
 

@@ -13,6 +13,7 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 - `scenes/Ball.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scenes/CueBall.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scenes/Table.tscn` - Godot scene file used for authored node layout and scene wiring.
+- `scenes/TableObstacle.tscn` - Godot scene file used for authored node layout and scene wiring.
 - `scripts/AnchorBallSystem.gd` - Handles the new Anchor curse-seed model: eight-ball penalty seed creation, chains/leashes, cue-control-gated tightening, warning timer, spread, collapse, presentation, and debug counters.
 - `scripts/Ball.gd` - Individual ball state, visuals, friction helpers, trails, draw-only anomaly presentation such as Cannon heat and Treasure legs, and anomaly identity flags.
 - `scripts/BallAudioSystem.gd` - Pooled event-driven ball-to-ball collision audio with random hit selection, pitch variation, intensity scaling, and cooldown filtering.
@@ -21,27 +22,32 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 - `scripts/BallPlacementSystem.gd` - Reusable item-agnostic placement mode with ghost preview, safe-position validation, and confirm/cancel flow for shop, Reserve, debug, and future placement effects.
 - `scripts/CannonBallSystem.gd` - Cannon Ball anomaly system for identity, visuals, heavy impulse modifiers, Powder Keg launch tuning, heavy-impact shake requests, and high-speed heat presence.
 - `scripts/CueController.gd` - Owns cue visuals, grab-zone hit testing, pullback, and strike presentation.
+- `scripts/CueProgressionSystem.gd` - Owns cue part definitions, unlock/equip validation, equipped loadout snapshots, effect definitions, and active cue modifier snapshots.
+- `scripts/EventMetadata.gd` - Central event/request metadata registry for labels and descriptions used by Passage tooltips and future reusable references.
+- `scripts/MainMenuCueLockerPanel.gd` - Main Menu Cue Locker panel UI presenter for Favor, equipped loadout, grouped cue parts, unlock/equip controls, and Back.
 - `scripts/PocketStreakPresenter.gd` - Queued Pocket Streak multiplier presentation, fixed-pool audio/reverb, X4+ whirlpool visuals, and localized presentation-only threat tells.
 - `scripts/PocketStreakSystem.gd` - Tracks same-pocket object-ball streaks per shot, same-pocket scoring subtotals, multiplier context, and double-award safety.
-- `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons and evolving pocket-side score stack presentation.
-- `scripts/ShotEventSystem.gd` - Tracks causal per-shot foundational, skilled, heroic, and legendary scoring events for sunk balls.
+- `scripts/ScoreSystem.gd` - Converts shot-event history into Doubloons, Treasure/Embezzler payout awards, and evolving pocket-side score stack presentation.
+- `scripts/ShotEventSystem.gd` - Tracks causal per-shot foundational, skilled, heroic, legendary, and sink-moment scoring events for sunk balls.
 - `scripts/SpawnSystem.gd` - Creates balls, performs safe spawn searches, owns regular anomaly odds, executes Table Event drop/launch helpers, and routes debug Anchor requests into curse-seed transformation.
 - `scripts/Table.gd` - High-level table coordinator, shot lifecycle owner, early cue-reclaim gate, and current home of authoritative arcade ball physics.
-- `scripts/TableDecorRandomizer.gd` - Scanned project file; classification is best-effort.
-- `scripts/TableEventMenu.gd` - Compact Request Kraken Intervention menu with three weighted offer cards, affordability, rarity display, hover, close, and purchase forwarding.
+- `scripts/TableDecorRandomizer.gd` - Presentation-only table decor variant randomizer for authored prop visuals.
+- `scripts/TableEventMenu.gd` - Compact Request Kraken Intervention menu with weighted offer cards, Oath choice replacement panel, affordability, rarity display, hover, close, and purchase/replacement forwarding.
 - `scripts/TableEventMeter.gd` - Horizontal bottom-center KRAKEN INTERVENTION meter with shot progress, percent text, pulse feedback, and ready icon.
-- `scripts/TableEventSystem.gd` - Owns Kraken Intervention shot-earned threshold tracking, pending readiness, weighted offers, purchases, debug triggers, and player-chosen Table Event execution routing.
+- `scripts/TableEventSystem.gd` - Owns Kraken Intervention shot-earned threshold tracking, pending readiness, weighted offers, Oath-backed single-slot replacement, purchases, cargo discovery, debug triggers, and player-chosen Table Event execution routing.
 - `scripts/TableImpactShakeSystem.gd` - Handles presentation-only table impact shake and draw-only ball shimmy for Powder Keg explosions and Cannon heavy impacts.
-- `scripts/TreasureBallSystem.gd` - Treasure Ball system for debug-spawn identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting.
+- `scripts/TableObstacleSystem.gd` - Owns TableObstacle spawning/clearing, debug placement, authored collision polygon extraction/cache, broadphase, custom ball collision, debug draw, and counters.
+- `scripts/TreasureBallSystem.gd` - Treasure Ball system for identity tracking, AimPreview corridor perception grace, committed hide targets, corridor/pocket-aware fleeing, soft scuttle movement, self-braking, reduced self-steer shove, and draw-only leg reporting; payout/discovery live in scoring/event systems.
 
 ## Current Notes
 
-- Current loop: better shots create Doubloons, Kraken Intervention opportunities, player-chosen Table Events, more balls/anomalies, more interactions, and an escalating table state.
-- Kraken Intervention is the active progression spine; automatic BallDrop rewards are retired/gated.
+- Current loop: better shots create Doubloons, completed Kraken Requests, Passage reduction, Kraken Intervention opportunities, player-chosen Table Events, more balls/anomalies, more interactions, and successful Passage rewards.
+- Passage is the current run objective; Kraken Intervention is the active chosen-chaos economy; automatic BallDrop rewards are retired/gated.
 - Early cue reclaim is shot-lifecycle coordination in Table.gd and should stay lightweight.
 - Cue/eight-ball sinks are penalties now, not run-ending conditions.
-- ShotEventSystem.gd now tracks foundational, skilled, heroic, and legendary events through causal shot history.
+- ShotEventSystem.gd now tracks foundational, skilled, heroic, legendary, and sink-moment events through causal shot history.
 - PocketStreakSystem.gd tracks same-pocket streak bonuses separately from MULTI_SINK.
+- RunStatsSystem.gd tracks current-run stats only; RunHistorySystem.gd persists finalized records.
 - Preserve cue feel, shot feel, pocket feel, and scoring values during cleanup.
 - Automatic score-triggered BallDrop rewards are retired/gated; BallDropSystem is mostly legacy/debug support plus cue/eight-ball penalty handling.
 
@@ -56,4 +62,4 @@ When investigating feel, prediction, anomaly, UI, or performance issues, check r
 ## Questions
 
 - Which new shot-event thresholds need tuning after longer playtests?
-- Which Kraken Intervention costs/weights/thresholds need playtest tuning?
+- Which Kraken Intervention costs/weights/thresholds and Passage request rewards need playtest tuning?

@@ -7,11 +7,11 @@ It exists to help future AI/Codex sessions understand Kraken An Eight Ball quick
 Current snapshot:
 
 - Kraken An Eight Ball is a systemic arcade-chaos billiards prototype.
-- The current loop is better shots -> more Doubloons -> Kraken Intervention opportunities -> player-chosen Table Events -> more balls/anomalies/chaos -> survive the escalating table.
-- Kraken Intervention is the active progression spine; automatic score-triggered BallDrop rewards are retired/gated.
+- The current loop is better shots -> Doubloons and Kraken Requests -> Passage reduction -> Kraken Intervention / Quartermaster / Oath choices -> more balls/anomalies/chaos -> successful Passage and Kraken Favor.
+- Passage is the current run objective; Kraken Intervention is the active chosen-chaos economy; automatic score-triggered BallDrop rewards are retired/gated.
 - BallDropSystem is mostly penalty handling, legacy support, and debug plumbing.
-- Main Menu, pooled collision audio, gameplay music, live Quartermaster HUD, Reserve slots/deployment, HudFeed, modular debug panels, evolving score stacks, Pocket Streaks, Anchor curse seeds, Embezzler, Broadside Attack, Wayfinder Current, and expanded shot-event tiers are active modern systems.
-- Early cue reclaim, fake-3D presentation, Cannon heat/impact presence, Treasure perception grace/hiding, Embezzler hide-or-run pressure, Pocket Streak whirlpools, and Wayfinder Current readability pulses remain important active systems.
+- Passage, Oaths, Run Stats/History, Kraken Favor, Cue Locker/modifiers, Options, Back Room Deals, table debris, Main Menu, pooled collision audio, gameplay music, live Quartermaster HUD, Reserve slots/deployment, HudFeed, modular debug panels, evolving score stacks, Pocket Streaks, Anchor curse seeds, Treasure payout/discovery, Embezzler, Broadside Attack, Wayfinder Current, and expanded shot-event tiers are active modern systems.
+- Early cue reclaim, cue-drag hover suppression, fake-3D presentation, Cannon heat/impact presence, Treasure perception grace/hiding, Embezzler hide-or-run pressure, Pocket Streak whirlpools, authored debris collision, and Wayfinder Current readability pulses remain important active systems.
 - Generated reports are a project map only; `AGENTS.md` and the real scripts/scenes remain authoritative.
 
 Important rules:

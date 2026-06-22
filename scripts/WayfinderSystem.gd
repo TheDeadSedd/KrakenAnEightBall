@@ -41,7 +41,7 @@ const WAYFINDER_GUIDE_SPEED_RETENTION_PER_SECOND := 0.82
 @export_range(0.5, 8.0, 0.1) var wayfinder_current_lifetime_seconds := 3.0
 @export_range(1, 8, 1) var wayfinder_current_transfer_limit := 4
 
-var table
+var table: BilliardsTable
 var redirect_collision_cooldowns: Dictionary = {}
 var guided_balls: Dictionary = {}
 var current_transfer_cooldowns: Dictionary = {}
@@ -59,7 +59,7 @@ var wayfinder_current_transfer_flashes := 0
 var wayfinder_current_presenter: WayfinderCurrentPresenter
 
 
-func setup(table_ref) -> void:
+func setup(table_ref: BilliardsTable) -> void:
 	table = table_ref
 	_ensure_wayfinder_current_presenter()
 
@@ -68,7 +68,7 @@ func _ensure_wayfinder_current_presenter() -> void:
 	if table == null or wayfinder_current_presenter != null:
 		return
 
-	var existing_presenter := table.get_node_or_null("WayfinderCurrentPresenter") as WayfinderCurrentPresenter
+	var existing_presenter: WayfinderCurrentPresenter = table.get_node_or_null("WayfinderCurrentPresenter") as WayfinderCurrentPresenter
 	if existing_presenter != null:
 		wayfinder_current_presenter = existing_presenter
 		return

@@ -61,38 +61,6 @@ const DEBUG_CONTRABAND_SELECTOR_ITEMS := [
 const OPTIONS_MENU_SCRIPT := preload("res://scripts/OptionsMenu.gd")
 const CONFIRM_PANEL_SIZE := Vector2(430.0, 220.0)
 const RUN_STATS_PANEL_SIZE := Vector2(590.0, 1080.0)
-const RUN_STATS_ROWS := [
-	{"label": "Doubloons Earned", "key": "doubloons_earned"},
-	{"label": "Doubloons Lost", "key": "doubloons_lost"},
-	{"label": "Passage Remaining", "key": "remaining_passage"},
-	{"label": "Kraken Wants", "key": "current_kraken_request"},
-	{"label": "Request Reward Bonus", "key": "request_reward_multiplier_bonus_summary"},
-	{"label": "Active Oaths", "key": "active_oaths_summary"},
-	{"label": "Oath Penalty Cut", "key": "oath_passage_penalty_reduction_summary"},
-	{"label": "Cue", "key": "cue_body"},
-	{"label": "Tip", "key": "cue_tip"},
-	{"label": "Grip", "key": "cue_grip"},
-	{"label": "Ferrule", "key": "cue_ferrule"},
-	{"label": "Chalk", "key": "cue_chalk"},
-	{"label": "Cue Mods", "key": "active_cue_modifiers_summary"},
-	{"label": "Cue Power Bonus", "key": "cue_power_bonus_summary"},
-	{"label": "Loose Contraband", "key": "loose_cargo_contraband_chance_summary"},
-	{"label": "QM Shot Cooldown", "key": "quartermaster_refresh_decay_summary"},
-	{"label": "Shots Taken", "key": "shots_taken"},
-	{"label": "Balls Sunk", "key": "balls_sunk"},
-	{"label": "Highest Pocket Streak", "key": "highest_pocket_streak"},
-	{"label": "Interventions Triggered", "key": "interventions_triggered"},
-	{"label": "Shop Refreshes", "key": "quartermaster_refreshes_used"},
-	{"label": "Refresh Doubloons", "key": "quartermaster_refresh_doubloons_spent"},
-	{"label": "Back Room Deals", "key": "back_room_deals_made"},
-	{"label": "Back Room Doubloons", "key": "back_room_deal_doubloons_spent"},
-	{"label": "Request Rerolls", "key": "kraken_request_rerolls_used"},
-	{"label": "Reroll Passage Added", "key": "passage_added_by_request_rerolls"},
-	{"label": "Contraband Found", "key": "contraband_found"},
-	{"label": "Treasure Claimed", "key": "treasure_claimed"},
-	{"label": "Current Ball Count", "key": "current_ball_count"},
-	{"label": "Run Time", "key": "run_time_seconds"},
-]
 
 @onready var shade: ColorRect = $Shade
 @onready var menu_panel: PanelContainer = $Shade/MenuPanel
@@ -395,7 +363,7 @@ func _build_run_stats_panel() -> void:
 	stats_grid.add_theme_constant_override("v_separation", 8)
 	stack.add_child(stats_grid)
 
-	for row_value in RUN_STATS_ROWS:
+	for row_value in RunStatsSystem.get_run_stats_rows():
 		var row: Dictionary = row_value
 		var stat_key := str(row.get("key", ""))
 		var name_label := _make_run_stats_name_label(str(row.get("label", "")))
@@ -900,7 +868,7 @@ func _update_run_stats_values() -> void:
 	if run_stats_value_labels.is_empty():
 		return
 
-	for row_value in RUN_STATS_ROWS:
+	for row_value in RunStatsSystem.get_run_stats_rows():
 		var row: Dictionary = row_value
 		var stat_key := str(row.get("key", ""))
 		var value_label: Label = run_stats_value_labels.get(stat_key) as Label

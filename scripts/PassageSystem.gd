@@ -117,10 +117,10 @@ func setup(table_ref: BilliardsTable) -> void:
 func get_passage_snapshot() -> Dictionary:
 	var request := _get_active_request()
 	var request_id := str(request.get("id", ""))
-	var metadata := EventMetadata.get_event_metadata(request_id)
-	var base_reward := _get_base_request_reward(request)
-	var effective_reward := _get_effective_request_reward(base_reward)
-	var reward_modifier_snapshot := get_request_reward_modifier_snapshot()
+	var metadata: Dictionary = EventMetadata.get_event_metadata(request_id)
+	var base_reward: int = _get_base_request_reward(request)
+	var effective_reward: int = _get_effective_request_reward(base_reward)
+	var reward_modifier_snapshot: Dictionary = get_request_reward_modifier_snapshot()
 	return {
 		"passage_required": maxi(passage_required, 0),
 		"remaining_passage": maxi(remaining_passage, 0),
@@ -234,7 +234,7 @@ func _make_request_snapshot(request: Dictionary) -> Dictionary:
 
 	var snapshot := request.duplicate(true)
 	var request_id := str(snapshot.get("id", ""))
-	var metadata := EventMetadata.get_event_metadata(request_id)
+	var metadata: Dictionary = EventMetadata.get_event_metadata(request_id)
 	snapshot["id"] = request_id
 	snapshot["request_id"] = request_id
 	snapshot["event_type"] = str(snapshot.get("event_type", ""))

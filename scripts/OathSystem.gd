@@ -175,6 +175,7 @@ func debug_advance_oath_shot() -> bool:
 			continue
 		_advance_oath_on_shot(oath_id)
 		advanced_any = true
+	_resolve_expired_oaths_after_shot()
 	return advanced_any
 
 
@@ -281,6 +282,8 @@ func _connect_event_sources() -> void:
 		return
 	if not table.shot_taken.is_connected(_on_shot_taken):
 		table.shot_taken.connect(_on_shot_taken)
+	if not table.shot_finished.is_connected(_on_shot_finished):
+		table.shot_finished.connect(_on_shot_finished)
 	if table.passage_system != null:
 		if not table.passage_system.request_completed.is_connected(_on_kraken_request_completed):
 			table.passage_system.request_completed.connect(_on_kraken_request_completed)
@@ -319,6 +322,10 @@ func _on_shot_taken(_count: int) -> void:
 		_advance_oath_on_shot(oath_id)
 
 
+func _on_shot_finished(_count: int) -> void:
+	_resolve_expired_oaths_after_shot()
+
+
 func _advance_oath_on_shot(oath_id: String) -> void:
 	var state: Dictionary = active_oaths.get(oath_id, {})
 	if state.is_empty():
@@ -353,6 +360,15 @@ func _advance_oath_on_shot(oath_id: String) -> void:
 		_:
 			active_oaths[oath_id] = state
 			_emit_oaths_changed()
+
+
+func _resolve_expired_oaths_after_shot() -> void:
+	if not active_oaths.has(OATH_OF_URGENCY):
+		return
+
+	var state: Dictionary = active_oaths.get(OATH_OF_URGENCY, {})
+	if maxi(int(state.get("shots_remaining", 0)), 0) <= 0:
+		_fail_active_oath(OATH_OF_URGENCY, "Request not completed in time")
 
 
 func _on_kraken_request_completed(_request_snapshot: Dictionary, _reward: int) -> void:

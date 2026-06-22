@@ -41,6 +41,14 @@ func _ready() -> void:
 	_configure_pause_process_modes()
 	debug_overlay.visible = true
 	_setup_cue_progression_runtime_bridge()
+	_connect_table_signals()
+	_connect_pause_menu_signals()
+	_connect_hud_signals()
+	_setup_hud_presenters()
+	_sync_initial_hud_state()
+
+
+func _connect_table_signals() -> void:
 	table.status_text_changed.connect(_on_status_text_changed)
 	table.game_finished.connect(_on_game_finished)
 	if not table.gameplay_mouse_lock_changed.is_connected(_on_gameplay_mouse_lock_changed):
@@ -63,8 +71,9 @@ func _ready() -> void:
 	table.reserve_system.reserve_slots_changed.connect(_on_reserve_slots_changed)
 	table.reserve_system.deployment_finished.connect(_on_reserve_deployment_finished)
 	table.reserve_system.deployment_blocked.connect(_on_reserve_deployment_blocked)
-	if not reserve_slots_ui.reserve_slot_clicked.is_connected(_on_reserve_slot_clicked):
-		reserve_slots_ui.reserve_slot_clicked.connect(_on_reserve_slot_clicked)
+
+
+func _connect_pause_menu_signals() -> void:
 	if not pause_menu.resume_requested.is_connected(_on_pause_resume_requested):
 		pause_menu.resume_requested.connect(_on_pause_resume_requested)
 	if not pause_menu.end_run_requested.is_connected(_on_pause_end_run_requested):
@@ -99,6 +108,11 @@ func _ready() -> void:
 		pause_menu.debug_oath_complete_requested.connect(_on_pause_debug_oath_complete_requested)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
+
+
+func _connect_hud_signals() -> void:
+	if not reserve_slots_ui.reserve_slot_clicked.is_connected(_on_reserve_slot_clicked):
+		reserve_slots_ui.reserve_slot_clicked.connect(_on_reserve_slot_clicked)
 	if not quartermaster_hud.quartermaster_offer_requested.is_connected(_on_quartermaster_hud_offer_requested):
 		quartermaster_hud.quartermaster_offer_requested.connect(_on_quartermaster_hud_offer_requested)
 	if not quartermaster_hud.quartermaster_refresh_requested.is_connected(_on_quartermaster_hud_refresh_requested):
@@ -113,6 +127,9 @@ func _ready() -> void:
 		table_event_menu.event_offer_selected.connect(_on_table_event_offer_selected)
 	if not table_event_menu.event_offer_replace_requested.is_connected(_on_table_event_offer_replace_requested):
 		table_event_menu.event_offer_replace_requested.connect(_on_table_event_offer_replace_requested)
+
+
+func _setup_hud_presenters() -> void:
 	result_label.text = ""
 	_on_doubloons_changed(table.score_system.get_doubloons_total())
 	table_event_meter.setup(table.table_event_system, table)
@@ -127,6 +144,9 @@ func _ready() -> void:
 	reserve_deployment_presenter.setup(table.reserve_system, reserve_slots_ui)
 	table.emit_ready_status_if_needed("")
 	debug_overlay.setup(table)
+
+
+func _sync_initial_hud_state() -> void:
 	pause_menu.set_debug_panel_states(debug_overlay.get_modular_debug_panel_states())
 	pause_menu.set_debris_collision_debug_state(table.table_obstacle_system.obstacle_collision_enabled)
 	pause_menu.set_debris_collision_draw_debug_state(table.table_obstacle_system.debug_collision_draw_enabled)
@@ -406,7 +426,7 @@ func _on_pause_loose_cargo_contraband_kind_selected(kind: String) -> void:
 
 
 func _on_pause_spawn_wood_debris_requested() -> void:
-	var obstacle := table.table_obstacle_system.debug_spawn_wood_debris()
+	var obstacle: Node = table.table_obstacle_system.debug_spawn_wood_debris()
 	if obstacle == null:
 		hud_feed.add_message("Debris spawn failed.", "event")
 	else:
@@ -435,7 +455,7 @@ func _on_pause_debug_oath_activate_requested(oath_id: String) -> void:
 		hud_feed.add_message("Debug Oath activated: %s." % _get_oath_label(oath_id), "event")
 		return
 
-	var blocker := table.oath_system.get_oath_activation_blocker(oath_id, true)
+	var blocker: String = table.oath_system.get_oath_activation_blocker(oath_id, true)
 	hud_feed.add_message("Debug Oath blocked: %s." % blocker, "event")
 
 
@@ -721,28 +741,15 @@ func _make_passage_completion_panel_style() -> StyleBoxFlat:
 	return style
 
 
-func _get_completion_rows() -> Array[Dictionary]:
-	return [
-		{"label": "Shots Taken", "key": "shots_taken"},
-		{"label": "Doubloons Earned", "key": "doubloons_earned"},
-		{"label": "Doubloons Lost", "key": "doubloons_lost"},
-		{"label": "Balls Sunk", "key": "balls_sunk"},
-		{"label": "Highest Pocket Streak", "key": "highest_pocket_streak"},
-		{"label": "Interventions Triggered", "key": "interventions_triggered"},
-		{"label": "Contraband Found", "key": "contraband_found"},
-		{"label": "Treasure Claimed", "key": "treasure_claimed"},
-		{"label": "Kraken Favor Earned", "key": "kraken_favor_earned"},
-		{"label": "Total Kraken Favor", "key": "total_kraken_favor"},
-		{"label": "Final Ball Count", "key": "current_ball_count"},
-		{"label": "Run Duration", "key": "run_time_seconds"},
-	]
+func _get_completion_rows() -> Array:
+	return RunStatsSystem.get_passage_completion_rows()
 
 
 func _update_passage_completion_values() -> void:
 	if table == null or table.run_stats_system == null:
 		return
 
-	var snapshot := table.run_stats_system.get_run_stats_snapshot()
+	var snapshot: Dictionary = table.run_stats_system.get_run_stats_snapshot()
 	snapshot["kraken_favor_earned"] = int(passage_completion_progression_award.get("kraken_favor_earned", 0))
 	if progression_system != null:
 		snapshot["total_kraken_favor"] = int(progression_system.get_progression_snapshot().get("total_kraken_favor", 0))

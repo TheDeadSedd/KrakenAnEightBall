@@ -48,7 +48,7 @@ const SHOP_ITEMS := {
 @export var refresh_shot_decay_amount := 2
 @export var refresh_max_cost := 0
 
-var table
+var table: BilliardsTable
 var pending_item_id := ""
 var purchase_attempts := 0
 var denied_purchase_attempts := 0
@@ -70,7 +70,7 @@ var cue_modifier_snapshot: Dictionary = {}
 var stock_rng := RandomNumberGenerator.new()
 
 
-func setup(table_ref) -> void:
+func setup(table_ref: BilliardsTable) -> void:
 	table = table_ref
 	stock_rng.seed = STOCK_RNG_SEED
 	stock_refresh_serial = 0
@@ -240,6 +240,10 @@ func get_refresh_decay_snapshot() -> Dictionary:
 
 func get_current_refresh_cost() -> int:
 	return _apply_refresh_cost_cap(maxi(current_refresh_cost, _get_base_refresh_cost()))
+
+
+func get_quartermaster_access_blocker() -> String:
+	return _get_oath_quartermaster_blocker()
 
 
 func can_afford_item(item_id: String) -> bool:

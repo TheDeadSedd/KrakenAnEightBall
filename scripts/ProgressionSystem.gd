@@ -5,8 +5,8 @@ signal progression_changed(snapshot: Dictionary)
 signal kraken_favor_awarded(amount: int, total: int, award_snapshot: Dictionary)
 signal kraken_favor_spent(amount: int, total: int, reason: String)
 
-# Persistent run-spanning progression currency only. Cue upgrades will consume
-# this later, but no upgrade inventory or shop logic belongs in this pass.
+# Persistent run-spanning progression currency plus nested cue progression
+# save data. CueProgressionSystem owns cue definitions, unlocks, and loadout.
 const PROGRESSION_FILE_PATH := "user://progression.json"
 const SAVE_VERSION := 2
 
@@ -153,9 +153,12 @@ func finalize_successful_passage(stats_snapshot: Dictionary) -> Dictionary:
 		last_award_snapshot = _make_empty_award("Passage was not completed.")
 		return last_award_snapshot.duplicate(true)
 
-	current_run_reward_finalized = true
-	var award_snapshot := calculate_kraken_favor_reward(stats_snapshot)
-	var amount := maxi(int(award_snapshot.get("kraken_favor_earned", 0)), 0)
+	var previous_total := total_kraken_favor
+	var previous_lifetime_earned := lifetime_kraken_favor_earned
+	var previous_successful_passages := successful_passages
+	var previous_last_award := last_award_snapshot.duplicate(true)
+	var award_snapshot: Dictionary = calculate_kraken_favor_reward(stats_snapshot)
+	var amount: int = maxi(int(award_snapshot.get("kraken_favor_earned", 0)), 0)
 	total_kraken_favor += amount
 	lifetime_kraken_favor_earned += amount
 	successful_passages += 1
@@ -163,7 +166,14 @@ func finalize_successful_passage(stats_snapshot: Dictionary) -> Dictionary:
 	award_snapshot["successful_passages"] = successful_passages
 	award_snapshot["timestamp"] = Time.get_datetime_string_from_system(false, false)
 	last_award_snapshot = award_snapshot.duplicate(true)
-	_write_progression()
+	if not _write_progression():
+		total_kraken_favor = previous_total
+		lifetime_kraken_favor_earned = previous_lifetime_earned
+		successful_passages = previous_successful_passages
+		last_award_snapshot = previous_last_award
+		return _make_empty_award("Could not save Kraken Favor.").duplicate(true)
+
+	current_run_reward_finalized = true
 	kraken_favor_awarded.emit(amount, total_kraken_favor, last_award_snapshot.duplicate(true))
 	progression_changed.emit(get_progression_snapshot())
 	return last_award_snapshot.duplicate(true)
