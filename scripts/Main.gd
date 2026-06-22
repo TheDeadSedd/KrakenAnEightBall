@@ -43,6 +43,8 @@ func _ready() -> void:
 	_setup_cue_progression_runtime_bridge()
 	table.status_text_changed.connect(_on_status_text_changed)
 	table.game_finished.connect(_on_game_finished)
+	if not table.gameplay_mouse_lock_changed.is_connected(_on_gameplay_mouse_lock_changed):
+		table.gameplay_mouse_lock_changed.connect(_on_gameplay_mouse_lock_changed)
 	table.score_system.doubloons_changed.connect(_on_doubloons_changed)
 	table.score_system.score_feed_message.connect(_on_score_feed_message)
 	table.table_event_system.status_changed.connect(_on_table_event_status_changed)
@@ -130,6 +132,7 @@ func _ready() -> void:
 	pause_menu.set_debris_collision_draw_debug_state(table.table_obstacle_system.debug_collision_draw_enabled)
 	quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 	quartermaster_hud.set_back_room_deal_snapshot(table.back_room_deal_system.get_deal_snapshot())
+	_on_gameplay_mouse_lock_changed(table.should_suppress_hover_ui())
 
 
 func _configure_pause_process_modes() -> void:
@@ -286,6 +289,16 @@ func _on_table_event_status_changed(text: String) -> void:
 	hud_feed.add_message(text, "event")
 
 
+func _on_gameplay_mouse_lock_changed(locked: bool) -> void:
+	oath_hud.set_hover_ui_suppressed(locked)
+	passage_hud.set_hover_ui_suppressed(locked)
+	quartermaster_hud.set_hover_ui_suppressed(locked)
+	table_event_meter.set_hover_ui_suppressed(locked)
+	run_stats_hud.set_hover_ui_suppressed(locked)
+	hud_feed.set_hover_ui_suppressed(locked)
+	reserve_slots_ui.set_hover_ui_suppressed(locked)
+
+
 func _on_table_event_icon_clicked() -> void:
 	table_event_menu.open_menu()
 
@@ -294,8 +307,8 @@ func _on_table_event_offer_selected(offer_index: int) -> void:
 	table.table_event_system.request_purchase_offer(offer_index)
 
 
-func _on_table_event_offer_replace_requested(offer_index: int) -> void:
-	table.table_event_system.request_reroll_offer_with_oath(offer_index)
+func _on_table_event_offer_replace_requested(offer_index: int, oath_id: String) -> void:
+	table.table_event_system.request_reroll_offer_with_oath(offer_index, oath_id)
 
 
 func _on_table_event_purchased(_event_id: String, _cost: int) -> void:

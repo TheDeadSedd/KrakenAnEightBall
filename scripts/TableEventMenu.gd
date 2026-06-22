@@ -2,7 +2,7 @@ extends Control
 class_name TableEventMenu
 
 signal event_offer_selected(offer_index: int)
-signal event_offer_replace_requested(offer_index: int)
+signal event_offer_replace_requested(offer_index: int, oath_id: String)
 signal menu_closed
 
 # Compact Kraken Intervention choice menu. It presents Omens, while Table Event
@@ -11,7 +11,9 @@ const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const OFFER_SLOT_COUNT := 3
 const TABLE_CENTER := Vector2(960.0, 540.0)
 const PANEL_SIZE := Vector2(860.0, 268.0)
+const OATH_CHOICE_PANEL_SIZE := Vector2(610.0, 430.0)
 const CARD_SIZE := Vector2(250.0, 160.0)
+const OATH_CHOICE_ROW_SIZE := Vector2(548.0, 82.0)
 const CARD_GAP := 12
 const CARD_HORIZONTAL_PADDING := 11
 const CARD_VERTICAL_PADDING := 7
@@ -28,6 +30,11 @@ const TEXT_COLOR := Color(0.94, 0.88, 0.68, 1.0)
 const COST_COLOR := Color(1.0, 0.78, 0.32, 1.0)
 const DISABLED_TEXT_COLOR := Color(0.53, 0.48, 0.39, 0.82)
 const STATUS_COLOR := Color(0.76, 0.88, 0.82, 0.96)
+const OATH_CHOICE_IDS := [
+	OathSystem.OATH_OF_URGENCY,
+	OathSystem.OATH_OF_ISOLATION,
+	OathSystem.OATH_OF_HUMILITY,
+]
 
 var table_event_system: TableEventSystem
 var offer_buttons: Array[Button] = []
@@ -40,7 +47,17 @@ var status_label: Label
 var title_label: Label
 var close_button: Button
 var panel: Panel
+var oath_choice_panel: Panel
+var oath_choice_status_label: Label
+var oath_choice_cancel_button: Button
+var oath_choice_buttons: Dictionary = {}
+var oath_choice_name_labels: Dictionary = {}
+var oath_choice_description_labels: Dictionary = {}
+var oath_choice_duration_labels: Dictionary = {}
+var oath_choice_consequence_labels: Dictionary = {}
+var oath_choice_status_labels: Dictionary = {}
 var replace_press_guard_offer_index := -1
+var pending_oath_replace_offer_index := -1
 
 
 func _ready() -> void:
@@ -65,6 +82,10 @@ func open_menu() -> void:
 	if table_event_system == null or not table_event_system.is_event_icon_clickable():
 		return
 	visible = true
+	panel.visible = true
+	if oath_choice_panel != null:
+		oath_choice_panel.visible = false
+	pending_oath_replace_offer_index = -1
 	table_event_system.set_event_menu_open(true)
 	refresh_offers()
 	status_label.text = "Choose one event to unleash, or swear an oath to replace one omen."
@@ -73,6 +94,11 @@ func open_menu() -> void:
 func close_menu() -> void:
 	if table_event_system != null:
 		table_event_system.set_event_menu_open(false)
+	if oath_choice_panel != null:
+		oath_choice_panel.visible = false
+	if panel != null:
+		panel.visible = true
+	pending_oath_replace_offer_index = -1
 	visible = false
 	menu_closed.emit()
 
@@ -99,6 +125,9 @@ func _build_menu() -> void:
 	status_label = _build_status_label()
 	root.add_child(status_label)
 	root.add_child(_build_offer_row())
+
+	oath_choice_panel = _build_oath_choice_panel()
+	add_child(oath_choice_panel)
 
 
 func _build_shade() -> ColorRect:
@@ -201,6 +230,122 @@ func _build_offer_card(offer_index: int) -> Button:
 	return button
 
 
+func _build_oath_choice_panel() -> Panel:
+	var oath_panel := Panel.new()
+	oath_panel.visible = false
+	oath_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	oath_panel.clip_contents = true
+	oath_panel.z_index = 2
+	oath_panel.custom_minimum_size = OATH_CHOICE_PANEL_SIZE
+	oath_panel.set_anchors_preset(Control.PRESET_TOP_LEFT)
+	oath_panel.add_theme_stylebox_override("panel", _make_panel_style(PANEL_COLOR, PANEL_BORDER, 2, 14))
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	oath_panel.add_child(margin)
+
+	var stack := VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 8)
+	margin.add_child(stack)
+
+	var oath_title := _make_oath_choice_label(24, Color(1.0, 0.84, 0.46, 1.0), HORIZONTAL_ALIGNMENT_CENTER)
+	oath_title.text = "Swear an Oath"
+	oath_title.add_theme_constant_override("outline_size", 3)
+	stack.add_child(oath_title)
+
+	oath_choice_status_label = _make_oath_choice_label(13, STATUS_COLOR, HORIZONTAL_ALIGNMENT_CENTER)
+	oath_choice_status_label.text = "Choose what price the Kraken may remember."
+	oath_choice_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(oath_choice_status_label)
+
+	for oath_id_value in OATH_CHOICE_IDS:
+		var oath_id := str(oath_id_value)
+		var row := _build_oath_choice_row(oath_id)
+		stack.add_child(row)
+
+	oath_choice_cancel_button = Button.new()
+	oath_choice_cancel_button.text = "Cancel"
+	oath_choice_cancel_button.custom_minimum_size = Vector2(130.0, 32.0)
+	oath_choice_cancel_button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	oath_choice_cancel_button.mouse_filter = Control.MOUSE_FILTER_STOP
+	oath_choice_cancel_button.focus_mode = Control.FOCUS_ALL
+	oath_choice_cancel_button.add_theme_font_override("font", UI_FONT)
+	oath_choice_cancel_button.add_theme_font_size_override("font_size", 15)
+	oath_choice_cancel_button.pressed.connect(_on_oath_choice_cancel_pressed)
+	stack.add_child(oath_choice_cancel_button)
+
+	return oath_panel
+
+
+func _build_oath_choice_row(oath_id: String) -> Button:
+	var button := Button.new()
+	button.text = ""
+	button.custom_minimum_size = OATH_CHOICE_ROW_SIZE
+	button.mouse_filter = Control.MOUSE_FILTER_STOP
+	button.focus_mode = Control.FOCUS_ALL
+	button.add_theme_stylebox_override("normal", _make_panel_style(CARD_COLOR, CARD_BORDER, 1, 8))
+	button.add_theme_stylebox_override("hover", _make_panel_style(CARD_COLOR.lightened(0.08), CARD_HOVER_BORDER, 2, 8))
+	button.add_theme_stylebox_override("pressed", _make_panel_style(CARD_PRESSED_COLOR, CARD_HOVER_BORDER, 2, 8))
+	button.add_theme_stylebox_override("disabled", _make_panel_style(CARD_DISABLED_COLOR, CARD_BORDER.darkened(0.25), 1, 8))
+	button.pressed.connect(_on_oath_choice_pressed.bind(oath_id))
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 6)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 6)
+	button.add_child(margin)
+
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 1)
+	margin.add_child(stack)
+
+	var name_label := _make_oath_choice_label(16, TEXT_COLOR, HORIZONTAL_ALIGNMENT_LEFT)
+	stack.add_child(name_label)
+	oath_choice_name_labels[oath_id] = name_label
+
+	var description_label := _make_oath_choice_label(12, TEXT_COLOR, HORIZONTAL_ALIGNMENT_LEFT)
+	description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(description_label)
+	oath_choice_description_labels[oath_id] = description_label
+
+	var duration_label := _make_oath_choice_label(12, STATUS_COLOR, HORIZONTAL_ALIGNMENT_LEFT)
+	stack.add_child(duration_label)
+	oath_choice_duration_labels[oath_id] = duration_label
+
+	var consequence_label := _make_oath_choice_label(12, COST_COLOR, HORIZONTAL_ALIGNMENT_LEFT)
+	stack.add_child(consequence_label)
+	oath_choice_consequence_labels[oath_id] = consequence_label
+
+	var status_line := _make_oath_choice_label(12, STATUS_COLOR, HORIZONTAL_ALIGNMENT_LEFT)
+	stack.add_child(status_line)
+	oath_choice_status_labels[oath_id] = status_line
+
+	oath_choice_buttons[oath_id] = button
+	return button
+
+
+func _make_oath_choice_label(font_size: int, font_color: Color, alignment: HorizontalAlignment) -> Label:
+	var label := Label.new()
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.horizontal_alignment = alignment
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", font_color)
+	label.add_theme_color_override("font_outline_color", Color(0.04, 0.025, 0.01, 0.92))
+	label.add_theme_constant_override("outline_size", 2)
+	return label
+
+
 func _style_panel(menu_panel: Panel) -> void:
 	menu_panel.add_theme_stylebox_override("panel", _make_panel_style(PANEL_COLOR, PANEL_BORDER, 2, 14))
 
@@ -225,6 +370,12 @@ func _center_panel() -> void:
 		TABLE_CENTER.x - PANEL_SIZE.x * 0.5,
 		TABLE_CENTER.y - PANEL_SIZE.y * 0.5
 	)
+	if oath_choice_panel != null:
+		oath_choice_panel.size = OATH_CHOICE_PANEL_SIZE
+		oath_choice_panel.position = Vector2(
+			TABLE_CENTER.x - OATH_CHOICE_PANEL_SIZE.x * 0.5,
+			TABLE_CENTER.y - OATH_CHOICE_PANEL_SIZE.y * 0.5
+		)
 
 
 func _refresh_offers(offers: Array) -> void:
@@ -272,7 +423,7 @@ func _refresh_offer_card_content(offer_index: int, offer: Dictionary, disabled: 
 		var replace_button: Button = offer_replace_buttons[offer_index]
 		replace_button.disabled = not can_reroll
 		if can_reroll:
-			replace_button.tooltip_text = "Swear Oath of Urgency to replace this omen."
+			replace_button.tooltip_text = "Choose an Oath to replace this omen."
 		else:
 			replace_button.tooltip_text = reroll_blocker if not reroll_blocker.is_empty() else "This omen cannot be replaced."
 	_set_offer_card_colors(offer_index, disabled)
@@ -375,6 +526,92 @@ func _get_offer(offers: Array, offer_index: int) -> Dictionary:
 	return {}
 
 
+func _open_oath_choice_panel(offer_index: int) -> void:
+	if table_event_system == null or oath_choice_panel == null:
+		return
+	pending_oath_replace_offer_index = offer_index
+	panel.visible = false
+	oath_choice_panel.visible = true
+	_refresh_oath_choice_panel()
+	if oath_choice_cancel_button != null:
+		oath_choice_cancel_button.grab_focus()
+
+
+func _close_oath_choice_panel() -> void:
+	pending_oath_replace_offer_index = -1
+	if oath_choice_panel != null:
+		oath_choice_panel.visible = false
+	if panel != null:
+		panel.visible = true
+	status_label.text = "Choose one event to unleash, or swear an oath to replace one omen."
+
+
+func _refresh_oath_choice_panel() -> void:
+	if table_event_system == null or pending_oath_replace_offer_index < 0:
+		return
+
+	var choices := table_event_system.get_offer_reroll_oath_choices_snapshot(pending_oath_replace_offer_index)
+	var choices_by_id: Dictionary = {}
+	for choice_value in choices:
+		if not choice_value is Dictionary:
+			continue
+		var choice: Dictionary = choice_value
+		choices_by_id[str(choice.get("id", ""))] = choice
+
+	for oath_id_value in OATH_CHOICE_IDS:
+		var oath_id := str(oath_id_value)
+		var choice: Dictionary = choices_by_id.get(oath_id, {})
+		_refresh_oath_choice_row(oath_id, choice)
+
+	if oath_choice_status_label != null:
+		oath_choice_status_label.text = "Choose what price the Kraken may remember."
+
+
+func _refresh_oath_choice_row(oath_id: String, choice: Dictionary) -> void:
+	var button: Button = oath_choice_buttons.get(oath_id) as Button
+	if button == null:
+		return
+
+	var has_choice := not choice.is_empty()
+	var available := has_choice and bool(choice.get("available", false))
+	var blocker := str(choice.get("blocked_reason", ""))
+	button.disabled = not available
+	if available:
+		button.tooltip_text = "Swear %s to replace this omen." % str(choice.get("label", "an Oath"))
+	else:
+		button.tooltip_text = blocker if not blocker.is_empty() else "This Oath is unavailable."
+
+	var label_color := TEXT_COLOR if available else DISABLED_TEXT_COLOR
+	var status_color := STATUS_COLOR if available else DISABLED_TEXT_COLOR
+	var consequence_color := COST_COLOR if available else DISABLED_TEXT_COLOR
+
+	var name_label: Label = oath_choice_name_labels.get(oath_id) as Label
+	var description_label: Label = oath_choice_description_labels.get(oath_id) as Label
+	var duration_label: Label = oath_choice_duration_labels.get(oath_id) as Label
+	var consequence_label: Label = oath_choice_consequence_labels.get(oath_id) as Label
+	var status_line: Label = oath_choice_status_labels.get(oath_id) as Label
+
+	if name_label != null:
+		name_label.text = str(choice.get("label", oath_id)) if has_choice else oath_id
+		name_label.add_theme_color_override("font_color", label_color)
+	if description_label != null:
+		description_label.text = str(choice.get("description", "The Kraken gives no terms."))
+		description_label.add_theme_color_override("font_color", label_color)
+	if duration_label != null:
+		duration_label.text = str(choice.get("duration_text", "Duration: Unknown"))
+		duration_label.add_theme_color_override("font_color", status_color)
+	if consequence_label != null:
+		consequence_label.text = str(choice.get("consequence_text", "Restriction: Unknown"))
+		consequence_label.add_theme_color_override("font_color", consequence_color)
+	if status_line != null:
+		var status_text := "Available"
+		if not available:
+			var reason := blocker if not blocker.is_empty() else "blocked"
+			status_text = "Unavailable: %s" % reason
+		status_line.text = status_text
+		status_line.add_theme_color_override("font_color", status_color)
+
+
 func _on_offer_button_pressed(offer_index: int) -> void:
 	if replace_press_guard_offer_index == offer_index:
 		return
@@ -386,7 +623,7 @@ func _on_offer_replace_button_down(offer_index: int) -> void:
 
 
 func _on_offer_replace_button_pressed(offer_index: int) -> void:
-	event_offer_replace_requested.emit(offer_index)
+	_open_oath_choice_panel(offer_index)
 	call_deferred("_clear_replace_press_guard")
 
 
@@ -394,10 +631,24 @@ func _clear_replace_press_guard() -> void:
 	replace_press_guard_offer_index = -1
 
 
+func _on_oath_choice_pressed(oath_id: String) -> void:
+	if pending_oath_replace_offer_index < 0:
+		return
+	var offer_index := pending_oath_replace_offer_index
+	_close_oath_choice_panel()
+	event_offer_replace_requested.emit(offer_index, oath_id)
+
+
+func _on_oath_choice_cancel_pressed() -> void:
+	_close_oath_choice_panel()
+
+
 func _on_offers_changed(offers: Array) -> void:
 	if not visible:
 		return
 	_refresh_offers(offers)
+	if oath_choice_panel != null and oath_choice_panel.visible:
+		_refresh_oath_choice_panel()
 
 
 func _on_status_changed(text: String) -> void:

@@ -17,6 +17,7 @@ const DEFAULT_CATEGORY := "status"
 var messages: Array[Dictionary] = []
 var message_rows: Array[Control] = []
 var is_hovered := false
+var hover_ui_suppressed := false
 var review_scroll_offset := 0
 
 
@@ -56,7 +57,20 @@ func add_message(text: String, category: String = DEFAULT_CATEGORY, amount: int 
 	_refresh_labels()
 
 
+func set_hover_ui_suppressed(suppressed: bool) -> void:
+	if hover_ui_suppressed == suppressed:
+		return
+
+	hover_ui_suppressed = suppressed
+	mouse_filter = Control.MOUSE_FILTER_IGNORE if suppressed else Control.MOUSE_FILTER_PASS
+	if suppressed:
+		is_hovered = false
+		_set_review_scroll_offset(0)
+
+
 func _gui_input(event: InputEvent) -> void:
+	if hover_ui_suppressed:
+		return
 	if not is_hovered:
 		return
 	if not (event is InputEventMouseButton):
@@ -75,6 +89,11 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _on_mouse_entered() -> void:
+	if hover_ui_suppressed:
+		is_hovered = false
+		_refresh_labels()
+		return
+
 	is_hovered = true
 	_refresh_labels()
 

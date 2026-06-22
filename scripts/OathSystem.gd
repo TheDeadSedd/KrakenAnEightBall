@@ -105,6 +105,19 @@ func get_available_oath_definitions(include_hidden: bool = false) -> Array:
 	return definitions
 
 
+func get_oath_choice_definition(oath_id: String, include_hidden: bool = false) -> Dictionary:
+	var definition := _get_oath_definition(oath_id)
+	if definition.is_empty():
+		return {}
+	if not include_hidden and not bool(definition.get("visible", true)):
+		return {}
+
+	var choice := definition.duplicate(true)
+	choice["duration_text"] = _format_oath_duration_text(definition)
+	choice["consequence_text"] = _format_oath_consequence_text(definition)
+	return choice
+
+
 func activate_oath(oath_id: String, allow_hidden: bool = false) -> bool:
 	if not can_activate_oath(oath_id, allow_hidden):
 		return false
@@ -483,6 +496,30 @@ func _format_oath_penalty_text(definition: Dictionary) -> String:
 		PENALTY_REMOVE_BALLS:
 			return "Lose %s eligible balls" % amount
 	return "Unknown penalty"
+
+
+func _format_oath_duration_text(definition: Dictionary) -> String:
+	var shots := maxi(int(definition.get("duration_shots", 0)), 0)
+	if shots > 0:
+		var shot_text := "shot" if shots == 1 else "shots"
+		return "Duration: %s %s" % [shots, shot_text]
+	var failure_condition := str(definition.get("failure_condition", ""))
+	if not failure_condition.is_empty():
+		return "Condition-bound"
+	return "Duration: Immediate"
+
+
+func _format_oath_consequence_text(definition: Dictionary) -> String:
+	var penalty: Dictionary = definition.get("penalty", {})
+	if not penalty.is_empty():
+		return "Failure: %s" % _format_oath_penalty_text(definition)
+
+	var effects: Dictionary = definition.get("effects", {})
+	if bool(effects.get("quartermaster_locked", false)):
+		return "Restriction: Quartermaster unavailable"
+	if bool(effects.get("cue_modifiers_suppressed", false)):
+		return "Restriction: Cue bonuses silenced"
+	return "Restriction: None"
 
 
 func _get_effective_passage_penalty_amount(base_amount: int) -> int:

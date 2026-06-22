@@ -6,6 +6,7 @@ signal status_text_changed(text: String)
 signal game_finished(text: String)
 signal run_ball_counts_changed(active_ball_count: int, balls_sunk_count: int)
 signal shot_taken(count: int)
+signal gameplay_mouse_lock_changed(locked: bool)
 
 #region Data Containers
 class ResultCallout:
@@ -93,6 +94,7 @@ const MAX_DRAG_DISTANCE := 210.0
 const MIN_SHOT_DISTANCE := 12.0
 const SHOT_POWER := 9.4
 const CUE_MODIFIER_CUE_SHOT_POWER_MULTIPLIER_BONUS := "cue_shot_power_multiplier_bonus"
+const HIDE_CURSOR_DURING_CUE_DRAG := true
 const CUE_AIM_DEADZONE_RADIUS := 20.0
 const EARLY_CUE_RECLAIM_DELAY := 0.35
 const EARLY_CUE_RECLAIM_LOW_SPEED := 85.0
@@ -158,6 +160,8 @@ var drag_start_drag_vector := Vector2.ZERO
 var drag_aim_direction := Vector2.RIGHT
 var drag_mouse_position := Vector2.ZERO
 var is_dragging := false
+var gameplay_mouse_lock_active := false
+var cue_drag_restore_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_VISIBLE
 var aim_preview_dirty := true
 var game_over := false
 var shot_active := false
@@ -245,6 +249,11 @@ func _ready() -> void:
 	_queue_run_ball_count_update()
 	status_text_changed.emit(READY_STATUS_TEXT)
 	queue_redraw()
+
+
+func _exit_tree() -> void:
+	if gameplay_mouse_lock_active and HIDE_CURSOR_DURING_CUE_DRAG:
+		Input.mouse_mode = cue_drag_restore_mouse_mode
 
 
 func _connect_run_ball_count_events() -> void:
@@ -801,7 +810,7 @@ func cancel_active_cue_drag_for_pause() -> void:
 		return
 
 	if is_dragging:
-		is_dragging = false
+		_end_cue_drag()
 		cue_controller.stop_recoil()
 	_clear_aim_preview_now()
 	queue_redraw()
@@ -809,6 +818,14 @@ func cancel_active_cue_drag_for_pause() -> void:
 
 func is_cue_drag_active() -> bool:
 	return is_dragging
+
+
+func is_gameplay_mouse_locked() -> bool:
+	return gameplay_mouse_lock_active
+
+
+func should_suppress_hover_ui() -> bool:
+	return is_gameplay_mouse_locked()
 
 
 func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
@@ -855,7 +872,7 @@ func _try_start_drag(mouse_position: Vector2) -> void:
 	if not cue_controller.is_point_over_grab_zone(mouse_position, cue_ball, MAX_DRAG_DISTANCE):
 		return
 
-	is_dragging = true
+	_begin_cue_drag()
 	cue_controller.stop_recoil()
 	drag_start_mouse_position = mouse_position
 	drag_start_drag_vector = cue_ball.global_position - mouse_position
@@ -870,7 +887,7 @@ func _release_shot(_mouse_position: Vector2) -> void:
 		return
 
 	if not _can_release_current_shot():
-		is_dragging = false
+		_end_cue_drag()
 		cue_controller.stop_recoil()
 		_clear_aim_preview_now()
 		queue_redraw()
@@ -880,7 +897,7 @@ func _release_shot(_mouse_position: Vector2) -> void:
 	var drag_vector: Vector2 = _get_drag_vector(release_position)
 	var release_pullback: float = cue_controller.get_pullback_for_drag_vector(drag_vector, MAX_DRAG_DISTANCE)
 	var release_direction: Vector2 = drag_vector.normalized()
-	is_dragging = false
+	_end_cue_drag()
 	if drag_vector.length() < MIN_SHOT_DISTANCE:
 		cue_controller.stop_recoil()
 		_clear_aim_preview_now()
@@ -933,6 +950,36 @@ func _get_current_shot_drag_vector() -> Vector2:
 		return Vector2.ZERO
 
 	return _get_drag_vector(drag_mouse_position)
+
+
+func _begin_cue_drag() -> void:
+	if is_dragging:
+		return
+	is_dragging = true
+	_set_gameplay_mouse_lock(true)
+
+
+func _end_cue_drag() -> void:
+	if not is_dragging:
+		_set_gameplay_mouse_lock(false)
+		return
+	is_dragging = false
+	_set_gameplay_mouse_lock(false)
+
+
+func _set_gameplay_mouse_lock(locked: bool) -> void:
+	if gameplay_mouse_lock_active == locked:
+		return
+
+	gameplay_mouse_lock_active = locked
+	if locked:
+		cue_drag_restore_mouse_mode = Input.mouse_mode
+		if HIDE_CURSOR_DURING_CUE_DRAG:
+			Input.mouse_mode = Input.MOUSE_MODE_CONFINED_HIDDEN
+	else:
+		if HIDE_CURSOR_DURING_CUE_DRAG:
+			Input.mouse_mode = cue_drag_restore_mouse_mode
+	gameplay_mouse_lock_changed.emit(gameplay_mouse_lock_active)
 
 
 func _mark_aim_preview_dirty() -> void:
@@ -2385,7 +2432,7 @@ func _reset_ball(ball: Ball, origin: Vector2, message: String) -> void:
 
 func _finish_game(message: String) -> void:
 	game_over = true
-	is_dragging = false
+	_end_cue_drag()
 
 	for child in balls.get_children():
 		var ball := child as Ball

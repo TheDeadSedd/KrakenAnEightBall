@@ -18,6 +18,7 @@ var tooltip_panel: PanelContainer
 var tooltip_title_label: Label
 var tooltip_body_label: Label
 var indicator_hovered := false
+var hover_ui_suppressed := false
 
 
 func _ready() -> void:
@@ -62,7 +63,24 @@ func set_oath_snapshot(snapshot: Dictionary) -> void:
 		indicator_label.text = _format_indicator_text(active_oaths)
 	_update_tooltip(active_oaths)
 	if tooltip_panel != null:
-		tooltip_panel.visible = indicator_hovered
+		tooltip_panel.visible = indicator_hovered and not hover_ui_suppressed
+
+
+func set_hover_ui_suppressed(suppressed: bool) -> void:
+	if hover_ui_suppressed == suppressed:
+		return
+
+	hover_ui_suppressed = suppressed
+	if suppressed:
+		indicator_hovered = false
+		if indicator_panel != null:
+			indicator_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			indicator_panel.add_theme_stylebox_override("panel", _make_indicator_style(false))
+		if tooltip_panel != null:
+			tooltip_panel.visible = false
+	else:
+		if indicator_panel != null:
+			indicator_panel.mouse_filter = Control.MOUSE_FILTER_STOP
 
 
 func _build_indicator() -> void:
@@ -238,6 +256,12 @@ func _format_oath_tooltip_body(oath: Dictionary, include_name: bool) -> String:
 
 
 func _on_indicator_mouse_entered() -> void:
+	if hover_ui_suppressed:
+		indicator_hovered = false
+		if tooltip_panel != null:
+			tooltip_panel.visible = false
+		return
+
 	indicator_hovered = true
 	if indicator_panel != null:
 		indicator_panel.add_theme_stylebox_override("panel", _make_indicator_style(true))

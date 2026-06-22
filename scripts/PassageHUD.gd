@@ -21,6 +21,7 @@ var tooltip_reward_label: Label
 var latest_snapshot: Dictionary = {}
 var request_hovered := false
 var reroll_hovered := false
+var hover_ui_suppressed := false
 var panel_style := StyleBoxFlat.new()
 
 
@@ -67,6 +68,28 @@ func set_passage_snapshot(snapshot: Dictionary) -> void:
 		reroll_button.text = "Reroll: +%s Passage" % reroll_cost
 		reroll_button.disabled = not bool(snapshot.get("request_reroll_available", false))
 	_update_tooltip()
+
+
+func set_hover_ui_suppressed(suppressed: bool) -> void:
+	if hover_ui_suppressed == suppressed:
+		return
+
+	hover_ui_suppressed = suppressed
+	if suppressed:
+		request_hovered = false
+		reroll_hovered = false
+		if request_label != null:
+			request_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		if reroll_button != null:
+			reroll_button.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			reroll_button.release_focus()
+		if tooltip_panel != null:
+			tooltip_panel.visible = false
+	else:
+		if request_label != null:
+			request_label.mouse_filter = Control.MOUSE_FILTER_STOP
+		if reroll_button != null:
+			reroll_button.mouse_filter = Control.MOUSE_FILTER_STOP
 
 
 func _draw() -> void:
@@ -244,6 +267,11 @@ func _update_reroll_tooltip() -> void:
 
 
 func _on_request_mouse_entered() -> void:
+	if hover_ui_suppressed:
+		request_hovered = false
+		_update_tooltip_visibility()
+		return
+
 	request_hovered = true
 	_update_tooltip()
 	if tooltip_panel != null:
@@ -257,6 +285,11 @@ func _on_request_mouse_exited() -> void:
 
 
 func _on_reroll_mouse_entered() -> void:
+	if hover_ui_suppressed:
+		reroll_hovered = false
+		_update_tooltip_visibility()
+		return
+
 	reroll_hovered = true
 	_update_tooltip()
 	if tooltip_panel != null:
@@ -271,10 +304,12 @@ func _on_reroll_mouse_exited() -> void:
 
 func _update_tooltip_visibility() -> void:
 	if tooltip_panel != null:
-		tooltip_panel.visible = request_hovered or reroll_hovered
+		tooltip_panel.visible = not hover_ui_suppressed and (request_hovered or reroll_hovered)
 
 
 func _on_reroll_button_pressed() -> void:
+	if hover_ui_suppressed:
+		return
 	request_reroll_requested.emit()
 
 

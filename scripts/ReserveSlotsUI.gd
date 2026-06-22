@@ -33,6 +33,7 @@ var reserve_system: ReserveSystem
 var table
 var slot_snapshots: Array = []
 var hovered_slot_index := -1
+var hover_ui_suppressed := false
 var hover_changes := 0
 var clicks_consumed := 0
 var motion_events_seen := 0
@@ -65,6 +66,16 @@ func setup(reserve_system_ref: ReserveSystem, table_ref) -> void:
 		_on_reserve_slots_changed([])
 
 
+func set_hover_ui_suppressed(suppressed: bool) -> void:
+	if hover_ui_suppressed == suppressed:
+		return
+
+	hover_ui_suppressed = suppressed
+	mouse_filter = Control.MOUSE_FILTER_IGNORE if suppressed else Control.MOUSE_FILTER_PASS
+	if suppressed:
+		_clear_hovered_slot()
+
+
 func get_debug_snapshot() -> Dictionary:
 	return {
 		"visible": visible,
@@ -87,6 +98,10 @@ func get_slot_icon_key(slot_index: int) -> String:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if _should_suppress_hover_ui():
+		_clear_hovered_slot()
+		return
+
 	if event is InputEventMouseMotion:
 		motion_events_seen += 1
 		_update_hovered_slot(event.position)
@@ -178,6 +193,10 @@ func _on_reserve_slots_changed(slots: Array) -> void:
 
 
 func _on_mouse_exited() -> void:
+	_clear_hovered_slot()
+
+
+func _clear_hovered_slot() -> void:
 	if hovered_slot_index == -1:
 		return
 	hovered_slot_index = -1
@@ -186,6 +205,10 @@ func _on_mouse_exited() -> void:
 
 
 func _update_hovered_slot(local_position: Vector2) -> void:
+	if _should_suppress_hover_ui():
+		_clear_hovered_slot()
+		return
+
 	var next_hovered_slot := _get_slot_index_at_position(local_position)
 	if next_hovered_slot == hovered_slot_index:
 		return
@@ -204,6 +227,10 @@ func _get_slot_index_at_position(local_position: Vector2) -> int:
 
 func _is_cue_drag_active() -> bool:
 	return table != null and table.is_cue_drag_active()
+
+
+func _should_suppress_hover_ui() -> bool:
+	return hover_ui_suppressed or (table != null and table.should_suppress_hover_ui())
 
 
 func _get_slot_rect(slot_index: int) -> Rect2:

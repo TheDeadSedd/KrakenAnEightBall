@@ -6,6 +6,8 @@ class_name RunStatsHUD
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 
 const BUTTON_SIZE := Vector2(56.0, 42.0)
+const LEDGER_TOOLTIP_TEXT := "Run Stats"
+const CLOSE_TOOLTIP_TEXT := "Close"
 const PANEL_SIZE := Vector2(420.0, 995.0)
 const PANEL_OFFSET := Vector2(0.0, 50.0)
 const ROOT_SIZE := Vector2(450.0, 1085.0)
@@ -49,6 +51,7 @@ var close_button: Button
 var value_labels: Dictionary = {}
 var latest_snapshot: Dictionary = {}
 var intervention_history_label: Label
+var hover_ui_suppressed := false
 
 
 func _ready() -> void:
@@ -88,11 +91,30 @@ func close_panel() -> void:
 		ledger_button.button_pressed = false
 
 
+func set_hover_ui_suppressed(suppressed: bool) -> void:
+	if hover_ui_suppressed == suppressed:
+		return
+
+	hover_ui_suppressed = suppressed
+	if ledger_button != null:
+		ledger_button.mouse_filter = Control.MOUSE_FILTER_IGNORE if suppressed else Control.MOUSE_FILTER_STOP
+		ledger_button.tooltip_text = "" if suppressed else LEDGER_TOOLTIP_TEXT
+		if suppressed:
+			ledger_button.release_focus()
+	if stats_panel != null:
+		stats_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE if suppressed else Control.MOUSE_FILTER_STOP
+	if close_button != null:
+		close_button.mouse_filter = Control.MOUSE_FILTER_IGNORE if suppressed else Control.MOUSE_FILTER_STOP
+		close_button.tooltip_text = "" if suppressed else CLOSE_TOOLTIP_TEXT
+		if suppressed:
+			close_button.release_focus()
+
+
 func _build_button() -> void:
 	ledger_button = Button.new()
 	ledger_button.name = "RunStatsLedgerButton"
 	ledger_button.text = "LOG"
-	ledger_button.tooltip_text = "Run Stats"
+	ledger_button.tooltip_text = LEDGER_TOOLTIP_TEXT
 	ledger_button.position = Vector2.ZERO
 	ledger_button.size = BUTTON_SIZE
 	ledger_button.custom_minimum_size = BUTTON_SIZE
@@ -151,7 +173,7 @@ func _build_panel() -> void:
 	close_button = Button.new()
 	close_button.name = "CloseButton"
 	close_button.text = "X"
-	close_button.tooltip_text = "Close"
+	close_button.tooltip_text = CLOSE_TOOLTIP_TEXT
 	close_button.custom_minimum_size = Vector2(34.0, 30.0)
 	close_button.mouse_filter = Control.MOUSE_FILTER_STOP
 	close_button.focus_mode = Control.FOCUS_NONE
@@ -327,4 +349,8 @@ func _on_run_stats_changed(snapshot: Dictionary) -> void:
 
 
 func _on_ledger_button_pressed() -> void:
+	if hover_ui_suppressed:
+		if ledger_button != null:
+			ledger_button.button_pressed = false
+		return
 	stats_panel.visible = ledger_button.button_pressed

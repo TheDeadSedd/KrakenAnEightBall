@@ -53,6 +53,11 @@ const LOOSE_CARGO_CONTRABAND_FALLBACK_KINDS := [
 ]
 const CUE_MODIFIER_LOOSE_CARGO_CONTRABAND_CHANCE_BONUS := "loose_cargo_contraband_chance_bonus"
 const DEBUG_LOOSE_CARGO_CONTRABAND_RANDOM := "random"
+const OFFER_REROLL_OATH_CHOICES := [
+	OathSystem.OATH_OF_URGENCY,
+	OathSystem.OATH_OF_ISOLATION,
+	OathSystem.OATH_OF_HUMILITY,
+]
 const DEBUG_LOOSE_CARGO_CONTRABAND_KINDS := [
 	DEBUG_LOOSE_CARGO_CONTRABAND_RANDOM,
 	SpawnSystem.CARGO_REPLACEMENT_WAYFINDER,
@@ -377,6 +382,15 @@ func request_reroll_offer_with_oath(offer_index: int, oath_id: String = OathSyst
 		_emit_state()
 		return false
 
+	var oath_system: OathSystem = _get_oath_system()
+	if oath_system == null:
+		denied_offer_oath_rerolls += 1
+		last_blocker_reason = "Oath system not ready"
+		status_changed.emit(last_blocker_reason)
+		event_purchase_blocked.emit(last_blocker_reason)
+		_emit_state()
+		return false
+
 	_ensure_offer_slots()
 	var previous_event_id := str(active_offer_ids[offer_index])
 	var replacement_event_id := _pick_reroll_replacement_event_id(offer_index)
@@ -388,9 +402,9 @@ func request_reroll_offer_with_oath(offer_index: int, oath_id: String = OathSyst
 		_emit_state()
 		return false
 
-	if not table.oath_system.activate_oath(oath_id):
+	if not oath_system.activate_oath(oath_id):
 		denied_offer_oath_rerolls += 1
-		last_blocker_reason = table.oath_system.get_oath_activation_blocker(oath_id)
+		last_blocker_reason = oath_system.get_oath_activation_blocker(oath_id)
 		status_changed.emit(last_blocker_reason)
 		event_purchase_blocked.emit(last_blocker_reason)
 		_emit_state()
@@ -420,6 +434,25 @@ func get_event_offers_snapshot() -> Array:
 
 func get_event_display_name(event_id: String) -> String:
 	return _get_event_name(event_id)
+
+
+func get_offer_reroll_oath_choices_snapshot(offer_index: int) -> Array:
+	var choices: Array = []
+	var oath_system: OathSystem = _get_oath_system()
+	if oath_system == null:
+		return choices
+
+	for oath_id_value in OFFER_REROLL_OATH_CHOICES:
+		var oath_id: String = str(oath_id_value)
+		var choice: Dictionary = oath_system.get_oath_choice_definition(oath_id)
+		if choice.is_empty():
+			continue
+		var blocker: String = _get_offer_reroll_blocker(offer_index, oath_id)
+		choice["offer_index"] = offer_index
+		choice["available"] = blocker.is_empty()
+		choice["blocked_reason"] = blocker
+		choices.append(choice)
+	return choices
 
 
 func get_loose_cargo_contraband_chance_snapshot() -> Dictionary:
@@ -846,6 +879,19 @@ func _get_offer_purchase_blocker(offer_index: int) -> String:
 
 
 func _get_offer_reroll_blocker(offer_index: int, oath_id: String = OathSystem.OATH_OF_URGENCY) -> String:
+	var base_blocker := _get_offer_reroll_base_blocker(offer_index)
+	if not base_blocker.is_empty():
+		return base_blocker
+	var oath_system: OathSystem = _get_oath_system()
+	if oath_system == null:
+		return "Oath system not ready"
+	var oath_blocker: String = oath_system.get_oath_activation_blocker(oath_id)
+	if not oath_blocker.is_empty():
+		return oath_blocker
+	return ""
+
+
+func _get_offer_reroll_base_blocker(offer_index: int) -> String:
 	if not enabled:
 		return "Table Events disabled"
 	if not pending_event_available:
@@ -859,18 +905,35 @@ func _get_offer_reroll_blocker(offer_index: int, oath_id: String = OathSystem.OA
 	var event_id := str(active_offer_ids[offer_index])
 	if event_id.is_empty():
 		return "No event in this slot yet"
-	if table == null or table.oath_system == null:
+	if _get_oath_system() == null:
 		return "Oath system not ready"
-	var oath_blocker: String = table.oath_system.get_oath_activation_blocker(oath_id)
-	if not oath_blocker.is_empty():
-		return oath_blocker
 	if not _has_reroll_replacement_candidate(offer_index):
 		return "No replacement omen available"
 	return ""
 
 
+func _get_offer_reroll_choice_blocker(offer_index: int) -> String:
+	var base_blocker := _get_offer_reroll_base_blocker(offer_index)
+	if not base_blocker.is_empty():
+		return base_blocker
+	var oath_system: OathSystem = _get_oath_system()
+	if oath_system == null:
+		return "Oath system not ready"
+	for oath_id_value in OFFER_REROLL_OATH_CHOICES:
+		var oath_id: String = str(oath_id_value)
+		if oath_system.get_oath_activation_blocker(oath_id).is_empty():
+			return ""
+	return "No available Oath"
+
+
+func _get_oath_system() -> OathSystem:
+	if table == null:
+		return null
+	return table.oath_system as OathSystem
+
+
 func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
-	var reroll_blocker := _get_offer_reroll_blocker(offer_index)
+	var reroll_blocker := _get_offer_reroll_choice_blocker(offer_index)
 	if event_id.is_empty():
 		return {
 			"id": EMPTY_OFFER_ID,
@@ -887,7 +950,7 @@ func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
 			"blocked_reason": "Coming soon",
 			"reroll_available": false,
 			"reroll_blocked_reason": reroll_blocker,
-			"reroll_oath_id": OathSystem.OATH_OF_URGENCY,
+			"reroll_oath_id": "",
 		}
 
 	var event_data: Dictionary = _get_event_data(event_id)
@@ -908,7 +971,7 @@ func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
 		"blocked_reason": blocker,
 		"reroll_available": reroll_blocker.is_empty(),
 		"reroll_blocked_reason": reroll_blocker,
-		"reroll_oath_id": OathSystem.OATH_OF_URGENCY,
+		"reroll_oath_id": "",
 	}
 
 

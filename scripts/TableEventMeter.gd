@@ -45,6 +45,7 @@ var last_gain := 0
 var pending_event := false
 var event_ready := false
 var icon_hovered := false
+var hover_ui_suppressed := false
 var progress_pulse_remaining := 0.0
 var event_earned_flash_remaining := 0.0
 var ready_flash_remaining := 0.0
@@ -84,6 +85,17 @@ func setup(system: TableEventSystem, table_ref) -> void:
 	queue_redraw()
 
 
+func set_hover_ui_suppressed(suppressed: bool) -> void:
+	if hover_ui_suppressed == suppressed:
+		return
+
+	hover_ui_suppressed = suppressed
+	mouse_filter = Control.MOUSE_FILTER_IGNORE if suppressed else Control.MOUSE_FILTER_PASS
+	if suppressed and icon_hovered:
+		icon_hovered = false
+		queue_redraw()
+
+
 func _process(delta: float) -> void:
 	var smoothing_ratio: float = clampf(delta * FILL_SMOOTH_SPEED, 0.0, 1.0)
 	displayed_percent = lerpf(displayed_percent, target_percent, smoothing_ratio)
@@ -104,6 +116,12 @@ func _process(delta: float) -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if _should_suppress_hover_ui():
+		if icon_hovered:
+			icon_hovered = false
+			queue_redraw()
+		return
+
 	if event is InputEventMouseMotion:
 		_update_icon_hover(event.position)
 		return
@@ -288,6 +306,12 @@ func _draw_event_icon(draw_size: Vector2, ready_strength: float, idle_strength: 
 
 
 func _update_icon_hover(local_position: Vector2) -> void:
+	if _should_suppress_hover_ui():
+		if icon_hovered:
+			icon_hovered = false
+			queue_redraw()
+		return
+
 	var next_hovered: bool = event_ready and _get_icon_rect(size).has_point(local_position)
 	if icon_hovered == next_hovered:
 		return
@@ -296,11 +320,20 @@ func _update_icon_hover(local_position: Vector2) -> void:
 
 
 func _is_icon_clickable() -> bool:
-	return table_event_system != null and table_event_system.is_event_icon_clickable() and _get_icon_rect(size).has_point(get_local_mouse_position())
+	return (
+		not _should_suppress_hover_ui()
+		and table_event_system != null
+		and table_event_system.is_event_icon_clickable()
+		and _get_icon_rect(size).has_point(get_local_mouse_position())
+	)
 
 
 func _is_cue_drag_active() -> bool:
 	return table != null and table.is_cue_drag_active()
+
+
+func _should_suppress_hover_ui() -> bool:
+	return hover_ui_suppressed or (table != null and table.should_suppress_hover_ui())
 
 
 func _get_bar_rect(draw_size: Vector2) -> Rect2:

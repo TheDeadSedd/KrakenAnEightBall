@@ -67,6 +67,7 @@ var offer_snapshots: Array = []
 var hovered_offer_index := -1
 var refresh_button_hovered := false
 var back_room_button_hovered := false
+var hover_ui_suppressed := false
 var refresh_offer_index := -1
 var refresh_timer := 0.0
 var last_seen_stock_refresh_serial := 0
@@ -133,6 +134,17 @@ func set_back_room_deal_snapshot(snapshot: Dictionary) -> void:
 	queue_redraw()
 
 
+func set_hover_ui_suppressed(suppressed: bool) -> void:
+	if hover_ui_suppressed == suppressed:
+		return
+
+	hover_ui_suppressed = suppressed
+	mouse_filter = Control.MOUSE_FILTER_IGNORE if suppressed else Control.MOUSE_FILTER_PASS
+	_update_back_room_input_filters()
+	if suppressed:
+		_clear_hover_state()
+
+
 func _process(delta: float) -> void:
 	if refresh_timer <= 0.0:
 		set_process(false)
@@ -146,6 +158,10 @@ func _process(delta: float) -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if _should_suppress_hover_ui():
+		_clear_hover_state()
+		return
+
 	if event is InputEventMouseMotion:
 		_update_hover_state(event.position)
 		return
@@ -331,6 +347,7 @@ func _build_back_room_panel() -> void:
 	back_room_options_stack.add_theme_constant_override("separation", 7)
 	stack.add_child(back_room_options_stack)
 	_refresh_back_room_panel()
+	_update_back_room_input_filters()
 
 
 func _make_tooltip_style() -> StyleBoxFlat:
@@ -495,6 +512,10 @@ func _draw_refresh_cue(slot_rect: Rect2) -> void:
 
 
 func _update_hover_state(local_position: Vector2) -> void:
+	if _should_suppress_hover_ui():
+		_clear_hover_state()
+		return
+
 	var next_refresh_hovered := _get_refresh_button_rect().has_point(local_position)
 	var next_back_room_hovered := _is_back_room_unlocked() and _get_back_room_button_rect().has_point(local_position)
 	var next_hovered_offer := _get_offer_index_at_position(local_position)
@@ -544,6 +565,9 @@ func _get_preview_color(offer_index: int) -> Color:
 
 func _update_tooltip() -> void:
 	if tooltip_panel == null or tooltip_label == null:
+		return
+	if _should_suppress_hover_ui():
+		tooltip_panel.visible = false
 		return
 	if refresh_button_hovered:
 		tooltip_label.text = _make_refresh_tooltip_text()
@@ -631,12 +655,20 @@ func _get_back_room_tooltip_position() -> Vector2:
 
 
 func _on_mouse_exited() -> void:
+	_clear_hover_state()
+
+
+func _clear_hover_state() -> void:
 	if hovered_offer_index == -1 and not refresh_button_hovered and not back_room_button_hovered:
+		if tooltip_panel != null:
+			tooltip_panel.visible = false
 		return
+
 	hovered_offer_index = -1
 	refresh_button_hovered = false
 	back_room_button_hovered = false
-	_update_tooltip()
+	if tooltip_panel != null:
+		tooltip_panel.visible = false
 	queue_redraw()
 
 
@@ -735,6 +767,10 @@ func _is_cue_drag_active() -> bool:
 	return table != null and table.is_cue_drag_active()
 
 
+func _should_suppress_hover_ui() -> bool:
+	return hover_ui_suppressed or (table != null and table.should_suppress_hover_ui())
+
+
 func _toggle_back_room_panel() -> void:
 	if back_room_panel == null:
 		return
@@ -776,15 +812,18 @@ func _refresh_back_room_panel() -> void:
 		if not option_value is Dictionary:
 			continue
 		back_room_options_stack.add_child(_make_back_room_option_button(option_value))
+	_update_back_room_input_filters()
 
 
 func _make_back_room_option_button(option: Dictionary) -> Button:
 	var button := Button.new()
 	var item_id := str(option.get("id", ""))
 	var available := bool(option.get("available", false))
+	var blocked_reason := str(option.get("blocked_reason", ""))
 	button.text = _make_back_room_option_text(option)
 	button.disabled = not available
-	button.tooltip_text = str(option.get("blocked_reason", ""))
+	button.tooltip_text = "" if hover_ui_suppressed else blocked_reason
+	button.set_meta("blocked_reason", blocked_reason)
 	button.custom_minimum_size = Vector2(0.0, BACK_ROOM_OPTION_HEIGHT)
 	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	button.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -801,6 +840,22 @@ func _make_back_room_option_button(option: Dictionary) -> Button:
 	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	button.pressed.connect(_on_back_room_option_pressed.bind(item_id))
 	return button
+
+
+func _update_back_room_input_filters() -> void:
+	if back_room_panel != null:
+		back_room_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE if hover_ui_suppressed else Control.MOUSE_FILTER_STOP
+	if back_room_close_button != null:
+		back_room_close_button.mouse_filter = Control.MOUSE_FILTER_IGNORE if hover_ui_suppressed else Control.MOUSE_FILTER_STOP
+		back_room_close_button.tooltip_text = "" if hover_ui_suppressed else "Close"
+	if back_room_options_stack == null:
+		return
+	for child in back_room_options_stack.get_children():
+		var button := child as Button
+		if button == null:
+			continue
+		button.mouse_filter = Control.MOUSE_FILTER_IGNORE if hover_ui_suppressed else Control.MOUSE_FILTER_STOP
+		button.tooltip_text = "" if hover_ui_suppressed else str(button.get_meta("blocked_reason", ""))
 
 
 func _make_back_room_option_text(option: Dictionary) -> String:
