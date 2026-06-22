@@ -67,6 +67,7 @@ var deals_made := 0
 var doubloons_spent := 0
 var denied_attempts := 0
 var last_blocker_reason := ""
+var debug_force_available := false
 
 
 func setup(table_ref: BilliardsTable) -> void:
@@ -75,6 +76,7 @@ func setup(table_ref: BilliardsTable) -> void:
 	doubloons_spent = 0
 	denied_attempts = 0
 	last_blocker_reason = ""
+	debug_force_available = false
 	_connect_event_sources()
 	_emit_state_changed()
 
@@ -93,8 +95,16 @@ func get_deal_snapshot() -> Dictionary:
 		"doubloons_spent": doubloons_spent,
 		"denied_attempts": denied_attempts,
 		"last_blocker_reason": last_blocker_reason,
+		"debug_force_available": debug_force_available,
 		"options": _get_option_snapshots(),
 	}
+
+
+func set_debug_force_available(enabled: bool) -> void:
+	if debug_force_available == enabled:
+		return
+	debug_force_available = enabled
+	_emit_state_changed()
 
 
 func request_purchase_deal(item_id: String) -> bool:
@@ -200,7 +210,7 @@ func _has_reserved_item(item_id: String) -> bool:
 
 
 func _is_unlocked() -> bool:
-	return _get_current_refresh_cost() >= _get_unlock_refresh_cost()
+	return debug_force_available or _get_current_refresh_cost() >= _get_unlock_refresh_cost()
 
 
 func _get_current_refresh_cost() -> int:

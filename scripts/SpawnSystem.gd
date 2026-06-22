@@ -58,6 +58,13 @@ const CUE_BALL_SCENE := preload("res://scenes/CueBall.tscn")
 
 # Presentation-space spawn layout. These match the current centered table setup.
 const CUE_START := Vector2(700.0, 540.0)
+const CUE_START_VERTICAL_OFFSET := 86.0
+const CUE_START_DEFAULT_INDEX := 1
+const CUE_START_OPTIONS := [
+	{"id": "high", "label": "High", "offset": Vector2(0.0, -CUE_START_VERTICAL_OFFSET)},
+	{"id": "middle", "label": "Middle", "offset": Vector2.ZERO},
+	{"id": "low", "label": "Low", "offset": Vector2(0.0, CUE_START_VERTICAL_OFFSET)},
+]
 const RACK_ORIGIN := Vector2(1150.0, 540.0)
 const RACK_ROWS := 5
 const RACK_SPACING_MULTIPLIER := 2.12
@@ -98,17 +105,19 @@ var pending_spawn_requests: Array[SpawnBallRequest] = []
 var pending_landing_callbacks: Array[SpawnLandingCallback] = []
 var spawn_drop_cooldown := 0.0
 var next_spawn_ball_index := 0
+var selected_cue_start_index := CUE_START_DEFAULT_INDEX
 
 
 func setup(table_ref) -> void:
 	table = table_ref
+	selected_cue_start_index = CUE_START_DEFAULT_INDEX
 
 
 func spawn_starting_balls() -> StartingBallData:
 	var data: StartingBallData = StartingBallData.new()
 	data.cue_ball = CUE_BALL_SCENE.instantiate() as Ball
 	table.balls.add_child(data.cue_ball)
-	data.cue_ball.global_position = CUE_START
+	data.cue_ball.global_position = get_selected_cue_start()
 	_spawn_starting_rack(data, data.cue_ball.radius)
 	return data
 
@@ -512,6 +521,85 @@ func get_pending_spawn_count() -> int:
 
 func get_cue_start() -> Vector2:
 	return CUE_START
+
+
+func get_selected_cue_start() -> Vector2:
+	return get_cue_start_position(selected_cue_start_index)
+
+
+func get_selected_cue_start_index() -> int:
+	return selected_cue_start_index
+
+
+func set_selected_cue_start_index(start_index: int) -> bool:
+	if not is_valid_cue_start_index(start_index):
+		return false
+	selected_cue_start_index = start_index
+	return true
+
+
+func prepare_cue_ball_for_start_selection(cue_ball: Ball, reset_to_default: bool = false) -> bool:
+	if cue_ball == null or not is_instance_valid(cue_ball):
+		return false
+	if reset_to_default:
+		selected_cue_start_index = CUE_START_DEFAULT_INDEX
+	cue_ball.velocity = Vector2.ZERO
+	cue_ball.global_position = get_selected_cue_start()
+	cue_ball.visible = false
+	cue_ball.gameplay_enabled = false
+	return true
+
+
+func apply_selected_cue_start_to_ball(cue_ball: Ball, start_index: int) -> bool:
+	if cue_ball == null or not is_instance_valid(cue_ball):
+		return false
+	if not set_selected_cue_start_index(start_index):
+		return false
+	cue_ball.velocity = Vector2.ZERO
+	cue_ball.global_position = get_selected_cue_start()
+	cue_ball.visible = true
+	cue_ball.gameplay_enabled = true
+	return true
+
+
+func get_cue_start_position(start_index: int) -> Vector2:
+	if not is_valid_cue_start_index(start_index):
+		start_index = CUE_START_DEFAULT_INDEX
+	var option: Dictionary = CUE_START_OPTIONS[start_index] as Dictionary
+	var offset_value: Variant = option.get("offset", Vector2.ZERO)
+	var offset := Vector2.ZERO
+	if offset_value is Vector2:
+		offset = offset_value
+	return CUE_START + offset
+
+
+func is_valid_cue_start_index(start_index: int) -> bool:
+	return start_index >= 0 and start_index < CUE_START_OPTIONS.size()
+
+
+func get_nearest_cue_start_index(world_position: Vector2) -> int:
+	var nearest_index := CUE_START_DEFAULT_INDEX
+	var nearest_distance_sq := INF
+	for index in range(CUE_START_OPTIONS.size()):
+		var distance_sq := get_cue_start_position(index).distance_squared_to(world_position)
+		if distance_sq < nearest_distance_sq:
+			nearest_distance_sq = distance_sq
+			nearest_index = index
+	return nearest_index
+
+
+func get_cue_start_options_snapshot() -> Array[Dictionary]:
+	var options: Array[Dictionary] = []
+	for index in range(CUE_START_OPTIONS.size()):
+		var option: Dictionary = CUE_START_OPTIONS[index] as Dictionary
+		options.append({
+			"index": index,
+			"id": str(option.get("id", "")),
+			"label": str(option.get("label", "")),
+			"position": get_cue_start_position(index),
+			"selected": index == selected_cue_start_index,
+		})
+	return options
 
 
 func get_debug_spawn_hotkey_data() -> Dictionary:

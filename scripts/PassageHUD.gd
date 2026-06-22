@@ -4,11 +4,11 @@ class_name PassageHUD
 signal request_reroll_requested
 
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
-const PANEL_SIZE := Vector2(420.0, 64.0)
+const PANEL_SIZE := Vector2(420.0, 70.0)
 const TOOLTIP_SIZE := Vector2(350.0, 174.0)
-const REQUEST_LABEL_WIDTH := 220.0
-const REROLL_BUTTON_POSITION := Vector2(238.0, 34.0)
-const REROLL_BUTTON_SIZE := Vector2(170.0, 24.0)
+const REQUEST_LABEL_WIDTH := 396.0
+const REROLL_BUTTON_POSITION := Vector2(238.0, 46.0)
+const REROLL_BUTTON_SIZE := Vector2(170.0, 20.0)
 
 var passage_system: PassageSystem
 var passage_label: Label
@@ -111,9 +111,9 @@ func _configure_panel_style() -> void:
 
 func _build_labels() -> void:
 	passage_label = _make_label(Vector2(12.0, 7.0), 18, Color(1.0, 0.86, 0.36, 1.0))
-	request_label = _make_label(Vector2(12.0, 34.0), 15, Color(0.78, 0.94, 0.90, 0.96))
+	request_label = _make_label(Vector2(12.0, 28.0), 15, Color(0.78, 0.94, 0.90, 0.96))
 	request_label.mouse_filter = Control.MOUSE_FILTER_STOP
-	request_label.size = Vector2(REQUEST_LABEL_WIDTH, 24.0)
+	request_label.size = Vector2(REQUEST_LABEL_WIDTH, 17.0)
 	add_child(passage_label)
 	add_child(request_label)
 	request_label.mouse_entered.connect(_on_request_mouse_entered)
@@ -129,7 +129,7 @@ func _build_reroll_button() -> void:
 	reroll_button.mouse_filter = Control.MOUSE_FILTER_STOP
 	reroll_button.focus_mode = Control.FOCUS_NONE
 	reroll_button.add_theme_font_override("font", UI_FONT)
-	reroll_button.add_theme_font_size_override("font_size", 13)
+	reroll_button.add_theme_font_size_override("font_size", 12)
 	reroll_button.add_theme_color_override("font_color", Color(1.0, 0.86, 0.54, 0.96))
 	reroll_button.add_theme_color_override("font_hover_color", Color(1.0, 0.96, 0.72, 1.0))
 	reroll_button.add_theme_color_override("font_disabled_color", Color(0.56, 0.50, 0.40, 0.70))

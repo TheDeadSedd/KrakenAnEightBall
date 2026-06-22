@@ -81,6 +81,7 @@ const REQUEST_POOL := [
 @export var request_reroll_cost_multiplier := 2.0
 @export var request_reroll_completion_decay := 10
 @export var request_reroll_min_cost := 10
+@export var request_reroll_lockout_count := 3
 
 var table: BilliardsTable
 var rng := RandomNumberGenerator.new()
@@ -94,6 +95,8 @@ var remaining_passage := 10000
 var completed := false
 var voyage_marks_awarded := 0
 var cue_modifier_snapshot: Dictionary = {}
+var request_reroll_lockout_queue: Array[String] = []
+var last_rejected_request_id := ""
 
 
 func _ready() -> void:
@@ -107,6 +110,8 @@ func setup(table_ref: BilliardsTable) -> void:
 	passage_added_by_oaths = 0
 	request_rerolls_used = 0
 	current_request_reroll_cost = _get_request_reroll_base_cost()
+	request_reroll_lockout_queue.clear()
+	last_rejected_request_id = ""
 	completed = false
 	voyage_marks_awarded = 0
 	_select_new_request()
@@ -133,6 +138,11 @@ func get_passage_snapshot() -> Dictionary:
 		"request_reroll_cost_multiplier": maxf(request_reroll_cost_multiplier, 1.0),
 		"request_reroll_completion_decay": _get_request_reroll_completion_decay(),
 		"request_reroll_min_cost": _get_request_reroll_min_cost(),
+		"request_reroll_lockout_count": _get_request_reroll_lockout_count(),
+		"request_reroll_lockout_queue": request_reroll_lockout_queue.duplicate(),
+		"request_reroll_lockout_labels": _get_request_reroll_lockout_labels(),
+		"last_rejected_request_id": last_rejected_request_id,
+		"last_rejected_request_label": _get_request_label_for_id(last_rejected_request_id),
 		"request_reroll_available": _can_reroll_request(),
 		"current_request_id": request_id,
 		"current_request_label": str(metadata.get("label", request.get("label", ""))),
@@ -173,10 +183,12 @@ func request_reroll_active_request() -> bool:
 		return false
 
 	var previous_request := get_active_request_snapshot()
+	var previous_request_id := str(previous_request.get("id", ""))
 	var reroll_cost := get_current_request_reroll_cost()
 	passage_added_by_request_rerolls += reroll_cost
 	request_rerolls_used += 1
-	_select_new_request()
+	_remember_reroll_rejection(previous_request_id)
+	_select_new_request(true)
 	var new_request := get_active_request_snapshot()
 	current_request_reroll_cost = _get_next_request_reroll_cost(reroll_cost)
 	request_rerolled.emit(previous_request.duplicate(true), new_request.duplicate(true), reroll_cost)
@@ -211,15 +223,93 @@ func _connect_event_sources() -> void:
 			table.pocket_streak_system.streak_multiplier_reached.connect(_on_streak_multiplier_reached)
 
 
-func _select_new_request() -> void:
+func _select_new_request(use_reroll_lockout: bool = false) -> void:
 	if REQUEST_POOL.is_empty():
 		request_index = -1
 		return
 
-	var next_index := rng.randi_range(0, REQUEST_POOL.size() - 1)
-	if REQUEST_POOL.size() > 1 and next_index == request_index:
-		next_index = (next_index + 1 + rng.randi_range(0, REQUEST_POOL.size() - 2)) % REQUEST_POOL.size()
+	var current_request_id := _get_request_id_at_index(request_index)
+	var excluded_request_ids: Array[String] = []
+	if not current_request_id.is_empty():
+		excluded_request_ids.append(current_request_id)
+	if use_reroll_lockout:
+		excluded_request_ids.append_array(request_reroll_lockout_queue)
+
+	var candidate_indices := _get_request_candidate_indices(excluded_request_ids)
+	if candidate_indices.is_empty() and use_reroll_lockout:
+		var current_only_exclusions: Array[String] = []
+		if not current_request_id.is_empty():
+			current_only_exclusions.append(current_request_id)
+		candidate_indices = _get_request_candidate_indices(current_only_exclusions)
+	if candidate_indices.is_empty():
+		candidate_indices = _get_all_request_indices()
+
+	var next_index: int = candidate_indices[rng.randi_range(0, candidate_indices.size() - 1)]
 	request_index = next_index
+
+
+func _remember_reroll_rejection(request_id: String) -> void:
+	last_rejected_request_id = request_id
+	if request_id.is_empty():
+		return
+
+	var lockout_count := _get_request_reroll_lockout_count()
+	if lockout_count <= 0:
+		request_reroll_lockout_queue.clear()
+		return
+
+	request_reroll_lockout_queue.erase(request_id)
+	request_reroll_lockout_queue.append(request_id)
+	while request_reroll_lockout_queue.size() > lockout_count:
+		request_reroll_lockout_queue.pop_front()
+
+
+func _get_request_candidate_indices(excluded_request_ids: Array[String]) -> Array[int]:
+	var excluded_lookup := {}
+	for excluded_request_id in excluded_request_ids:
+		if not excluded_request_id.is_empty():
+			excluded_lookup[excluded_request_id] = true
+
+	var indices: Array[int] = []
+	for index in range(REQUEST_POOL.size()):
+		var request_id := _get_request_id_at_index(index)
+		if request_id.is_empty() or excluded_lookup.has(request_id):
+			continue
+		indices.append(index)
+	return indices
+
+
+func _get_all_request_indices() -> Array[int]:
+	var indices: Array[int] = []
+	for index in range(REQUEST_POOL.size()):
+		indices.append(index)
+	return indices
+
+
+func _get_request_id_at_index(index: int) -> String:
+	if index < 0 or index >= REQUEST_POOL.size():
+		return ""
+	var request: Dictionary = REQUEST_POOL[index] as Dictionary
+	return str(request.get("id", ""))
+
+
+func _get_request_label_for_id(request_id: String) -> String:
+	if request_id.is_empty():
+		return ""
+	for request_value in REQUEST_POOL:
+		var request: Dictionary = request_value as Dictionary
+		if str(request.get("id", "")) != request_id:
+			continue
+		var metadata: Dictionary = EventMetadata.get_event_metadata(request_id)
+		return str(metadata.get("label", request.get("label", request_id)))
+	return request_id
+
+
+func _get_request_reroll_lockout_labels() -> Array[String]:
+	var labels: Array[String] = []
+	for request_id in request_reroll_lockout_queue:
+		labels.append(_get_request_label_for_id(request_id))
+	return labels
 
 
 func _get_active_request() -> Dictionary:
@@ -313,6 +403,10 @@ func _get_request_reroll_base_cost() -> int:
 
 func _get_request_reroll_min_cost() -> int:
 	return maxi(request_reroll_min_cost, 0)
+
+
+func _get_request_reroll_lockout_count() -> int:
+	return maxi(request_reroll_lockout_count, 0)
 
 
 func _get_request_reroll_completion_decay() -> int:

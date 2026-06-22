@@ -17,6 +17,8 @@ signal debug_oath_clear_requested
 signal debug_oath_advance_shot_requested
 signal debug_oath_fail_requested(oath_id: String)
 signal debug_oath_complete_requested(oath_id: String)
+signal debug_back_room_force_available_toggled(enabled: bool)
+signal debug_back_room_open_requested
 signal quartermaster_cancel_placement_requested
 
 const PANEL_CORE_PERFORMANCE := "core_performance"
@@ -31,6 +33,9 @@ const PANEL_PHYSICS := "physics"
 const PANEL_EMBEZZLER := "embezzler"
 const NORMAL_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.62)
 const PLACEMENT_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.18)
+# Keep the pause shade above live gameplay HUD siblings.
+# Passage completion modal uses higher priority around 79/80.
+const PAUSE_MENU_Z_INDEX := 70
 const EVENT_TEST_SECTION_TITLE := "Event Test Buttons"
 const EVENT_TEST_WAYFINDER_TEXT := "Show Wayfinder Current Test Button"
 const EVENT_TEST_BROADSIDE_TEXT := "Show Broadside Attack Test Button"
@@ -39,6 +44,9 @@ const EVENT_TEST_SPAWN_WOOD_DEBRIS_TEXT := "Spawn Wood Debris"
 const EVENT_TEST_CLEAR_DEBRIS_TEXT := "Clear Debris"
 const EVENT_TEST_OBSTACLE_COLLISION_TEXT := "Enable Debris Collision"
 const EVENT_TEST_OBSTACLE_COLLISION_DRAW_TEXT := "Show Debris Collision Shape"
+const BACK_ROOM_TEST_SECTION_TITLE := "Back Room Testing"
+const BACK_ROOM_TEST_FORCE_AVAILABLE_TEXT := "Force Back Room Available"
+const BACK_ROOM_TEST_OPEN_TEXT := "Open Back Room Deal"
 const OATH_TEST_SECTION_TITLE := "Oath Testing"
 const OATH_TESTING_SELECTOR_ITEMS := [
 	{"label": "Oath of Urgency", "oath_id": OathSystem.OATH_OF_URGENCY},
@@ -94,6 +102,9 @@ var spawn_wood_debris_button: Button
 var clear_debris_button: Button
 var obstacle_collision_check_box: CheckBox
 var obstacle_collision_debug_check_box: CheckBox
+var back_room_testing_section_label: Label
+var force_back_room_available_check_box: CheckBox
+var open_back_room_deal_button: Button
 var oath_testing_section_label: Label
 var oath_testing_selector: OptionButton
 var oath_activate_button: Button
@@ -123,6 +134,7 @@ var end_run_cancel_button: Button
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	z_index = PAUSE_MENU_Z_INDEX
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	visible = false
 	placement_hint_panel.visible = false
@@ -138,6 +150,7 @@ func _ready() -> void:
 	_ensure_dev_options_controls()
 	_ensure_end_run_controls()
 	_ensure_event_test_controls()
+	_ensure_back_room_testing_controls()
 	_ensure_oath_testing_controls()
 	_connect_debug_panel_toggles()
 	_show_pause_panel()
@@ -177,6 +190,10 @@ func _connect_debug_panel_toggles() -> void:
 		obstacle_collision_check_box.toggled.connect(_on_obstacle_collision_toggled)
 	if not obstacle_collision_debug_check_box.toggled.is_connected(_on_obstacle_collision_draw_toggled):
 		obstacle_collision_debug_check_box.toggled.connect(_on_obstacle_collision_draw_toggled)
+	if not force_back_room_available_check_box.toggled.is_connected(_on_back_room_force_available_toggled):
+		force_back_room_available_check_box.toggled.connect(_on_back_room_force_available_toggled)
+	if not open_back_room_deal_button.pressed.is_connected(_on_open_back_room_deal_pressed):
+		open_back_room_deal_button.pressed.connect(_on_open_back_room_deal_pressed)
 	if not oath_activate_button.pressed.is_connected(_on_oath_activate_pressed):
 		oath_activate_button.pressed.connect(_on_oath_activate_pressed)
 	if not oath_clear_button.pressed.is_connected(_on_oath_clear_pressed):
@@ -282,6 +299,11 @@ func set_debris_collision_debug_state(enabled: bool) -> void:
 func set_debris_collision_draw_debug_state(enabled: bool) -> void:
 	if obstacle_collision_debug_check_box != null:
 		obstacle_collision_debug_check_box.set_pressed_no_signal(enabled)
+
+
+func set_back_room_force_available_debug_state(enabled: bool) -> void:
+	if force_back_room_available_check_box != null:
+		force_back_room_available_check_box.set_pressed_no_signal(enabled)
 
 
 func _ensure_options_controls() -> void:
@@ -587,6 +609,26 @@ func _ensure_event_test_controls() -> void:
 		obstacle_collision_debug_check_box.set_pressed_no_signal(false)
 		debug_section.add_child(obstacle_collision_debug_check_box)
 		debug_section.move_child(obstacle_collision_debug_check_box, 10)
+	_move_dev_options_controls_into_scroll()
+
+
+func _ensure_back_room_testing_controls() -> void:
+	if back_room_testing_section_label == null:
+		back_room_testing_section_label = Label.new()
+		back_room_testing_section_label.text = BACK_ROOM_TEST_SECTION_TITLE
+		_apply_debug_section_label_style(back_room_testing_section_label)
+		debug_section.add_child(back_room_testing_section_label)
+
+	if force_back_room_available_check_box == null:
+		force_back_room_available_check_box = _make_event_test_check_box(BACK_ROOM_TEST_FORCE_AVAILABLE_TEXT)
+		force_back_room_available_check_box.tooltip_text = "Debug-only: bypasses only the Back Room refresh-cost unlock threshold."
+		debug_section.add_child(force_back_room_available_check_box)
+
+	if open_back_room_deal_button == null:
+		open_back_room_deal_button = _make_event_test_button(BACK_ROOM_TEST_OPEN_TEXT, "OpenBackRoomDealButton")
+		open_back_room_deal_button.tooltip_text = "Debug-only: opens the live Back Room Deal panel."
+		debug_section.add_child(open_back_room_deal_button)
+
 	_move_dev_options_controls_into_scroll()
 
 
@@ -1046,6 +1088,14 @@ func _on_obstacle_collision_toggled(enabled: bool) -> void:
 
 func _on_obstacle_collision_draw_toggled(enabled: bool) -> void:
 	debug_obstacle_collision_draw_toggled.emit(enabled)
+
+
+func _on_back_room_force_available_toggled(enabled: bool) -> void:
+	debug_back_room_force_available_toggled.emit(enabled)
+
+
+func _on_open_back_room_deal_pressed() -> void:
+	debug_back_room_open_requested.emit()
 
 
 func _on_oath_activate_pressed() -> void:

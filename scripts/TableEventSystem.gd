@@ -262,7 +262,6 @@ func handle_cue_control_regained() -> void:
 	if not enabled or not pending_event_available:
 		return
 	if pending_event_ready:
-		_emit_state()
 		return
 
 	pending_event_ready = true

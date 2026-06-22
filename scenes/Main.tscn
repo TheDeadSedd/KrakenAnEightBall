@@ -21,6 +21,7 @@
 [ext_resource type="Script" path="res://scripts/OathHUD.gd" id="19_oath_hud"]
 [ext_resource type="Script" path="res://scripts/ProgressionSystem.gd" id="20_progression_system"]
 [ext_resource type="Script" path="res://scripts/CueProgressionSystem.gd" id="21_cue_progression_system"]
+[ext_resource type="Script" path="res://scripts/CueStartSelectorHUD.gd" id="22_cue_start_selector_hud"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -309,6 +310,18 @@ offset_bottom = 402.0
 mouse_filter = 2
 script = ExtResource("16_run_stats_hud")
 
+[node name="CueStartSelectorHUD" type="Control" parent="CanvasLayer/HUD"]
+process_mode = 3
+z_index = 23
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("22_cue_start_selector_hud")
+
 [node name="PassageHUD" type="Control" parent="CanvasLayer/HUD"]
 process_mode = 3
 z_index = 19
@@ -316,7 +329,7 @@ anchors_preset = 0
 offset_left = 746.0
 offset_top = 94.0
 offset_right = 1166.0
-offset_bottom = 158.0
+offset_bottom = 164.0
 mouse_filter = 2
 script = ExtResource("18_passage_hud")
 

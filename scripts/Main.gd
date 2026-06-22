@@ -5,6 +5,7 @@ const PAUSE_TOGGLE_KEY := KEY_ESCAPE
 const MAIN_MENU_SCENE_PATH := "res://scenes/MainMenu.tscn"
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const COMPLETION_PANEL_SIZE := Vector2(620.0, 710.0)
+const BACK_ROOM_PANEL_VIEWPORT_MARGIN := 24.0
 
 @onready var table: BilliardsTable = $Table
 @onready var run_history_system: RunHistorySystem = $RunHistorySystem
@@ -17,6 +18,7 @@ const COMPLETION_PANEL_SIZE := Vector2(620.0, 710.0)
 @onready var doubloons_label: Label = $CanvasLayer/HUD/DoubloonsLabel
 @onready var run_ledger_hud: RunLedgerHUD = $CanvasLayer/HUD/RunLedgerHUD
 @onready var run_stats_hud: RunStatsHUD = $CanvasLayer/HUD/RunStatsHUD
+@onready var cue_start_selector_hud: CueStartSelectorHUD = $CanvasLayer/HUD/CueStartSelectorHUD
 @onready var passage_hud: PassageHUD = $CanvasLayer/HUD/PassageHUD
 @onready var oath_hud: OathHUD = $CanvasLayer/HUD/OathHUD
 @onready var table_event_meter: TableEventMeter = $CanvasLayer/HUD/TableEventMeter
@@ -35,6 +37,8 @@ var passage_completion_value_labels: Dictionary = {}
 var passage_completion_confirm_button: Button
 var passage_completion_progression_award: Dictionary = {}
 var latest_cue_progression_snapshot: Dictionary = {}
+var latest_back_room_deal_snapshot: Dictionary = {}
+var back_room_panel: BackRoomDealPanel
 
 
 func _ready() -> void:
@@ -53,6 +57,8 @@ func _connect_table_signals() -> void:
 	table.game_finished.connect(_on_game_finished)
 	if not table.gameplay_mouse_lock_changed.is_connected(_on_gameplay_mouse_lock_changed):
 		table.gameplay_mouse_lock_changed.connect(_on_gameplay_mouse_lock_changed)
+	if not table.cue_start_selection_changed.is_connected(_on_cue_start_selection_changed):
+		table.cue_start_selection_changed.connect(_on_cue_start_selection_changed)
 	table.score_system.doubloons_changed.connect(_on_doubloons_changed)
 	table.score_system.score_feed_message.connect(_on_score_feed_message)
 	table.table_event_system.status_changed.connect(_on_table_event_status_changed)
@@ -106,6 +112,10 @@ func _connect_pause_menu_signals() -> void:
 		pause_menu.debug_oath_fail_requested.connect(_on_pause_debug_oath_fail_requested)
 	if not pause_menu.debug_oath_complete_requested.is_connected(_on_pause_debug_oath_complete_requested):
 		pause_menu.debug_oath_complete_requested.connect(_on_pause_debug_oath_complete_requested)
+	if not pause_menu.debug_back_room_force_available_toggled.is_connected(_on_pause_back_room_force_available_toggled):
+		pause_menu.debug_back_room_force_available_toggled.connect(_on_pause_back_room_force_available_toggled)
+	if not pause_menu.debug_back_room_open_requested.is_connected(_on_pause_back_room_open_requested):
+		pause_menu.debug_back_room_open_requested.connect(_on_pause_back_room_open_requested)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 
@@ -117,8 +127,8 @@ func _connect_hud_signals() -> void:
 		quartermaster_hud.quartermaster_offer_requested.connect(_on_quartermaster_hud_offer_requested)
 	if not quartermaster_hud.quartermaster_refresh_requested.is_connected(_on_quartermaster_hud_refresh_requested):
 		quartermaster_hud.quartermaster_refresh_requested.connect(_on_quartermaster_hud_refresh_requested)
-	if not quartermaster_hud.back_room_deal_option_requested.is_connected(_on_quartermaster_hud_back_room_deal_option_requested):
-		quartermaster_hud.back_room_deal_option_requested.connect(_on_quartermaster_hud_back_room_deal_option_requested)
+	if not quartermaster_hud.back_room_deal_open_requested.is_connected(_on_quartermaster_hud_back_room_deal_open_requested):
+		quartermaster_hud.back_room_deal_open_requested.connect(_on_quartermaster_hud_back_room_deal_open_requested)
 	if not passage_hud.request_reroll_requested.is_connected(_on_passage_hud_request_reroll_requested):
 		passage_hud.request_reroll_requested.connect(_on_passage_hud_request_reroll_requested)
 	if not table_event_meter.event_icon_clicked.is_connected(_on_table_event_icon_clicked):
@@ -136,22 +146,88 @@ func _setup_hud_presenters() -> void:
 	table_event_menu.setup(table.table_event_system)
 	run_ledger_hud.setup(table)
 	run_stats_hud.setup(table.run_stats_system)
+	cue_start_selector_hud.setup(table)
 	passage_hud.setup(table.passage_system)
 	oath_hud.setup(table.oath_system)
 	_on_run_stats_changed(table.run_stats_system.get_run_stats_snapshot())
 	reserve_slots_ui.setup(table.reserve_system, table)
 	quartermaster_hud.setup(table.quartermaster_system, table)
+	_build_back_room_deal_panel()
 	reserve_deployment_presenter.setup(table.reserve_system, reserve_slots_ui)
 	table.emit_ready_status_if_needed("")
 	debug_overlay.setup(table)
+
+
+func _build_back_room_deal_panel() -> void:
+	if back_room_panel != null:
+		return
+
+	back_room_panel = BackRoomDealPanel.new()
+	back_room_panel.name = "BackRoomDealPanel"
+	back_room_panel.z_index = 58
+	debug_overlay.add_child(back_room_panel)
+	back_room_panel.close_requested.connect(_close_back_room_deal_panel)
+	back_room_panel.deal_option_selected.connect(_on_back_room_panel_option_selected)
+	back_room_panel.set_hover_ui_suppressed(table.should_suppress_hover_ui())
+	if not latest_back_room_deal_snapshot.is_empty():
+		back_room_panel.set_deal_snapshot(latest_back_room_deal_snapshot)
+	_position_back_room_deal_panel()
+
+
+func _set_back_room_deal_snapshot(snapshot: Dictionary) -> void:
+	latest_back_room_deal_snapshot = snapshot.duplicate(true)
+	if quartermaster_hud != null:
+		quartermaster_hud.set_back_room_deal_snapshot(latest_back_room_deal_snapshot)
+	if back_room_panel != null:
+		back_room_panel.set_deal_snapshot(latest_back_room_deal_snapshot)
+		if back_room_panel.visible:
+			_position_back_room_deal_panel()
+
+
+func _open_back_room_deal_panel(snapshot: Dictionary = {}) -> bool:
+	if back_room_panel == null:
+		_build_back_room_deal_panel()
+	if back_room_panel == null:
+		return false
+
+	var panel_snapshot := latest_back_room_deal_snapshot
+	if not snapshot.is_empty():
+		_set_back_room_deal_snapshot(snapshot)
+		panel_snapshot = latest_back_room_deal_snapshot
+
+	back_room_panel.open_panel(panel_snapshot)
+	if back_room_panel.visible:
+		_position_back_room_deal_panel()
+	return back_room_panel.visible
+
+
+func _close_back_room_deal_panel() -> void:
+	if back_room_panel != null:
+		back_room_panel.close_panel()
+
+
+func _position_back_room_deal_panel() -> void:
+	if back_room_panel == null:
+		return
+
+	var panel_size := back_room_panel.get_desired_panel_size()
+	var viewport_size := get_viewport_rect().size
+	var panel_position := (viewport_size - panel_size) * 0.5
+	var max_x := maxf(viewport_size.x - panel_size.x - BACK_ROOM_PANEL_VIEWPORT_MARGIN, BACK_ROOM_PANEL_VIEWPORT_MARGIN)
+	var max_y := maxf(viewport_size.y - panel_size.y - BACK_ROOM_PANEL_VIEWPORT_MARGIN, BACK_ROOM_PANEL_VIEWPORT_MARGIN)
+	panel_position.x = clampf(panel_position.x, BACK_ROOM_PANEL_VIEWPORT_MARGIN, max_x)
+	panel_position.y = clampf(panel_position.y, BACK_ROOM_PANEL_VIEWPORT_MARGIN, max_y)
+	back_room_panel.position = panel_position
 
 
 func _sync_initial_hud_state() -> void:
 	pause_menu.set_debug_panel_states(debug_overlay.get_modular_debug_panel_states())
 	pause_menu.set_debris_collision_debug_state(table.table_obstacle_system.obstacle_collision_enabled)
 	pause_menu.set_debris_collision_draw_debug_state(table.table_obstacle_system.debug_collision_draw_enabled)
+	pause_menu.set_back_room_force_available_debug_state(bool(table.back_room_deal_system.get_deal_snapshot().get("debug_force_available", false)))
 	quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
-	quartermaster_hud.set_back_room_deal_snapshot(table.back_room_deal_system.get_deal_snapshot())
+	_set_back_room_deal_snapshot(table.back_room_deal_system.get_deal_snapshot())
+	cue_start_selector_hud.set_cue_start_snapshot(table.get_cue_start_selection_snapshot())
 	_on_gameplay_mouse_lock_changed(table.should_suppress_hover_ui())
 
 
@@ -168,6 +244,7 @@ func _configure_pause_process_modes() -> void:
 	reserve_deployment_presenter.process_mode = Node.PROCESS_MODE_ALWAYS
 	run_ledger_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	run_stats_hud.process_mode = Node.PROCESS_MODE_ALWAYS
+	cue_start_selector_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	passage_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	oath_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	table_event_meter.process_mode = Node.PROCESS_MODE_ALWAYS
@@ -312,11 +389,18 @@ func _on_table_event_status_changed(text: String) -> void:
 func _on_gameplay_mouse_lock_changed(locked: bool) -> void:
 	oath_hud.set_hover_ui_suppressed(locked)
 	passage_hud.set_hover_ui_suppressed(locked)
+	cue_start_selector_hud.set_hover_ui_suppressed(locked)
 	quartermaster_hud.set_hover_ui_suppressed(locked)
 	table_event_meter.set_hover_ui_suppressed(locked)
 	run_stats_hud.set_hover_ui_suppressed(locked)
 	hud_feed.set_hover_ui_suppressed(locked)
 	reserve_slots_ui.set_hover_ui_suppressed(locked)
+	if back_room_panel != null:
+		back_room_panel.set_hover_ui_suppressed(locked)
+
+
+func _on_cue_start_selection_changed(snapshot: Dictionary) -> void:
+	cue_start_selector_hud.set_cue_start_snapshot(snapshot)
 
 
 func _on_table_event_icon_clicked() -> void:
@@ -485,6 +569,23 @@ func _on_pause_debug_oath_complete_requested(oath_id: String) -> void:
 		hud_feed.add_message("Debug Oath complete skipped: no matching active Oath.", "event")
 
 
+func _on_pause_back_room_force_available_toggled(enabled: bool) -> void:
+	table.back_room_deal_system.set_debug_force_available(enabled)
+	var status_text := "Back Room debug availability forced." if enabled else "Back Room debug availability restored."
+	hud_feed.add_message(status_text, "shop")
+
+
+func _on_pause_back_room_open_requested() -> void:
+	var snapshot: Dictionary = table.back_room_deal_system.get_deal_snapshot()
+	if _open_back_room_deal_panel(snapshot):
+		_set_game_paused(false)
+		hud_feed.add_message("Back Room opened for testing.", "shop")
+		return
+
+	var blocker := str(snapshot.get("blocked_reason", "Back Room unavailable."))
+	hud_feed.add_message("Back Room debug open blocked: %s" % blocker, "shop")
+
+
 func _get_oath_label(oath_id: String) -> String:
 	if table == null or table.oath_system == null:
 		return oath_id
@@ -505,7 +606,12 @@ func _on_quartermaster_hud_refresh_requested() -> void:
 	table.quartermaster_system.request_refresh_stock()
 
 
-func _on_quartermaster_hud_back_room_deal_option_requested(item_id: String) -> void:
+func _on_quartermaster_hud_back_room_deal_open_requested() -> void:
+	_open_back_room_deal_panel(table.back_room_deal_system.get_deal_snapshot())
+
+
+func _on_back_room_panel_option_selected(item_id: String) -> void:
+	_close_back_room_deal_panel()
 	table.back_room_deal_system.request_purchase_deal(item_id)
 
 
@@ -547,7 +653,7 @@ func _on_reserve_deployment_blocked(reason: String) -> void:
 func _on_reserve_slots_changed(_slots: Array) -> void:
 	if quartermaster_hud != null and table != null:
 		quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
-		quartermaster_hud.set_back_room_deal_snapshot(table.back_room_deal_system.get_deal_snapshot())
+		_set_back_room_deal_snapshot(table.back_room_deal_system.get_deal_snapshot())
 
 
 func _on_quartermaster_shop_state_changed(items: Array) -> void:
@@ -559,8 +665,7 @@ func _on_quartermaster_status_changed(text: String) -> void:
 
 
 func _on_back_room_deal_state_changed(snapshot: Dictionary) -> void:
-	if quartermaster_hud != null:
-		quartermaster_hud.set_back_room_deal_snapshot(snapshot)
+	_set_back_room_deal_snapshot(snapshot)
 
 
 func _on_back_room_deal_status_changed(text: String) -> void:

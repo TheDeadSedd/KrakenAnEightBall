@@ -8,6 +8,7 @@ signal run_ball_counts_changed(active_ball_count: int, balls_sunk_count: int)
 signal shot_taken(count: int)
 signal shot_finished(count: int)
 signal gameplay_mouse_lock_changed(locked: bool)
+signal cue_start_selection_changed(snapshot: Dictionary)
 
 #region Data Containers
 class ResultCallout:
@@ -178,6 +179,9 @@ var shot_elapsed_time := 0.0
 var shots_taken_count := 0
 var balls_sunk_count := 0
 var run_ball_count_update_queued := false
+var cue_start_selection_active := false
+var cue_start_selection_locked := false
+var cue_start_highlighted_index := 1
 var cue_control_reclaimed := false
 var cue_reclaim_eligible := false
 var cue_reclaim_blocker_reason := "No active shot"
@@ -249,6 +253,7 @@ func _ready() -> void:
 	cue_ball = starting_balls.cue_ball
 	eight_ball = starting_balls.eight_ball
 	eight_start = starting_balls.eight_start
+	_activate_initial_cue_start_selection()
 	_queue_run_ball_count_update()
 	status_text_changed.emit(READY_STATUS_TEXT)
 	queue_redraw()
@@ -412,6 +417,9 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 
 	if _try_debug_spawn_ball(event):
+		return
+
+	if _try_handle_initial_cue_start_input(event):
 		return
 
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
@@ -831,6 +839,42 @@ func should_suppress_hover_ui() -> bool:
 	return is_gameplay_mouse_locked()
 
 
+func get_cue_start_selection_snapshot() -> Dictionary:
+	return {
+		"active": cue_start_selection_active,
+		"locked": cue_start_selection_locked,
+		"can_change": _can_change_initial_cue_start(),
+		"highlighted_index": cue_start_highlighted_index,
+		"selected_index": spawn_system.get_selected_cue_start_index() if spawn_system != null else 1,
+		"options": spawn_system.get_cue_start_options_snapshot() if spawn_system != null else [],
+	}
+
+
+func request_initial_cue_start_index(start_index: int) -> bool:
+	return _lock_initial_cue_start(start_index)
+
+
+func request_initial_cue_start_unlock() -> bool:
+	return _unlock_initial_cue_start()
+
+
+func _lock_initial_cue_start(start_index: int) -> bool:
+	if not _can_change_initial_cue_start():
+		_emit_cue_start_selection_update()
+		return false
+	if not spawn_system.apply_selected_cue_start_to_ball(cue_ball, start_index):
+		_emit_cue_start_selection_update()
+		return false
+
+	cue_start_selection_locked = true
+	cue_start_highlighted_index = start_index
+	cue_controller.stop_recoil()
+	_clear_aim_preview_now()
+	_emit_cue_start_selection_update()
+	queue_redraw()
+	return true
+
+
 func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
 	cue_modifier_snapshot = snapshot.duplicate(true)
 	if is_dragging:
@@ -955,6 +999,110 @@ func _get_current_shot_drag_vector() -> Vector2:
 	return _get_drag_vector(drag_mouse_position)
 
 
+func _try_handle_initial_cue_start_input(event: InputEvent) -> bool:
+	if not cue_start_selection_active or shots_taken_count > 0:
+		return false
+	if ball_placement_system.is_placement_active():
+		return false
+
+	if event is InputEventMouseMotion:
+		if not cue_start_selection_locked:
+			_update_initial_cue_start_highlight(event.position)
+		return false
+
+	if not event is InputEventMouseButton:
+		return false
+
+	var mouse_event: InputEventMouseButton = event
+	if not mouse_event.pressed:
+		return false
+
+	if mouse_event.button_index == MOUSE_BUTTON_LEFT and not cue_start_selection_locked:
+		_update_initial_cue_start_highlight(mouse_event.position)
+		if not _is_cue_start_selection_click_position(mouse_event.position):
+			return false
+		_lock_initial_cue_start(cue_start_highlighted_index)
+		get_viewport().set_input_as_handled()
+		return true
+
+	if mouse_event.button_index == MOUSE_BUTTON_RIGHT and cue_start_selection_locked and not is_dragging:
+		if _unlock_initial_cue_start():
+			_update_initial_cue_start_highlight(mouse_event.position)
+		get_viewport().set_input_as_handled()
+		return true
+
+	return false
+
+
+func _update_initial_cue_start_highlight(mouse_position: Vector2) -> void:
+	if spawn_system == null:
+		return
+	var nearest_index := spawn_system.get_nearest_cue_start_index(mouse_position)
+	if nearest_index == cue_start_highlighted_index:
+		return
+	cue_start_highlighted_index = nearest_index
+	_emit_cue_start_selection_update()
+
+
+func _is_cue_start_selection_click_position(mouse_position: Vector2) -> bool:
+	_ensure_table_geometry_cached()
+	return playfield_rect.has_point(mouse_position)
+
+
+func _activate_initial_cue_start_selection() -> void:
+	cue_start_selection_active = shots_taken_count == 0 and is_instance_valid(cue_ball)
+	cue_start_selection_locked = false
+	if spawn_system != null:
+		spawn_system.prepare_cue_ball_for_start_selection(cue_ball, true)
+		cue_start_highlighted_index = spawn_system.get_selected_cue_start_index()
+	_emit_cue_start_selection_update()
+
+
+func _deactivate_initial_cue_start_selection() -> void:
+	if not cue_start_selection_active:
+		return
+	cue_start_selection_active = false
+	cue_start_selection_locked = true
+	_emit_cue_start_selection_update()
+
+
+func _can_change_initial_cue_start() -> bool:
+	return (
+		cue_start_selection_active
+		and shots_taken_count == 0
+		and not shot_active
+		and not is_dragging
+		and not game_over
+		and is_instance_valid(cue_ball)
+		and not ball_placement_system.is_placement_active()
+		and _all_balls_stopped()
+	)
+
+
+func _unlock_initial_cue_start() -> bool:
+	if not cue_start_selection_active or not cue_start_selection_locked:
+		_emit_cue_start_selection_update()
+		return false
+	if not _can_change_initial_cue_start():
+		_emit_cue_start_selection_update()
+		return false
+	if not spawn_system.prepare_cue_ball_for_start_selection(cue_ball):
+		_emit_cue_start_selection_update()
+		return false
+
+	cue_start_selection_locked = false
+	cue_start_highlighted_index = spawn_system.get_selected_cue_start_index()
+	cue_controller.stop_recoil()
+	_clear_aim_preview_now()
+	_emit_cue_start_selection_update()
+	queue_redraw()
+	return true
+
+
+func _emit_cue_start_selection_update() -> void:
+	cue_start_selection_changed.emit(get_cue_start_selection_snapshot())
+
+
 func _begin_cue_drag() -> void:
 	if is_dragging:
 		return
@@ -1063,6 +1211,8 @@ func _can_start_aiming() -> bool:
 func _can_take_cue_control() -> bool:
 	if not _get_cue_control_base_blocker().is_empty():
 		return false
+	if cue_start_selection_active and not cue_start_selection_locked:
+		return false
 	if shot_active:
 		return cue_control_reclaimed
 
@@ -1078,6 +1228,8 @@ func _can_release_current_shot() -> bool:
 	if not is_dragging:
 		return false
 	if not _get_cue_control_base_blocker().is_empty():
+		return false
+	if cue_start_selection_active and not cue_start_selection_locked:
 		return false
 
 	# Once aiming has started, later non-cue-ball movement should not revoke
@@ -1248,6 +1400,7 @@ func _note_actual_cue_pocketed(ball: Ball) -> void:
 
 
 func _start_shot_tracking() -> void:
+	_deactivate_initial_cue_start_selection()
 	shot_active = true
 	shots_taken_count += 1
 	shot_taken.emit(shots_taken_count)
@@ -2284,6 +2437,11 @@ func _update_cue_reclaim_state(delta: float) -> void:
 		var base_blocker: String = _get_cue_control_base_blocker()
 		cue_reclaim_eligible = base_blocker == ""
 		cue_reclaim_blocker_reason = "Granted" if cue_reclaim_eligible else base_blocker
+		# Late sinks can earn Kraken Intervention after early cue reclaim.
+		# Re-check only TableEventSystem readiness here; do not rerun the full
+		# cue-control-regained hook and its other shot-window side effects.
+		if cue_reclaim_eligible and table_event_system != null:
+			table_event_system.handle_cue_control_regained()
 		return
 
 	var signature: String = _get_cue_reclaim_motion_signature()

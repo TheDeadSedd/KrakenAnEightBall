@@ -3,7 +3,7 @@ class_name QuartermasterHUD
 
 signal quartermaster_offer_requested(offer_index: int)
 signal quartermaster_refresh_requested
-signal back_room_deal_option_requested(item_id: String)
+signal back_room_deal_open_requested
 
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const OFFER_SLOT_COUNT := 3
@@ -81,7 +81,6 @@ var refresh_button_hover_style := StyleBoxFlat.new()
 var refresh_button_unavailable_style := StyleBoxFlat.new()
 var tooltip_panel: PanelContainer
 var tooltip_label: Label
-var back_room_panel: BackRoomDealPanel
 var preview_rng := RandomNumberGenerator.new()
 var preview_colors_by_offer_index: Dictionary = {}
 var preview_signatures_by_offer_index: Dictionary = {}
@@ -95,7 +94,6 @@ func _ready() -> void:
 	preview_rng.randomize()
 	_configure_styles()
 	_build_tooltip()
-	_build_back_room_panel_presenter()
 	if not mouse_exited.is_connected(_on_mouse_exited):
 		mouse_exited.connect(_on_mouse_exited)
 	set_process(false)
@@ -124,9 +122,6 @@ func set_back_room_deal_snapshot(snapshot: Dictionary) -> void:
 	back_room_snapshot = snapshot.duplicate(true)
 	if not _is_back_room_unlocked():
 		back_room_button_hovered = false
-		_close_back_room_panel()
-	if back_room_panel != null:
-		back_room_panel.set_deal_snapshot(back_room_snapshot)
 	_update_tooltip()
 	queue_redraw()
 
@@ -137,7 +132,6 @@ func set_hover_ui_suppressed(suppressed: bool) -> void:
 
 	hover_ui_suppressed = suppressed
 	mouse_filter = Control.MOUSE_FILTER_IGNORE if suppressed else Control.MOUSE_FILTER_PASS
-	_update_back_room_input_filters()
 	if suppressed:
 		_clear_hover_state()
 
@@ -271,18 +265,6 @@ func _build_tooltip() -> void:
 	margin.add_child(tooltip_label)
 
 
-func _build_back_room_panel_presenter() -> void:
-	back_room_panel = BackRoomDealPanel.new()
-	back_room_panel.name = "BackRoomDealPanel"
-	back_room_panel.position = _get_back_room_panel_position()
-	back_room_panel.z_index = 10
-	add_child(back_room_panel)
-	back_room_panel.close_requested.connect(_close_back_room_panel)
-	back_room_panel.deal_option_selected.connect(_on_back_room_option_selected)
-	back_room_panel.set_hover_ui_suppressed(hover_ui_suppressed)
-	back_room_panel.set_deal_snapshot(back_room_snapshot)
-
-
 func _make_tooltip_style() -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
 	style.bg_color = Color(0.035, 0.026, 0.018, 0.94)
@@ -310,8 +292,6 @@ func _position_on_table_rail() -> void:
 		table_rect.end.x + SHOP_X_OFFSET_FROM_TABLE,
 		table_rect.position.y + SHOP_Y_OFFSET_FROM_TABLE
 	)
-	if back_room_panel != null:
-		back_room_panel.position = _get_back_room_panel_position()
 
 
 func _get_table_outer_rect() -> Rect2:
@@ -630,10 +610,6 @@ func _get_back_room_button_rect() -> Rect2:
 	)
 
 
-func _get_back_room_panel_position() -> Vector2:
-	return Vector2(-BackRoomDealPanel.PANEL_SIZE.x - 26.0, -38.0)
-
-
 func _get_slot_rect(offer_index: int) -> Rect2:
 	var slot_step := SLOT_SIZE.x + SLOT_GAP
 	return Rect2(
@@ -705,28 +681,6 @@ func _should_suppress_hover_ui() -> bool:
 
 
 func _toggle_back_room_panel() -> void:
-	if back_room_panel == null:
-		return
 	if not _is_back_room_unlocked():
-		back_room_panel.close_panel()
 		return
-	back_room_panel.position = _get_back_room_panel_position()
-	if back_room_panel.visible:
-		back_room_panel.close_panel()
-	else:
-		back_room_panel.open_panel(back_room_snapshot)
-
-
-func _close_back_room_panel() -> void:
-	if back_room_panel != null:
-		back_room_panel.close_panel()
-
-
-func _update_back_room_input_filters() -> void:
-	if back_room_panel != null:
-		back_room_panel.set_hover_ui_suppressed(hover_ui_suppressed)
-
-
-func _on_back_room_option_selected(item_id: String) -> void:
-	_close_back_room_panel()
-	back_room_deal_option_requested.emit(item_id)
+	back_room_deal_open_requested.emit()
