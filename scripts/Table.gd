@@ -115,6 +115,8 @@ const PHYSICS_SUBSTEPS := 4
 const BALL_COLLISION_GRID_CELL_SIZE := 56.0
 const PHYSICS_DEBUG_SPEED_THRESHOLD := 5.0
 const PHYSICS_DEBUG_MAX_BALLS := 10
+const CUE_BALL_CANNON_WAKE_DEFAULT_IMPACT_MULTIPLIER := 1.35
+const CUE_BALL_CANNON_WAKE_DEFAULT_RETENTION := 0.22
 #endregion
 
 #region Cached Node References
@@ -128,6 +130,7 @@ const PHYSICS_DEBUG_MAX_BALLS := 10
 @onready var pocket_streak_system: PocketStreakSystem = $PocketStreakSystem
 @onready var ball_drop_system: BallDropSystem = $BallDropSystem
 @onready var table_event_system: TableEventSystem = $TableEventSystem
+@onready var kraken_boon_system: KrakenBoonSystem = $KrakenBoonSystem
 @onready var run_stats_system: RunStatsSystem = $RunStatsSystem
 @onready var passage_system: PassageSystem = $PassageSystem
 @onready var oath_system: OathSystem = $OathSystem
@@ -206,6 +209,7 @@ var perf_ball_collision_ms := 0.0
 var perf_rail_collision_ms := 0.0
 var perf_pocket_check_ms := 0.0
 var cue_modifier_snapshot: Dictionary = {}
+var kraken_boon_effect_snapshot: Dictionary = {}
 #endregion
 
 
@@ -220,6 +224,10 @@ func _ready() -> void:
 	score_system.setup(self)
 	pocket_streak_system.setup(self)
 	ball_drop_system.setup(self)
+	kraken_boon_system.setup(self)
+	kraken_boon_effect_snapshot = kraken_boon_system.get_active_effects_snapshot()
+	if not kraken_boon_system.boons_changed.is_connected(_on_kraken_boons_changed):
+		kraken_boon_system.boons_changed.connect(_on_kraken_boons_changed)
 	table_event_system.setup(self)
 	if table_event_system.should_disable_automatic_ball_drops():
 		ball_drop_system.enabled = false
@@ -276,6 +284,16 @@ func get_run_ball_counts_snapshot() -> Dictionary:
 		"active_ball_count": _count_active_run_balls(),
 		"balls_sunk_count": balls_sunk_count,
 	}
+
+
+func get_kraken_boon_effects_snapshot() -> Dictionary:
+	return kraken_boon_effect_snapshot.duplicate(true)
+
+
+func get_kraken_boon_snapshot() -> Dictionary:
+	if kraken_boon_system == null:
+		return {}
+	return kraken_boon_system.get_boon_snapshot()
 
 
 func _on_balls_child_tree_changed(_node: Node) -> void:
@@ -719,10 +737,92 @@ func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2,
 		return true
 	if embezzler_system.try_apply_collision_response(ball_a, ball_b, normal, impulse):
 		return true
+	if _try_apply_cue_ball_cannon_wake_collision_response(ball_a, ball_b, normal, impulse):
+		return true
 
 	ball_a.velocity -= impulse
 	ball_b.velocity += impulse
 	return true
+
+
+func _try_apply_cue_ball_cannon_wake_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2, impulse: Vector2) -> bool:
+	if not _is_cue_ball_cannon_wake_enabled():
+		return false
+	if cue_ball == null:
+		return false
+
+	var target_ball: Ball = null
+	var cue_to_target_normal: Vector2 = normal
+	var base_cue_delta: Vector2 = Vector2.ZERO
+	var base_target_delta: Vector2 = Vector2.ZERO
+	if ball_a == cue_ball and _is_cue_ball_cannon_wake_target(ball_b):
+		target_ball = ball_b
+		cue_to_target_normal = normal
+		base_cue_delta = -impulse
+		base_target_delta = impulse
+	elif ball_b == cue_ball and _is_cue_ball_cannon_wake_target(ball_a):
+		target_ball = ball_a
+		cue_to_target_normal = -normal
+		base_cue_delta = impulse
+		base_target_delta = -impulse
+	else:
+		return false
+
+	if target_ball == null or cue_to_target_normal.length_squared() <= 0.001:
+		return false
+
+	var cue_speed_toward_target: float = cue_ball.velocity.dot(cue_to_target_normal)
+	var target_speed_toward_cue: float = target_ball.velocity.dot(cue_to_target_normal)
+	if cue_speed_toward_target <= 0.0 or cue_speed_toward_target <= target_speed_toward_cue:
+		return false
+
+	var cue_pre_collision_velocity: Vector2 = cue_ball.velocity
+	var impact_multiplier: float = _get_cue_ball_cannon_wake_impact_multiplier()
+	var cue_retention: float = _get_cue_ball_cannon_wake_retention()
+	target_ball.velocity += base_target_delta * impact_multiplier
+	var normal_cue_velocity: Vector2 = cue_pre_collision_velocity + base_cue_delta
+	cue_ball.velocity = normal_cue_velocity.lerp(cue_pre_collision_velocity, cue_retention)
+	return true
+
+
+func _is_cue_ball_cannon_wake_target(ball: Ball) -> bool:
+	if ball == null or ball == cue_ball or ball == eight_ball:
+		return false
+	if not ball.is_gameplay_active() or ball.ball_type != Ball.BallType.OBJECT:
+		return false
+	return (
+		not ball.is_wayfinder
+		and not ball.is_powder_keg
+		and not ball.is_anchor_ball
+		and not ball.is_cannon_ball
+		and not ball.is_treasure_ball
+		and not ball.is_embezzler_ball
+	)
+
+
+func _is_cue_ball_cannon_wake_enabled() -> bool:
+	return bool(kraken_boon_effect_snapshot.get(KrakenBoonSystem.EFFECT_CUE_BALL_CANNON_WAKE_ENABLED, false))
+
+
+func _get_cue_ball_cannon_wake_impact_multiplier() -> float:
+	return maxf(
+		float(kraken_boon_effect_snapshot.get(
+			KrakenBoonSystem.EFFECT_CUE_BALL_CANNON_WAKE_IMPACT_MULTIPLIER,
+			CUE_BALL_CANNON_WAKE_DEFAULT_IMPACT_MULTIPLIER
+		)),
+		1.0
+	)
+
+
+func _get_cue_ball_cannon_wake_retention() -> float:
+	return clampf(
+		float(kraken_boon_effect_snapshot.get(
+			KrakenBoonSystem.EFFECT_CUE_BALL_CANNON_WAKE_CUE_RETENTION,
+			CUE_BALL_CANNON_WAKE_DEFAULT_RETENTION
+		)),
+		0.0,
+		0.85
+	)
 
 
 func _note_actual_cue_ball_hit(ball_a: Ball, ball_b: Ball) -> void:
@@ -1152,17 +1252,28 @@ func _clear_aim_preview_now() -> void:
 
 func _refresh_aim_preview() -> void:
 	var effective_shot_power := get_effective_shot_power()
+	var boon_effects := get_kraken_boon_effects_snapshot()
 	if not is_dragging or not _can_release_current_shot():
-		aim_preview.update_preview(false, Vector2.ZERO, Vector2.ZERO, effective_shot_power, 0.0)
+		aim_preview.update_preview(false, Vector2.ZERO, Vector2.ZERO, effective_shot_power, 0.0, boon_effects)
 		treasure_ball_system.handle_aim_perception_snapshot(aim_preview.get_treasure_perception_snapshot())
 		embezzler_system.handle_aim_perception_snapshot(aim_preview.get_embezzler_perception_snapshot())
 		return
 
 	var drag_vector: Vector2 = _get_drag_vector(drag_mouse_position)
 	var power_ratio: float = clamp(drag_vector.length() / MAX_DRAG_DISTANCE, 0.0, 1.0)
-	aim_preview.update_preview(true, cue_ball.global_position, drag_vector, effective_shot_power, power_ratio)
+	aim_preview.update_preview(true, cue_ball.global_position, drag_vector, effective_shot_power, power_ratio, boon_effects)
 	treasure_ball_system.handle_aim_perception_snapshot(aim_preview.get_treasure_perception_snapshot())
 	embezzler_system.handle_aim_perception_snapshot(aim_preview.get_embezzler_perception_snapshot())
+
+
+func _on_kraken_boons_changed(_snapshot: Dictionary) -> void:
+	var effects_value: Variant = _snapshot.get("active_effects", {})
+	if effects_value is Dictionary:
+		kraken_boon_effect_snapshot = (effects_value as Dictionary).duplicate(true)
+	else:
+		kraken_boon_effect_snapshot.clear()
+	if is_dragging:
+		_mark_aim_preview_dirty()
 
 
 func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) -> void:
@@ -1917,6 +2028,9 @@ func _get_embezzler_performance_snapshot(embezzler_snapshot: Dictionary) -> Dict
 
 func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dictionary:
 	var table_event_snapshot: Dictionary = table_event_system.get_debug_snapshot()
+	var kraken_boon_snapshot: Dictionary = {}
+	if kraken_boon_system != null:
+		kraken_boon_snapshot = kraken_boon_system.get_debug_snapshot()
 	return {
 		"ball_drop_progress": ball_drop_snapshot["drop_progress"],
 		"ball_drop_threshold": ball_drop_snapshot["doubloons_per_drop"],
@@ -1929,6 +2043,11 @@ func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dict
 		"table_event_shot_progress": table_event_snapshot["shot_progress"],
 		"table_event_threshold": table_event_snapshot["shot_threshold"],
 		"table_event_progress_percent": table_event_snapshot["progress_percent"],
+		"table_event_pending_charges": table_event_snapshot["pending_intervention_charges"],
+		"table_event_segment_index": table_event_snapshot["current_segment_index"],
+		"table_event_segment_goal": table_event_snapshot["current_segment_goal"],
+		"table_event_current_shot_doubloons": table_event_snapshot["current_shot_doubloons"],
+		"table_event_shot_charges_earned": table_event_snapshot["shot_intervention_charges_earned"],
 		"table_event_pending": table_event_snapshot["pending_event_available"],
 		"table_event_ready": table_event_snapshot["pending_event_ready"],
 		"table_event_menu_open": table_event_snapshot["event_menu_open"],
@@ -1944,6 +2063,12 @@ func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dict
 		"table_event_last_purchase_event_id": table_event_snapshot["last_purchase_event_id"],
 		"table_event_last_purchase_cost": table_event_snapshot["last_purchase_cost"],
 		"table_event_last_blocker_reason": table_event_snapshot["last_blocker_reason"],
+		"kraken_boon_active_summary": str(kraken_boon_snapshot.get("active_boons_summary", "None")),
+		"kraken_boon_active_count": int(kraken_boon_snapshot.get("active_boon_count", 0)),
+		"kraken_boon_active_effects": kraken_boon_snapshot.get("active_effects", {}),
+		"kraken_boon_activations_total": int(kraken_boon_snapshot.get("activations_total", 0)),
+		"kraken_boon_refreshes_total": int(kraken_boon_snapshot.get("refreshes_total", 0)),
+		"kraken_boon_expirations_total": int(kraken_boon_snapshot.get("expirations_total", 0)),
 		"table_event_cheap_cargo_cost": table_event_snapshot["cheap_cargo_cost"],
 		"table_event_cheap_cargo_ball_count": table_event_snapshot["cheap_cargo_ball_count"],
 		"table_event_loose_cargo_cost": table_event_snapshot["loose_cargo_cost"],

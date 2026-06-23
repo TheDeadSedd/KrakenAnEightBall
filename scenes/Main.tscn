@@ -22,6 +22,7 @@
 [ext_resource type="Script" path="res://scripts/ProgressionSystem.gd" id="20_progression_system"]
 [ext_resource type="Script" path="res://scripts/CueProgressionSystem.gd" id="21_cue_progression_system"]
 [ext_resource type="Script" path="res://scripts/CueStartSelectorHUD.gd" id="22_cue_start_selector_hud"]
+[ext_resource type="Script" path="res://scripts/KrakenBoonHUD.gd" id="23_kraken_boon_hud"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -343,6 +344,17 @@ offset_right = 1136.0
 offset_bottom = 416.0
 mouse_filter = 2
 script = ExtResource("19_oath_hud")
+
+[node name="KrakenBoonHUD" type="Control" parent="CanvasLayer/HUD"]
+process_mode = 3
+z_index = 23
+anchors_preset = 0
+offset_left = 1558.0
+offset_top = 522.0
+offset_right = 1828.0
+offset_bottom = 598.0
+mouse_filter = 2
+script = ExtResource("23_kraken_boon_hud")
 
 [node name="HudFeed" type="Control" parent="CanvasLayer/HUD" unique_id=634428339]
 process_mode = 3

@@ -21,6 +21,7 @@ const BACK_ROOM_PANEL_VIEWPORT_MARGIN := 24.0
 @onready var cue_start_selector_hud: CueStartSelectorHUD = $CanvasLayer/HUD/CueStartSelectorHUD
 @onready var passage_hud: PassageHUD = $CanvasLayer/HUD/PassageHUD
 @onready var oath_hud: OathHUD = $CanvasLayer/HUD/OathHUD
+@onready var kraken_boon_hud: KrakenBoonHUD = $CanvasLayer/HUD/KrakenBoonHUD
 @onready var table_event_meter: TableEventMeter = $CanvasLayer/HUD/TableEventMeter
 @onready var table_event_menu: TableEventMenu = $CanvasLayer/HUD/TableEventMenu
 @onready var reserve_slots_ui: ReserveSlotsUI = $CanvasLayer/HUD/ReserveSlotsUI
@@ -116,6 +117,16 @@ func _connect_pause_menu_signals() -> void:
 		pause_menu.debug_back_room_force_available_toggled.connect(_on_pause_back_room_force_available_toggled)
 	if not pause_menu.debug_back_room_open_requested.is_connected(_on_pause_back_room_open_requested):
 		pause_menu.debug_back_room_open_requested.connect(_on_pause_back_room_open_requested)
+	if not pause_menu.debug_activate_long_sight_requested.is_connected(_on_pause_debug_activate_long_sight_requested):
+		pause_menu.debug_activate_long_sight_requested.connect(_on_pause_debug_activate_long_sight_requested)
+	if not pause_menu.debug_activate_krakens_patience_requested.is_connected(_on_pause_debug_activate_krakens_patience_requested):
+		pause_menu.debug_activate_krakens_patience_requested.connect(_on_pause_debug_activate_krakens_patience_requested)
+	if not pause_menu.debug_activate_deep_ledger_requested.is_connected(_on_pause_debug_activate_deep_ledger_requested):
+		pause_menu.debug_activate_deep_ledger_requested.connect(_on_pause_debug_activate_deep_ledger_requested)
+	if not pause_menu.debug_activate_iron_wake_requested.is_connected(_on_pause_debug_activate_iron_wake_requested):
+		pause_menu.debug_activate_iron_wake_requested.connect(_on_pause_debug_activate_iron_wake_requested)
+	if not pause_menu.debug_expire_all_boons_requested.is_connected(_on_pause_debug_expire_all_boons_requested):
+		pause_menu.debug_expire_all_boons_requested.connect(_on_pause_debug_expire_all_boons_requested)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 
@@ -135,6 +146,8 @@ func _connect_hud_signals() -> void:
 		table_event_meter.event_icon_clicked.connect(_on_table_event_icon_clicked)
 	if not table_event_menu.event_offer_selected.is_connected(_on_table_event_offer_selected):
 		table_event_menu.event_offer_selected.connect(_on_table_event_offer_selected)
+	if not table_event_menu.boon_offer_selected.is_connected(_on_table_event_boon_offer_selected):
+		table_event_menu.boon_offer_selected.connect(_on_table_event_boon_offer_selected)
 	if not table_event_menu.event_offer_replace_requested.is_connected(_on_table_event_offer_replace_requested):
 		table_event_menu.event_offer_replace_requested.connect(_on_table_event_offer_replace_requested)
 
@@ -149,6 +162,7 @@ func _setup_hud_presenters() -> void:
 	cue_start_selector_hud.setup(table)
 	passage_hud.setup(table.passage_system)
 	oath_hud.setup(table.oath_system)
+	kraken_boon_hud.setup(table.kraken_boon_system)
 	_on_run_stats_changed(table.run_stats_system.get_run_stats_snapshot())
 	reserve_slots_ui.setup(table.reserve_system, table)
 	quartermaster_hud.setup(table.quartermaster_system, table)
@@ -247,6 +261,7 @@ func _configure_pause_process_modes() -> void:
 	cue_start_selector_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	passage_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	oath_hud.process_mode = Node.PROCESS_MODE_ALWAYS
+	kraken_boon_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	table_event_meter.process_mode = Node.PROCESS_MODE_ALWAYS
 	table_event_menu.process_mode = Node.PROCESS_MODE_ALWAYS
 
@@ -389,6 +404,7 @@ func _on_table_event_status_changed(text: String) -> void:
 func _on_gameplay_mouse_lock_changed(locked: bool) -> void:
 	oath_hud.set_hover_ui_suppressed(locked)
 	passage_hud.set_hover_ui_suppressed(locked)
+	kraken_boon_hud.set_hover_ui_suppressed(locked)
 	cue_start_selector_hud.set_hover_ui_suppressed(locked)
 	quartermaster_hud.set_hover_ui_suppressed(locked)
 	table_event_meter.set_hover_ui_suppressed(locked)
@@ -411,11 +427,15 @@ func _on_table_event_offer_selected(offer_index: int) -> void:
 	table.table_event_system.request_purchase_offer(offer_index)
 
 
+func _on_table_event_boon_offer_selected(boon_offer_index: int) -> void:
+	table.table_event_system.request_purchase_boon_offer(boon_offer_index)
+
+
 func _on_table_event_offer_replace_requested(offer_index: int, oath_id: String) -> void:
 	table.table_event_system.request_reroll_offer_with_oath(offer_index, oath_id)
 
 
-func _on_table_event_purchased(_event_id: String, _cost: int) -> void:
+func _on_table_event_purchased(_event_id: String, _charge_cost: int) -> void:
 	table_event_menu.close_menu()
 
 
@@ -584,6 +604,40 @@ func _on_pause_back_room_open_requested() -> void:
 
 	var blocker := str(snapshot.get("blocked_reason", "Back Room unavailable."))
 	hud_feed.add_message("Back Room debug open blocked: %s" % blocker, "shop")
+
+
+func _on_pause_debug_activate_long_sight_requested() -> void:
+	_debug_activate_boon(KrakenBoonSystem.BOON_LONG_SIGHT)
+
+
+func _on_pause_debug_activate_krakens_patience_requested() -> void:
+	_debug_activate_boon(KrakenBoonSystem.BOON_KRAKENS_PATIENCE)
+
+
+func _on_pause_debug_activate_deep_ledger_requested() -> void:
+	_debug_activate_boon(KrakenBoonSystem.BOON_DEEP_LEDGER)
+
+
+func _on_pause_debug_activate_iron_wake_requested() -> void:
+	_debug_activate_boon(KrakenBoonSystem.BOON_IRON_WAKE)
+
+
+func _debug_activate_boon(boon_id: String) -> void:
+	if table.kraken_boon_system.activate_boon(boon_id):
+		var message: String = table.kraken_boon_system.get_boon_activation_message(boon_id)
+		hud_feed.add_message("Debug Boon: %s" % (message if not message.is_empty() else "Boon active."), "event")
+		return
+
+	var blocker: String = table.kraken_boon_system.get_boon_activation_blocker(boon_id)
+	hud_feed.add_message("Debug Boon blocked: %s." % blocker, "event")
+
+
+func _on_pause_debug_expire_all_boons_requested() -> void:
+	var expired_count: int = table.kraken_boon_system.debug_expire_all_boons()
+	if expired_count <= 0:
+		hud_feed.add_message("Debug Boon expire skipped: no active boons.", "event")
+	else:
+		hud_feed.add_message("Debug Boons expired: %s." % expired_count, "event")
 
 
 func _get_oath_label(oath_id: String) -> String:

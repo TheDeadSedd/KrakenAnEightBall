@@ -2,6 +2,7 @@ extends Control
 class_name TableEventMenu
 
 signal event_offer_selected(offer_index: int)
+signal boon_offer_selected(boon_offer_index: int)
 signal event_offer_replace_requested(offer_index: int, oath_id: String)
 signal menu_closed
 
@@ -10,9 +11,12 @@ signal menu_closed
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const OFFER_SLOT_COUNT := 3
 const TABLE_CENTER := Vector2(960.0, 540.0)
-const PANEL_SIZE := Vector2(860.0, 268.0)
+const PANEL_SIZE := Vector2(860.0, 408.0)
 const OATH_CHOICE_PANEL_SIZE := Vector2(610.0, 430.0)
 const CARD_SIZE := Vector2(250.0, 160.0)
+const BOON_CARD_SIZE := Vector2(196.0, 68.0)
+const BOON_TOOLTIP_SIZE := Vector2(350.0, 174.0)
+const BOON_TOOLTIP_VIEWPORT_MARGIN := 10.0
 const OATH_CHOICE_ROW_SIZE := Vector2(548.0, 82.0)
 const CARD_GAP := 12
 const CARD_HORIZONTAL_PADDING := 11
@@ -43,6 +47,18 @@ var offer_meta_labels: Array[Label] = []
 var offer_description_labels: Array[Label] = []
 var offer_status_labels: Array[Label] = []
 var offer_replace_buttons: Array[Button] = []
+var boon_section: VBoxContainer
+var boon_offer_row: HBoxContainer
+var boon_offer_buttons: Array[Button] = []
+var boon_offer_name_labels: Array[Label] = []
+var boon_offer_meta_labels: Array[Label] = []
+var boon_offer_status_labels: Array[Label] = []
+var boon_tooltip_panel: PanelContainer
+var boon_tooltip_title_label: Label
+var boon_tooltip_details_label: Label
+var boon_tooltip_description_label: Label
+var current_boon_offers: Array = []
+var hovered_boon_offer_index := -1
 var status_label: Label
 var title_label: Label
 var close_button: Button
@@ -74,8 +90,10 @@ func setup(system: TableEventSystem) -> void:
 	if table_event_system == null:
 		return
 	table_event_system.offers_changed.connect(_on_offers_changed)
+	table_event_system.boon_offers_changed.connect(_on_boon_offers_changed)
 	table_event_system.status_changed.connect(_on_status_changed)
 	_refresh_offers(table_event_system.get_event_offers_snapshot())
+	_refresh_boon_offers(table_event_system.get_boon_offers_snapshot())
 
 
 func open_menu() -> void:
@@ -88,7 +106,7 @@ func open_menu() -> void:
 	pending_oath_replace_offer_index = -1
 	table_event_system.set_event_menu_open(true)
 	refresh_offers()
-	status_label.text = "Choose one event to unleash, or swear an oath to replace one omen."
+	status_label.text = "Choose an omen to unleash, or claim a short-lived boon below."
 
 
 func close_menu() -> void:
@@ -96,6 +114,7 @@ func close_menu() -> void:
 		table_event_system.set_event_menu_open(false)
 	if oath_choice_panel != null:
 		oath_choice_panel.visible = false
+	_hide_boon_tooltip()
 	if panel != null:
 		panel.visible = true
 	pending_oath_replace_offer_index = -1
@@ -107,6 +126,7 @@ func refresh_offers() -> void:
 	if table_event_system == null:
 		return
 	_refresh_offers(table_event_system.get_event_offers_snapshot())
+	_refresh_boon_offers(table_event_system.get_boon_offers_snapshot())
 
 
 func _build_menu() -> void:
@@ -125,9 +145,12 @@ func _build_menu() -> void:
 	status_label = _build_status_label()
 	root.add_child(status_label)
 	root.add_child(_build_offer_row())
+	root.add_child(_build_boon_section())
 
 	oath_choice_panel = _build_oath_choice_panel()
 	add_child(oath_choice_panel)
+	boon_tooltip_panel = _build_boon_tooltip_panel()
+	add_child(boon_tooltip_panel)
 
 
 func _build_shade() -> ColorRect:
@@ -197,7 +220,7 @@ func _build_close_button() -> Button:
 
 func _build_status_label() -> Label:
 	var label := Label.new()
-	label.text = "Spend Doubloons to unleash one table event, or close and keep the choice."
+	label.text = "Spend Intervention Charges to unleash one omen, or close and keep the choice."
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.add_theme_font_override("font", UI_FONT)
 	label.add_theme_font_size_override("font_size", 13)
@@ -217,6 +240,25 @@ func _build_offer_row() -> HBoxContainer:
 	return cards
 
 
+func _build_boon_section() -> VBoxContainer:
+	boon_section = VBoxContainer.new()
+	boon_section.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	boon_section.add_theme_constant_override("separation", 3)
+
+	var section_title := _make_offer_card_label(15, Color(1.0, 0.84, 0.46, 1.0))
+	section_title.text = "Kraken Boons"
+	section_title.custom_minimum_size = Vector2(0.0, 19.0)
+	boon_section.add_child(section_title)
+
+	boon_offer_row = HBoxContainer.new()
+	boon_offer_row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	boon_offer_row.alignment = BoxContainer.ALIGNMENT_CENTER
+	boon_offer_row.add_theme_constant_override("separation", CARD_GAP)
+	boon_offer_row.custom_minimum_size = Vector2(0.0, BOON_CARD_SIZE.y)
+	boon_section.add_child(boon_offer_row)
+	return boon_section
+
+
 func _build_offer_card(offer_index: int) -> Button:
 	var button := Button.new()
 	button.text = ""
@@ -228,6 +270,60 @@ func _build_offer_card(offer_index: int) -> Button:
 	_add_offer_card_content(button)
 	offer_buttons.append(button)
 	return button
+
+
+func _build_boon_offer_card(boon_offer_index: int) -> Button:
+	var button := Button.new()
+	button.text = ""
+	button.custom_minimum_size = BOON_CARD_SIZE
+	button.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	button.tooltip_text = ""
+	_style_boon_card(button)
+	button.pressed.connect(_on_boon_offer_button_pressed.bind(boon_offer_index))
+	button.mouse_entered.connect(_on_boon_offer_mouse_entered.bind(boon_offer_index))
+	button.mouse_exited.connect(_on_boon_offer_mouse_exited.bind(boon_offer_index))
+	_add_boon_offer_card_content(button)
+	boon_offer_buttons.append(button)
+	return button
+
+
+func _build_boon_tooltip_panel() -> PanelContainer:
+	var tooltip: PanelContainer = PanelContainer.new()
+	tooltip.name = "KrakenBoonTooltip"
+	tooltip.visible = false
+	tooltip.z_index = 3
+	tooltip.size = BOON_TOOLTIP_SIZE
+	tooltip.custom_minimum_size = BOON_TOOLTIP_SIZE
+	tooltip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	tooltip.add_theme_stylebox_override("panel", _make_boon_tooltip_style())
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	tooltip.add_child(margin)
+
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 7)
+	margin.add_child(stack)
+
+	boon_tooltip_title_label = _make_boon_tooltip_label(19, Color(1.0, 0.88, 0.54, 1.0))
+	stack.add_child(boon_tooltip_title_label)
+
+	boon_tooltip_details_label = _make_boon_tooltip_label(15, Color(0.78, 0.94, 0.90, 0.98))
+	boon_tooltip_details_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	boon_tooltip_details_label.custom_minimum_size = Vector2(312.0, 46.0)
+	stack.add_child(boon_tooltip_details_label)
+
+	boon_tooltip_description_label = _make_boon_tooltip_label(14, Color(0.86, 0.84, 0.72, 0.96))
+	boon_tooltip_description_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	boon_tooltip_description_label.custom_minimum_size = Vector2(312.0, 58.0)
+	stack.add_child(boon_tooltip_description_label)
+	return tooltip
 
 
 func _build_oath_choice_panel() -> Panel:
@@ -357,6 +453,39 @@ func _style_offer_card(button: Button) -> void:
 	button.add_theme_stylebox_override("disabled", _make_panel_style(CARD_DISABLED_COLOR, CARD_BORDER.darkened(0.25), 1, 10))
 
 
+func _style_boon_card(button: Button) -> void:
+	button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.038, 0.062, 0.058, 0.94), Color(0.42, 0.92, 0.82, 0.52), 1, 8))
+	button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.052, 0.088, 0.080, 0.98), Color(0.62, 1.0, 0.90, 0.86), 2, 8))
+	button.add_theme_stylebox_override("pressed", _make_panel_style(Color(0.030, 0.108, 0.092, 0.98), Color(0.76, 1.0, 0.90, 0.96), 2, 8))
+	button.add_theme_stylebox_override("disabled", _make_panel_style(CARD_DISABLED_COLOR, CARD_BORDER.darkened(0.18), 1, 8))
+
+
+func _make_boon_tooltip_label(font_size: int, font_color: Color) -> Label:
+	var label: Label = Label.new()
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", font_color)
+	label.add_theme_color_override("font_outline_color", Color(0.04, 0.03, 0.02, 0.88))
+	label.add_theme_constant_override("outline_size", 2)
+	return label
+
+
+func _make_boon_tooltip_style() -> StyleBoxFlat:
+	var style: StyleBoxFlat = StyleBoxFlat.new()
+	style.bg_color = Color(0.035, 0.026, 0.018, 0.90)
+	style.border_color = Color(0.96, 0.78, 0.34, 0.58)
+	style.border_width_left = 1
+	style.border_width_top = 1
+	style.border_width_right = 1
+	style.border_width_bottom = 1
+	style.corner_radius_top_left = 7
+	style.corner_radius_top_right = 7
+	style.corner_radius_bottom_left = 7
+	style.corner_radius_bottom_right = 7
+	return style
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_RESIZED:
 		_center_panel()
@@ -388,6 +517,27 @@ func _refresh_offers(offers: Array) -> void:
 		_refresh_offer_card_content(offer_index, offer, purchase_blocked)
 
 
+func _refresh_boon_offers(offers: Array) -> void:
+	_clear_boon_offer_cards()
+	current_boon_offers = offers.duplicate(true)
+	_hide_boon_tooltip()
+	if boon_section == null:
+		return
+
+	boon_section.visible = not offers.is_empty()
+	if offers.is_empty():
+		return
+
+	for boon_offer_index in range(offers.size()):
+		var offer: Dictionary = _get_offer(offers, boon_offer_index)
+		var button := _build_boon_offer_card(boon_offer_index)
+		boon_offer_row.add_child(button)
+		var has_offer := not offer.is_empty() and str(offer.get("id", TableEventSystem.EMPTY_OFFER_ID)) != TableEventSystem.EMPTY_OFFER_ID
+		var purchase_blocked := not bool(offer.get("available", false))
+		button.disabled = not has_offer or purchase_blocked
+		_refresh_boon_offer_card_content(boon_offer_index, offer, purchase_blocked)
+
+
 func _refresh_offer_card_content(offer_index: int, offer: Dictionary, disabled: bool) -> void:
 	if offer.is_empty():
 		offer_name_labels[offer_index].text = "Unknown Event"
@@ -401,10 +551,16 @@ func _refresh_offer_card_content(offer_index: int, offer: Dictionary, disabled: 
 		_set_offer_card_colors(offer_index, true)
 		return
 
-	var cost: int = int(offer.get("cost", 0))
-	var cost_text: String = "Cost: %s Doubloons" % cost if cost > 0 else str(offer.get("blocked_reason", "Unavailable"))
+	var charge_cost: int = int(offer.get("charge_cost", offer.get("cost", 0)))
+	var doubloon_cost: int = int(offer.get("doubloon_cost", 0))
+	var cost_text: String = _format_offer_cost_text(charge_cost, doubloon_cost)
 	var rarity: String = str(offer.get("rarity", ""))
-	var rarity_text: String = "%s Omen" % rarity if not rarity.is_empty() else ""
+	var offer_type := str(offer.get("type", TableEventSystem.OFFER_TYPE_INTERVENTION))
+	var duration_shots := maxi(int(offer.get("duration_shots", 0)), 0)
+	var rarity_suffix := "Boon" if offer_type == TableEventSystem.OFFER_TYPE_BOON else "Omen"
+	var rarity_text: String = "%s %s" % [rarity, rarity_suffix] if not rarity.is_empty() else rarity_suffix
+	if offer_type == TableEventSystem.OFFER_TYPE_BOON and duration_shots > 0:
+		rarity_text = "%s  |  %s shots" % [rarity_text, duration_shots]
 	var cost_line: String = cost_text
 	if not rarity_text.is_empty():
 		cost_line = "%s  |  %s" % [cost_text, rarity_text]
@@ -427,6 +583,64 @@ func _refresh_offer_card_content(offer_index: int, offer: Dictionary, disabled: 
 		else:
 			replace_button.tooltip_text = reroll_blocker if not reroll_blocker.is_empty() else "This omen cannot be replaced."
 	_set_offer_card_colors(offer_index, disabled)
+
+
+func _refresh_boon_offer_card_content(boon_offer_index: int, offer: Dictionary, disabled: bool) -> void:
+	if offer.is_empty():
+		return
+
+	var charge_cost: int = int(offer.get("charge_cost", offer.get("cost", 0)))
+	var doubloon_cost: int = int(offer.get("doubloon_cost", 0))
+	var cost_text: String = _format_offer_cost_amount_text(charge_cost, doubloon_cost)
+	var is_active: bool = bool(offer.get("active", false))
+
+	boon_offer_name_labels[boon_offer_index].text = str(offer.get("name", "Kraken Boon"))
+	boon_offer_meta_labels[boon_offer_index].text = cost_text
+	boon_offer_status_labels[boon_offer_index].text = "ACTIVE" if is_active else ""
+	_set_boon_offer_card_colors(boon_offer_index, disabled, is_active)
+
+
+func _get_boon_offer_tooltip_details(offer: Dictionary, charge_cost: int, doubloon_cost: int) -> String:
+	var lines: Array[String] = []
+	var cost_text: String = _format_offer_cost_amount_text(charge_cost, doubloon_cost)
+	var duration_shots: int = maxi(int(offer.get("duration_shots", 0)), 0)
+	var is_active: bool = bool(offer.get("active", false))
+	var active_remaining_shots: int = maxi(int(offer.get("active_remaining_shots", 0)), 0)
+	var blocker: String = str(offer.get("blocked_reason", ""))
+
+	if is_active:
+		lines.append("Active: %s remaining" % _format_shots(active_remaining_shots))
+		lines.append("Refresh: %s" % cost_text)
+	else:
+		lines.append("Cost: %s" % cost_text)
+		if duration_shots > 0:
+			lines.append("Duration: %s" % _format_shots(duration_shots))
+	if not blocker.is_empty():
+		var need_text: String = blocker
+		if need_text.begins_with("Need "):
+			need_text = need_text.substr(5)
+		lines.append("Need: %s" % need_text)
+	return "\n".join(lines)
+
+
+func _format_offer_cost_text(charge_cost: int, doubloon_cost: int) -> String:
+	return "Cost: %s" % _format_offer_cost_amount_text(charge_cost, doubloon_cost)
+
+
+func _format_offer_cost_amount_text(charge_cost: int, doubloon_cost: int) -> String:
+	var parts: Array[String] = []
+	if charge_cost > 0:
+		parts.append("%s Charge%s" % [charge_cost, "" if charge_cost == 1 else "s"])
+	if doubloon_cost > 0:
+		parts.append("%s Doubloon%s" % [doubloon_cost, "" if doubloon_cost == 1 else "s"])
+	if parts.is_empty():
+		return "Free"
+	return " + ".join(parts)
+
+
+func _format_shots(count: int) -> String:
+	var safe_count: int = maxi(count, 0)
+	return "%s shot%s" % [safe_count, "" if safe_count == 1 else "s"]
 
 
 func _add_offer_card_content(button: Button) -> void:
@@ -468,6 +682,44 @@ func _add_offer_card_content(button: Button) -> void:
 	var replace_button := _make_replace_button(offer_replace_buttons.size())
 	stack.add_child(replace_button)
 	offer_replace_buttons.append(replace_button)
+
+
+func _add_boon_offer_card_content(button: Button) -> void:
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.add_theme_constant_override("margin_left", 7)
+	margin.add_theme_constant_override("margin_top", 4)
+	margin.add_theme_constant_override("margin_right", 7)
+	margin.add_theme_constant_override("margin_bottom", 4)
+	button.add_child(margin)
+
+	var text_stack := VBoxContainer.new()
+	text_stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	text_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	text_stack.add_theme_constant_override("separation", 0)
+	margin.add_child(text_stack)
+
+	var name_label := _make_offer_card_label(13, TEXT_COLOR)
+	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	name_label.custom_minimum_size = Vector2(0.0, 19.0)
+	text_stack.add_child(name_label)
+	boon_offer_name_labels.append(name_label)
+
+	var meta_label := _make_offer_card_label(10, COST_COLOR)
+	meta_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	meta_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	meta_label.custom_minimum_size = Vector2(0.0, 18.0)
+	text_stack.add_child(meta_label)
+	boon_offer_meta_labels.append(meta_label)
+
+	var status_line := _make_offer_card_label(11, STATUS_COLOR)
+	status_line.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	status_line.custom_minimum_size = Vector2(0.0, 15.0)
+	status_line.autowrap_mode = TextServer.AUTOWRAP_OFF
+	text_stack.add_child(status_line)
+	boon_offer_status_labels.append(status_line)
 
 
 func _make_offer_card_label(font_size: int, font_color: Color) -> Label:
@@ -517,6 +769,35 @@ func _set_offer_card_colors(offer_index: int, disabled: bool) -> void:
 	offer_status_labels[offer_index].add_theme_color_override("font_color", status_color)
 
 
+func _set_boon_offer_card_colors(boon_offer_index: int, disabled: bool, active: bool = false) -> void:
+	var primary_color: Color = DISABLED_TEXT_COLOR if disabled else TEXT_COLOR
+	var meta_color: Color = DISABLED_TEXT_COLOR if disabled else COST_COLOR
+	var status_color: Color = DISABLED_TEXT_COLOR if disabled else Color(0.66, 1.0, 0.88, 1.0)
+	boon_offer_name_labels[boon_offer_index].add_theme_color_override("font_color", primary_color)
+	boon_offer_meta_labels[boon_offer_index].add_theme_color_override("font_color", meta_color)
+	boon_offer_status_labels[boon_offer_index].add_theme_color_override("font_color", status_color)
+	if boon_offer_index < 0 or boon_offer_index >= boon_offer_buttons.size():
+		return
+	var button: Button = boon_offer_buttons[boon_offer_index]
+	if active and not disabled:
+		button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.046, 0.086, 0.074, 0.96), Color(0.68, 1.0, 0.86, 0.82), 2, 8))
+		button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.060, 0.110, 0.094, 0.98), Color(0.82, 1.0, 0.92, 1.0), 2, 8))
+	else:
+		_style_boon_card(button)
+
+
+func _clear_boon_offer_cards() -> void:
+	_hide_boon_tooltip()
+	if boon_offer_row != null:
+		for child in boon_offer_row.get_children():
+			boon_offer_row.remove_child(child)
+			child.queue_free()
+	boon_offer_buttons.clear()
+	boon_offer_name_labels.clear()
+	boon_offer_meta_labels.clear()
+	boon_offer_status_labels.clear()
+
+
 func _get_offer(offers: Array, offer_index: int) -> Dictionary:
 	if offer_index < 0 or offer_index >= offers.size():
 		return {}
@@ -529,6 +810,7 @@ func _get_offer(offers: Array, offer_index: int) -> Dictionary:
 func _open_oath_choice_panel(offer_index: int) -> void:
 	if table_event_system == null or oath_choice_panel == null:
 		return
+	_hide_boon_tooltip()
 	pending_oath_replace_offer_index = offer_index
 	panel.visible = false
 	oath_choice_panel.visible = true
@@ -543,7 +825,7 @@ func _close_oath_choice_panel() -> void:
 		oath_choice_panel.visible = false
 	if panel != null:
 		panel.visible = true
-	status_label.text = "Choose one event to unleash, or swear an oath to replace one omen."
+	status_label.text = "Choose an omen to unleash, or claim a short-lived boon below."
 
 
 func _refresh_oath_choice_panel() -> void:
@@ -618,6 +900,66 @@ func _on_offer_button_pressed(offer_index: int) -> void:
 	event_offer_selected.emit(offer_index)
 
 
+func _on_boon_offer_button_pressed(boon_offer_index: int) -> void:
+	_hide_boon_tooltip()
+	boon_offer_selected.emit(boon_offer_index)
+
+
+func _on_boon_offer_mouse_entered(boon_offer_index: int) -> void:
+	_show_boon_tooltip(boon_offer_index)
+
+
+func _on_boon_offer_mouse_exited(boon_offer_index: int) -> void:
+	if hovered_boon_offer_index == boon_offer_index:
+		_hide_boon_tooltip()
+
+
+func _show_boon_tooltip(boon_offer_index: int) -> void:
+	if boon_tooltip_panel == null:
+		return
+	if boon_offer_index < 0 or boon_offer_index >= current_boon_offers.size():
+		_hide_boon_tooltip()
+		return
+	var offer: Dictionary = _get_offer(current_boon_offers, boon_offer_index)
+	if offer.is_empty():
+		_hide_boon_tooltip()
+		return
+
+	var charge_cost: int = int(offer.get("charge_cost", offer.get("cost", 0)))
+	var doubloon_cost: int = int(offer.get("doubloon_cost", 0))
+	boon_tooltip_title_label.text = str(offer.get("name", "Kraken Boon"))
+	boon_tooltip_details_label.text = _get_boon_offer_tooltip_details(offer, charge_cost, doubloon_cost)
+	boon_tooltip_description_label.text = str(offer.get("description", ""))
+	hovered_boon_offer_index = boon_offer_index
+	_position_boon_tooltip(boon_offer_index)
+	boon_tooltip_panel.visible = true
+
+
+func _hide_boon_tooltip() -> void:
+	hovered_boon_offer_index = -1
+	if boon_tooltip_panel != null:
+		boon_tooltip_panel.visible = false
+
+
+func _position_boon_tooltip(boon_offer_index: int) -> void:
+	if boon_tooltip_panel == null or boon_offer_index < 0 or boon_offer_index >= boon_offer_buttons.size():
+		return
+	var button: Button = boon_offer_buttons[boon_offer_index]
+	var button_rect: Rect2 = button.get_global_rect()
+	var viewport_size: Vector2 = get_viewport_rect().size
+	var tooltip_size: Vector2 = BOON_TOOLTIP_SIZE
+	var margin: float = BOON_TOOLTIP_VIEWPORT_MARGIN
+	var tooltip_position: Vector2 = Vector2(
+		button_rect.position.x,
+		button_rect.position.y - tooltip_size.y - 8.0
+	)
+	if tooltip_position.y < margin:
+		tooltip_position.y = button_rect.position.y + button_rect.size.y + 8.0
+	tooltip_position.x = clampf(tooltip_position.x, margin, viewport_size.x - tooltip_size.x - margin)
+	tooltip_position.y = clampf(tooltip_position.y, margin, viewport_size.y - tooltip_size.y - margin)
+	boon_tooltip_panel.global_position = tooltip_position
+
+
 func _on_offer_replace_button_down(offer_index: int) -> void:
 	replace_press_guard_offer_index = offer_index
 
@@ -651,6 +993,12 @@ func _on_offers_changed(offers: Array) -> void:
 		_refresh_oath_choice_panel()
 
 
+func _on_boon_offers_changed(offers: Array) -> void:
+	if not visible:
+		return
+	_refresh_boon_offers(offers)
+
+
 func _on_status_changed(text: String) -> void:
 	if status_label != null and visible:
 		status_label.text = text
@@ -676,5 +1024,7 @@ func _disconnect_table_event_system() -> void:
 		return
 	if table_event_system.offers_changed.is_connected(_on_offers_changed):
 		table_event_system.offers_changed.disconnect(_on_offers_changed)
+	if table_event_system.boon_offers_changed.is_connected(_on_boon_offers_changed):
+		table_event_system.boon_offers_changed.disconnect(_on_boon_offers_changed)
 	if table_event_system.status_changed.is_connected(_on_status_changed):
 		table_event_system.status_changed.disconnect(_on_status_changed)

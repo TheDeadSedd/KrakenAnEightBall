@@ -296,7 +296,7 @@ func _on_kraken_request_rerolled(_previous_request_snapshot: Dictionary, _new_re
 	_emit_stats_changed()
 
 
-func _on_intervention_purchased(event_id: String, cost: int) -> void:
+func _on_intervention_purchased(event_id: String, charge_cost: int) -> void:
 	if event_id.is_empty():
 		return
 
@@ -307,12 +307,15 @@ func _on_intervention_purchased(event_id: String, cost: int) -> void:
 			"name": _get_intervention_name(event_id),
 			"count": 0,
 			"total_cost": 0,
+			"total_charge_cost": 0,
 			"last_run_time_seconds": 0.0,
 		}
 		intervention_purchase_order.append(event_id)
 
 	summary["count"] = maxi(int(summary.get("count", 0)), 0) + 1
-	summary["total_cost"] = maxi(int(summary.get("total_cost", 0)), 0) + maxi(cost, 0)
+	var safe_charge_cost := maxi(charge_cost, 0)
+	summary["total_cost"] = maxi(int(summary.get("total_cost", 0)), 0) + safe_charge_cost
+	summary["total_charge_cost"] = maxi(int(summary.get("total_charge_cost", 0)), 0) + safe_charge_cost
 	summary["last_run_time_seconds"] = run_time_seconds
 	intervention_purchase_summaries[event_id] = summary
 	_emit_stats_changed()

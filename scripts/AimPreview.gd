@@ -42,6 +42,18 @@ const AIM_TARGET_ENDPOINT_MARKER_RADIUS := 5.0
 const AIM_TARGET_PREDICTION_MAX_DISTANCE := 360.0
 const AIM_TARGET_PREDICTION_MAX_STEPS := 120
 const AIM_TARGET_PREDICTION_STEP_SUBSTEPS := 2
+const AIM_EFFECT_CHAIN_DEPTH := "aim_preview_chain_depth"
+const AIM_LONG_SIGHT_FALLBACK_ENABLED := "aim_preview_long_sight_enabled"
+const AIM_EFFECT_CUE_BALL_CANNON_WAKE_ENABLED := "cue_ball_cannon_wake_enabled"
+const AIM_EFFECT_CUE_BALL_CANNON_WAKE_IMPACT_MULTIPLIER := "cue_ball_cannon_wake_impact_multiplier"
+const AIM_LONG_SIGHT_FALLBACK_CHAIN_DEPTH := 5
+const AIM_LONG_SIGHT_MAX_CHAIN_DEPTH := 8
+const AIM_CHAIN_LINE_WIDTH := 1.7
+const AIM_CHAIN_LINE_GLOW_WIDTH := 5.0
+const AIM_CHAIN_LINE_GLOW_ALPHA := 0.15
+const AIM_CHAIN_CORE_COLOR := Color(0.10, 0.56, 0.64, 0.44)
+const AIM_CHAIN_GLOW_COLOR := Color(0.30, 1.0, 0.92, 0.22)
+const AIM_CHAIN_ENDPOINT_MARKER_RADIUS := 3.8
 const AIM_TREASURE_PERCEPTION_RADIUS := 54.0
 const AIM_TREASURE_COVER_CANDIDATE_QUERY_RADIUS := 120.0
 const AIM_TREASURE_OCCLUSION_DISTANCE_PADDING := 4.0
@@ -67,6 +79,9 @@ class AimPrediction:
 	var target_prediction_steps: int = 0
 	var target_first_stop_reason: String = "inactive"
 	var target_path_length: float = 0.0
+	var target_first_hit_ball: Ball = null
+	var target_first_hit_position := Vector2.ZERO
+	var target_incoming_velocity_at_stop := Vector2.ZERO
 	var path_points: Array[Vector2] = []
 	var rail_position := Vector2.ZERO
 	var rail_normal := Vector2.ZERO
@@ -95,6 +110,19 @@ class AimTargetPath:
 	var steps: int = 0
 	var first_stop_reason: String = "inactive"
 	var path_length: float = 0.0
+	var first_hit_ball: Ball = null
+	var first_hit_position := Vector2.ZERO
+	var incoming_velocity_at_stop := Vector2.ZERO
+
+class AimChainLink:
+	var ball: Ball = null
+	var path_points: Array[Vector2] = []
+	var ends_in_pocket := false
+	var first_stop_reason := "inactive"
+	var path_length := 0.0
+	var next_ball: Ball = null
+	var incoming_velocity_at_stop := Vector2.ZERO
+	var predicted_next_velocity := Vector2.ZERO
 
 class BallMotionState:
 	var position := Vector2.ZERO
@@ -109,6 +137,8 @@ var preview_origin := Vector2.ZERO
 var preview_drag_vector := Vector2.ZERO
 var preview_power_ratio := 0.0
 var current_prediction: AimPrediction
+var active_effect_snapshot: Dictionary = {}
+var long_sight_chain_links: Array[AimChainLink] = []
 var bank_debug_markers: Array[BankDebugMarker] = []
 var last_predicted_aim_path: Array[Vector2] = []
 var last_predicted_rail_position := Vector2.ZERO
@@ -169,10 +199,19 @@ func setup(table_ref) -> void:
 	table = table_ref
 
 
-func update_preview(active: bool, origin: Vector2, drag_vector: Vector2, shot_power: float, power_ratio: float) -> void:
+func update_preview(
+	active: bool,
+	origin: Vector2,
+	drag_vector: Vector2,
+	shot_power: float,
+	power_ratio: float,
+	effect_snapshot: Dictionary = {}
+) -> void:
+	active_effect_snapshot = effect_snapshot.duplicate(true)
 	if not active:
 		prediction_ms = 0.0
 		_aim_ball_spatial_grid.clear()
+		long_sight_chain_links.clear()
 		aim_spatial_cells = 0
 		aim_spatial_balls = 0
 		aim_spatial_treasure_balls = 0
@@ -196,6 +235,7 @@ func update_preview(active: bool, origin: Vector2, drag_vector: Vector2, shot_po
 	var aim_start_usec: int = Time.get_ticks_usec()
 	_rebuild_aim_ball_spatial_grid()
 	current_prediction = _get_first_aim_collision(origin, drag_vector * shot_power)
+	_rebuild_long_sight_chain(current_prediction)
 	_rebuild_treasure_perception_snapshot(current_prediction)
 	_rebuild_embezzler_perception_snapshot(current_prediction)
 	prediction_ms = _elapsed_ms_since(aim_start_usec)
@@ -346,6 +386,8 @@ func get_debug_snapshot() -> Dictionary:
 		"treasure_perception_epoch": treasure_perception_epoch,
 		"treasure_perception_rebuilds": treasure_perception_rebuilds_this_frame,
 		"treasure_perception_checks": treasure_perception_checks_this_frame,
+		"long_sight_chain_depth": _get_active_aim_chain_depth(),
+		"long_sight_chain_links": long_sight_chain_links.size(),
 		"draw_ms": draw_ms_last_draw,
 		"draw_segments": draw_segments_last_draw,
 		"draw_calls": draw_calls_last_draw,
@@ -476,6 +518,7 @@ func _draw_prediction(prediction: AimPrediction) -> void:
 		return
 
 	_draw_target_prediction_line(prediction)
+	_draw_long_sight_chain()
 
 
 func _draw_basic_guide_line() -> void:
@@ -606,6 +649,45 @@ func _draw_target_endpoint_marker(position: Vector2) -> void:
 	_draw_calls_in_progress += 2
 	draw_circle(position, AIM_TARGET_ENDPOINT_MARKER_RADIUS * 1.85, glow_color)
 	draw_circle(position, AIM_TARGET_ENDPOINT_MARKER_RADIUS, core_color)
+
+
+func _draw_long_sight_chain() -> void:
+	if long_sight_chain_links.is_empty():
+		return
+
+	for link_index in range(long_sight_chain_links.size()):
+		var link: AimChainLink = long_sight_chain_links[link_index]
+		if link == null or link.path_points.size() < 2:
+			continue
+		var alpha_multiplier: float = maxf(0.28, 0.76 - float(link_index) * 0.11)
+		var segment_count: int = link.path_points.size() - 1
+		for segment_index in range(segment_count):
+			_draw_guidance_line_segment(
+				link.path_points[segment_index],
+				link.path_points[segment_index + 1],
+				AIM_CHAIN_CORE_COLOR,
+				AIM_CHAIN_GLOW_COLOR,
+				_get_path_fade_ratio(segment_index, segment_count),
+				alpha_multiplier,
+				AIM_CHAIN_LINE_WIDTH,
+				AIM_CHAIN_LINE_GLOW_WIDTH,
+				AIM_CHAIN_LINE_GLOW_ALPHA
+			)
+
+		_draw_long_sight_endpoint_marker(
+			link.path_points[link.path_points.size() - 1],
+			link.ends_in_pocket,
+			alpha_multiplier
+		)
+
+
+func _draw_long_sight_endpoint_marker(position: Vector2, ends_in_pocket: bool, alpha_multiplier: float) -> void:
+	var marker_color := AIM_TARGET_POCKET_MARKER_COLOR if ends_in_pocket else AIM_CHAIN_CORE_COLOR
+	var glow_color := Color(AIM_CHAIN_GLOW_COLOR.r, AIM_CHAIN_GLOW_COLOR.g, AIM_CHAIN_GLOW_COLOR.b, 0.11 * alpha_multiplier)
+	var core_color := Color(marker_color.r, marker_color.g, marker_color.b, marker_color.a * alpha_multiplier)
+	_draw_calls_in_progress += 2
+	draw_circle(position, AIM_CHAIN_ENDPOINT_MARKER_RADIUS * 1.9, glow_color)
+	draw_circle(position, AIM_CHAIN_ENDPOINT_MARKER_RADIUS, core_color)
 
 
 func _get_prediction_end_direction(prediction: AimPrediction) -> Vector2:
@@ -770,6 +852,104 @@ func _get_first_aim_collision(origin: Vector2, initial_velocity: Vector2) -> Aim
 	return prediction
 
 
+func _rebuild_long_sight_chain(prediction: AimPrediction) -> void:
+	long_sight_chain_links.clear()
+	var chain_depth: int = _get_active_aim_chain_depth()
+	if chain_depth <= 1 or prediction == null or prediction.collision_type != "ball":
+		return
+	if not is_instance_valid(prediction.ball) or prediction.target_first_stop_reason != "ball":
+		return
+
+	var previous_moving_ball: Ball = prediction.ball
+	var target_path := _make_target_path_from_prediction(prediction)
+	var remaining_links: int = chain_depth - 1
+	while remaining_links > 0:
+		var link: AimChainLink = _make_long_sight_chain_link(previous_moving_ball, target_path)
+		if link == null:
+			return
+
+		long_sight_chain_links.append(link)
+		remaining_links -= 1
+		if link.first_stop_reason != "ball" or not is_instance_valid(link.next_ball):
+			return
+
+		previous_moving_ball = link.ball
+		target_path = _make_target_path_from_link(link)
+
+
+func _make_target_path_from_prediction(prediction: AimPrediction) -> AimTargetPath:
+	var target_path: AimTargetPath = AimTargetPath.new()
+	target_path.points = prediction.target_path_points.duplicate()
+	target_path.ends_in_pocket = prediction.target_ends_in_pocket
+	target_path.steps = prediction.target_prediction_steps
+	target_path.first_stop_reason = prediction.target_first_stop_reason
+	target_path.path_length = prediction.target_path_length
+	target_path.first_hit_ball = prediction.target_first_hit_ball
+	target_path.first_hit_position = prediction.target_first_hit_position
+	target_path.incoming_velocity_at_stop = prediction.target_incoming_velocity_at_stop
+	return target_path
+
+
+func _make_target_path_from_link(link: AimChainLink) -> AimTargetPath:
+	var target_path: AimTargetPath = AimTargetPath.new()
+	target_path.points = link.path_points.duplicate()
+	target_path.ends_in_pocket = link.ends_in_pocket
+	target_path.first_stop_reason = link.first_stop_reason
+	target_path.path_length = link.path_length
+	target_path.first_hit_ball = link.next_ball
+	if link.path_points.size() > 0:
+		target_path.first_hit_position = link.path_points[link.path_points.size() - 1]
+	target_path.incoming_velocity_at_stop = link.incoming_velocity_at_stop
+	return target_path
+
+
+func _make_long_sight_chain_link(previous_moving_ball: Ball, previous_path: AimTargetPath) -> AimChainLink:
+	if previous_path == null or not is_instance_valid(previous_path.first_hit_ball):
+		return null
+	if not is_instance_valid(previous_moving_ball):
+		return null
+
+	var next_ball: Ball = previous_path.first_hit_ball
+	var hit_position: Vector2 = previous_path.first_hit_position
+	var incoming_velocity: Vector2 = previous_path.incoming_velocity_at_stop
+	if incoming_velocity.length_squared() <= 0.001:
+		return null
+
+	var target_direction: Vector2 = next_ball.global_position - hit_position
+	if target_direction.length_squared() > 0.001:
+		target_direction = target_direction.normalized()
+	else:
+		target_direction = incoming_velocity.normalized()
+
+	var predicted_next_velocity: Vector2 = _get_predicted_target_velocity(incoming_velocity, next_ball, target_direction)
+	if predicted_next_velocity.length_squared() <= 0.001:
+		return null
+
+	var next_path: AimTargetPath = _get_predicted_target_path(next_ball, predicted_next_velocity, previous_moving_ball)
+	if next_path.points.size() < 2:
+		return null
+
+	var link: AimChainLink = AimChainLink.new()
+	link.ball = next_ball
+	link.path_points = next_path.points.duplicate()
+	link.ends_in_pocket = next_path.ends_in_pocket
+	link.first_stop_reason = next_path.first_stop_reason
+	link.path_length = next_path.path_length
+	link.next_ball = next_path.first_hit_ball
+	link.incoming_velocity_at_stop = next_path.incoming_velocity_at_stop
+	link.predicted_next_velocity = predicted_next_velocity
+	return link
+
+
+func _get_active_aim_chain_depth() -> int:
+	var depth := clampi(int(active_effect_snapshot.get(AIM_EFFECT_CHAIN_DEPTH, 0)), 0, AIM_LONG_SIGHT_MAX_CHAIN_DEPTH)
+	if depth > 0:
+		return depth
+	if bool(active_effect_snapshot.get(AIM_LONG_SIGHT_FALLBACK_ENABLED, false)):
+		return AIM_LONG_SIGHT_FALLBACK_CHAIN_DEPTH
+	return 0
+
+
 func _rebuild_treasure_perception_snapshot(prediction: AimPrediction) -> void:
 	_treasure_perceived_ball_ids.clear()
 	_treasure_seen_entries.clear()
@@ -866,8 +1046,13 @@ func _get_first_aim_ball_hit_on_segment(segment_start: Vector2, segment_end: Vec
 	return _get_first_ball_hit_on_segment(segment_start, segment_end, table.cue_ball.radius, table.cue_ball, null)
 
 
-func _get_first_target_ball_hit_on_segment(segment_start: Vector2, segment_end: Vector2, target_ball: Ball) -> AimBallHit:
-	return _get_first_ball_hit_on_segment(segment_start, segment_end, target_ball.radius, table.cue_ball, target_ball)
+func _get_first_target_ball_hit_on_segment(
+	segment_start: Vector2,
+	segment_end: Vector2,
+	target_ball: Ball,
+	extra_ignored_ball: Ball = null
+) -> AimBallHit:
+	return _get_first_ball_hit_on_segment(segment_start, segment_end, target_ball.radius, table.cue_ball, target_ball, extra_ignored_ball)
 
 
 func _get_first_target_pocket_hit_on_segment(segment_start: Vector2, segment_end: Vector2, target_ball: Ball) -> AimPocketHit:
@@ -1318,7 +1503,8 @@ func _get_first_ball_hit_on_segment(
 	segment_end: Vector2,
 	moving_ball_radius: float,
 	ignored_ball_a: Ball,
-	ignored_ball_b: Ball
+	ignored_ball_b: Ball,
+	ignored_ball_c: Ball = null
 ) -> AimBallHit:
 	var nearest_hit: AimBallHit = AimBallHit.new()
 	var segment: Vector2 = segment_end - segment_start
@@ -1331,6 +1517,7 @@ func _get_first_ball_hit_on_segment(
 			target_ball == null
 			or target_ball == ignored_ball_a
 			or target_ball == ignored_ball_b
+			or target_ball == ignored_ball_c
 			or not target_ball.is_gameplay_active()
 		):
 			continue
@@ -1422,6 +1609,9 @@ func _make_ball_prediction_from_position(
 	prediction.target_prediction_steps = target_prediction.steps
 	prediction.target_first_stop_reason = target_prediction.first_stop_reason
 	prediction.target_path_length = target_prediction.path_length
+	prediction.target_first_hit_ball = target_prediction.first_hit_ball
+	prediction.target_first_hit_position = target_prediction.first_hit_position
+	prediction.target_incoming_velocity_at_stop = target_prediction.incoming_velocity_at_stop
 	prediction.path_points.append(cue_center_at_impact)
 	return prediction
 
@@ -1437,10 +1627,40 @@ func _get_predicted_target_velocity(incoming_velocity: Vector2, target_ball: Bal
 
 	var impulse_strength: float = (1.0 + table.BALL_COLLISION_RESTITUTION) * speed_along_normal * 0.5
 	impulse_strength *= table.BALL_VELOCITY_TRANSFER
+	impulse_strength *= _get_cue_ball_wake_preview_impact_multiplier(target_ball)
 	return target_ball.velocity + target_direction * impulse_strength
 
 
-func _get_predicted_target_path(target_ball: Ball, starting_velocity: Vector2) -> AimTargetPath:
+func _get_cue_ball_wake_preview_impact_multiplier(target_ball: Ball) -> float:
+	if not bool(active_effect_snapshot.get(AIM_EFFECT_CUE_BALL_CANNON_WAKE_ENABLED, false)):
+		return 1.0
+	if not _is_cue_ball_wake_preview_target(target_ball):
+		return 1.0
+	return maxf(float(active_effect_snapshot.get(AIM_EFFECT_CUE_BALL_CANNON_WAKE_IMPACT_MULTIPLIER, 1.0)), 1.0)
+
+
+func _is_cue_ball_wake_preview_target(ball: Ball) -> bool:
+	if ball == null:
+		return false
+	if table != null and (ball == table.cue_ball or ball == table.eight_ball):
+		return false
+	if ball.ball_type != Ball.BallType.OBJECT:
+		return false
+	return (
+		not ball.is_wayfinder
+		and not ball.is_powder_keg
+		and not ball.is_anchor_ball
+		and not ball.is_cannon_ball
+		and not ball.is_treasure_ball
+		and not ball.is_embezzler_ball
+	)
+
+
+func _get_predicted_target_path(
+	target_ball: Ball,
+	starting_velocity: Vector2,
+	extra_ignored_ball: Ball = null
+) -> AimTargetPath:
 	var target_prediction: AimTargetPath = AimTargetPath.new()
 	target_prediction.points.append(target_ball.global_position)
 
@@ -1467,7 +1687,7 @@ func _get_predicted_target_path(target_ball: Ball, starting_velocity: Vector2) -
 			movement_delta = movement_delta.limit_length(remaining_distance)
 		var movement_end: Vector2 = previous_position + movement_delta
 		var pocket_hit: AimPocketHit = _get_first_target_pocket_hit_on_segment(previous_position, movement_end, target_ball)
-		var ball_hit: AimBallHit = _get_first_target_ball_hit_on_segment(previous_position, movement_end, target_ball)
+		var ball_hit: AimBallHit = _get_first_target_ball_hit_on_segment(previous_position, movement_end, target_ball, extra_ignored_ball)
 
 		var step_result: BallMotionState = _simulate_aim_target_step(target_ball, movement_end, simulated_velocity, step_delta)
 		var stop_type := ""
@@ -1492,6 +1712,10 @@ func _get_predicted_target_path(target_ball: Ball, starting_velocity: Vector2) -
 			_append_target_path_point(target_prediction.points, stop_position, true)
 			target_prediction.ends_in_pocket = stop_type == "pocket"
 			target_prediction.first_stop_reason = stop_type
+			if stop_type == "ball":
+				target_prediction.first_hit_ball = ball_hit.ball
+				target_prediction.first_hit_position = ball_hit.position
+				target_prediction.incoming_velocity_at_stop = simulated_velocity
 			target_prediction.path_length = travel_distance + previous_position.distance_to(stop_position)
 			return target_prediction
 

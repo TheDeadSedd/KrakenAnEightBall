@@ -1,12 +1,13 @@
 extends Node
 class_name TableEventSystem
 
-signal meter_changed(progress: int, threshold: int, percent: float, pending: bool, ready: bool)
+signal meter_changed(progress: int, threshold: int, percent: float, pending: bool, ready: bool, charges: int, segment_index: int)
 signal progress_advanced(amount: int, shot_total: int)
 signal pending_event_changed(pending: bool, ready: bool)
 signal offers_changed(offers: Array)
+signal boon_offers_changed(offers: Array)
 signal status_changed(text: String)
-signal event_purchased(event_id: String, cost: int)
+signal event_purchased(event_id: String, charge_cost: int)
 signal event_purchase_blocked(reason: String)
 signal offer_rerolled(offer_index: int, previous_event_id: String, new_event_id: String, oath_id: String)
 signal intervention_executed(event_id: String, debug_trigger: bool)
@@ -24,6 +25,8 @@ const EVENT_WAYFINDERS_FAVOR := "wayfinders_favor"
 const EVENT_CANNON_WARNING := "cannon_warning"
 const EVENT_BROADSIDE_ATTACK := "broadside_attack"
 const EVENT_WAYFINDER_CURRENT := "wayfinder_current"
+const OFFER_TYPE_INTERVENTION := "intervention"
+const OFFER_TYPE_BOON := "boon"
 const OFFER_SLOT_COUNT := 3
 const OFFER_RNG_SEED := 1742026
 const CARGO_STOWAWAY_RNG_SEED := 580813
@@ -72,6 +75,9 @@ const EVENT_EARNED_MESSAGES := [
 	"Kraken Intervention is ready.",
 	"The Quartermaster smells opportunity.",
 ]
+const ADDITIONAL_CHARGE_EARNED_MESSAGE := "The Kraken marks another bargain."
+const SEGMENT_GOAL_INITIAL_INCREASE := 20
+const SEGMENT_GOAL_INCREASE_STEP := 5
 const EVENT_POOL := [
 	EVENT_LOOSE_CARGO,
 	EVENT_CHEAP_CARGO,
@@ -81,89 +87,109 @@ const EVENT_POOL := [
 	EVENT_BROADSIDE_ATTACK,
 	EVENT_WAYFINDER_CURRENT,
 ]
+const BOON_OFFER_POOL := [
+	KrakenBoonSystem.BOON_LONG_SIGHT,
+	KrakenBoonSystem.BOON_KRAKENS_PATIENCE,
+	KrakenBoonSystem.BOON_DEEP_LEDGER,
+	KrakenBoonSystem.BOON_IRON_WAKE,
+]
 const EVENT_DATA := {
 	"loose_cargo": {
 		"id": EVENT_LOOSE_CARGO,
+		"type": OFFER_TYPE_INTERVENTION,
 		"name": "Loose Cargo",
 		"description": "Drop 10 regular object balls onto the table.",
 		"flavor": "A cargo net snaps. The table gets crowded.",
 		"icon_key": "plain_object_ball",
 		"rarity": "Common",
 		"weight": 8,
+		"charge_cost": 2,
+		"doubloon_cost": 0,
 	},
 	"cheap_cargo": {
 		"id": EVENT_CHEAP_CARGO,
+		"type": OFFER_TYPE_INTERVENTION,
 		"name": "Cheap Cargo",
 		"description": "Drop 5 regular object balls onto the table.",
 		"flavor": "A smaller crate splits open.",
 		"icon_key": "plain_object_ball",
 		"rarity": "Common",
 		"weight": 10,
+		"charge_cost": 1,
+		"doubloon_cost": 0,
 	},
 	"powder_cache": {
 		"id": EVENT_POWDER_CACHE,
+		"type": OFFER_TYPE_INTERVENTION,
 		"name": "Powder Cache",
 		"description": "Drop 3 Powder Kegs onto the table.",
 		"flavor": "Someone stored the fireworks badly.",
 		"icon_key": "powder_keg_ball",
 		"rarity": "Uncommon",
 		"weight": 4,
+		"charge_cost": 2,
+		"doubloon_cost": 0,
 	},
 	"wayfinders_favor": {
 		"id": EVENT_WAYFINDERS_FAVOR,
+		"type": OFFER_TYPE_INTERVENTION,
 		"name": "Wayfinder's Favor",
 		"description": "Drop 2 Wayfinder Balls onto the table.",
 		"flavor": "The compass stones start whispering.",
 		"icon_key": "wayfinder_ball",
 		"rarity": "Uncommon",
 		"weight": 5,
+		"charge_cost": 2,
+		"doubloon_cost": 0,
 	},
 	"cannon_warning": {
 		"id": EVENT_CANNON_WARNING,
+		"type": OFFER_TYPE_INTERVENTION,
 		"name": "Cannon Warning",
 		"description": "Drop one heavy Cannon Ball onto the table.",
 		"flavor": "A future problem rolls aboard.",
 		"icon_key": "cannon_ball",
 		"rarity": "Rare",
 		"weight": 2,
+		"charge_cost": 3,
+		"doubloon_cost": 0,
 	},
 	"broadside_attack": {
 		"id": EVENT_BROADSIDE_ATTACK,
+		"type": OFFER_TYPE_INTERVENTION,
 		"name": "Broadside Attack",
 		"description": "Powder Kegs fall in lanes. Cannon Balls follow.",
 		"flavor": "A gun deck answers the deep.",
 		"icon_key": "cannon_ball",
 		"rarity": "Rare",
 		"weight": 1,
+		"charge_cost": 5,
+		"doubloon_cost": 0,
 	},
 	"wayfinder_current": {
 		"id": EVENT_WAYFINDER_CURRENT,
+		"type": OFFER_TYPE_INTERVENTION,
 		"name": "Wayfinder Current",
 		"description": "Two Wayfinders drop. Nearby balls are swept into guided motion.",
 		"flavor": "Compass stones drag the tide sideways.",
 		"icon_key": "wayfinder_ball",
 		"rarity": "Rare",
 		"weight": 3,
+		"charge_cost": 4,
+		"doubloon_cost": 0,
 	},
 }
 
 @export var enabled := true
 @export var disable_automatic_ball_drops := true
 @export_range(1, 9999, 1) var shot_doubloon_threshold := 30
-@export_range(0, 9999, 1) var cheap_cargo_cost := 20
 @export_range(1, 50, 1) var cheap_cargo_ball_count := 5
 @export_range(0.0, 1.0, 0.01) var cheap_cargo_treasure_chance := 0.05
-@export_range(0, 9999, 1) var loose_cargo_cost := 40
 @export_range(1, 50, 1) var loose_cargo_ball_count := 10
 @export_range(0.0, 1.0, 0.001) var loose_cargo_contraband_chance := 0.01
 @export_range(0.0, 1.0, 0.01) var loose_cargo_treasure_chance := 0.10
-@export_range(0, 9999, 1) var wayfinders_favor_cost := 55
 @export_range(1, 8, 1) var wayfinders_favor_ball_count := 2
-@export_range(0, 9999, 1) var powder_cache_cost := 75
 @export_range(1, 12, 1) var powder_cache_ball_count := 3
-@export_range(0, 9999, 1) var cannon_warning_cost := 90
-@export_range(0, 9999, 1) var broadside_attack_cost := 140
-@export_range(0, 9999, 1) var wayfinder_current_cost := 120
 @export_range(3, 5, 1) var broadside_powder_keg_count := 4
 @export_range(2, 4, 1) var broadside_cannon_ball_count := 3
 @export_range(0.1, 1.0, 0.05) var broadside_warning_delay := 0.35
@@ -173,10 +199,14 @@ const EVENT_DATA := {
 var table: BilliardsTable
 var shot_active := false
 var current_shot_doubloons := 0
+var current_segment_progress := 0
+var current_segment_index := 0
+var pending_intervention_charges := 0
 var pending_event_available := false
 var pending_event_ready := false
 var event_menu_open := false
 var active_offer_ids: Array = []
+var active_boon_offer_ids: Array = []
 var offer_rng := RandomNumberGenerator.new()
 var cargo_stowaway_rng := RandomNumberGenerator.new()
 
@@ -190,8 +220,11 @@ var denied_offer_oath_rerolls := 0
 var offers_generated := 0
 var ignored_awards_while_pending := 0
 var last_award_amount := 0
+var shot_intervention_charges_earned := 0
+var shot_additional_charge_message_sent := false
 var last_purchase_event_id := ""
-var last_purchase_cost := 0
+var last_purchase_charge_cost := 0
+var last_purchase_doubloon_cost := 0
 var last_blocker_reason := ""
 var event_earned_message_index := 0
 var broadside_delay_remaining := 0.0
@@ -218,6 +251,9 @@ func setup(table_ref: BilliardsTable) -> void:
 	offer_rng.seed = OFFER_RNG_SEED
 	cargo_stowaway_rng.seed = CARGO_STOWAWAY_RNG_SEED
 	active_offer_ids.clear()
+	active_boon_offer_ids.clear()
+	if table != null and table.kraken_boon_system != null and not table.kraken_boon_system.boons_changed.is_connected(_on_kraken_boons_changed):
+		table.kraken_boon_system.boons_changed.connect(_on_kraken_boons_changed)
 	set_process(false)
 	_emit_state()
 
@@ -246,15 +282,28 @@ func should_disable_automatic_ball_drops() -> bool:
 
 func start_shot() -> void:
 	shot_active = true
+	current_shot_doubloons = 0
+	if _should_carry_partial_intervention_progress():
+		_align_current_segment_with_pending_charges()
+	else:
+		_reset_current_segment_progress()
+	shot_intervention_charges_earned = 0
+	shot_additional_charge_message_sent = false
 	pending_event_ready = false
 	event_menu_open = false
-	if not pending_event_available:
-		current_shot_doubloons = 0
+	_sync_pending_event_flags()
 	_emit_state()
 
 
 func finish_shot() -> void:
 	shot_active = false
+	current_shot_doubloons = 0
+	if _should_carry_partial_intervention_progress():
+		_align_current_segment_with_pending_charges()
+	else:
+		_reset_current_segment_progress()
+	shot_intervention_charges_earned = 0
+	shot_additional_charge_message_sent = false
 	_emit_state()
 
 
@@ -274,21 +323,27 @@ func handle_doubloons_awarded(amount: int, _new_total: int = 0) -> void:
 	if not enabled or amount <= 0 or not shot_active:
 		return
 
-	if pending_event_available:
-		ignored_awards_while_pending += amount
-		return
-
 	last_award_amount = amount
-	current_shot_doubloons += amount
 	total_tracked_doubloons += amount
-	progress_advanced.emit(amount, current_shot_doubloons)
-	if current_shot_doubloons >= shot_doubloon_threshold:
-		current_shot_doubloons = shot_doubloon_threshold
-		pending_event_available = true
-		pending_event_ready = false
-		pending_events_earned += 1
-		_generate_event_offers()
-		status_changed.emit(_get_next_event_earned_message())
+	current_shot_doubloons += amount
+	var meter_amount: int = _get_intervention_meter_progress_amount(amount)
+	progress_advanced.emit(meter_amount, current_shot_doubloons)
+
+	var remaining: int = meter_amount
+	while remaining > 0:
+		var segment_goal := _get_segment_goal(current_segment_index)
+		var needed := segment_goal - current_segment_progress
+		if needed <= 0:
+			_complete_intervention_segment()
+			continue
+
+		if remaining < needed:
+			current_segment_progress += remaining
+			remaining = 0
+		else:
+			current_segment_progress = segment_goal
+			remaining -= needed
+			_complete_intervention_segment()
 	_emit_state()
 
 
@@ -337,38 +392,59 @@ func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
 func request_purchase_offer(offer_index: int) -> bool:
 	var blocker: String = _get_offer_purchase_blocker(offer_index)
 	if not blocker.is_empty():
-		denied_purchases += 1
-		last_blocker_reason = blocker
-		status_changed.emit(blocker)
-		event_purchase_blocked.emit(blocker)
-		_emit_state()
-		return false
+		return _deny_purchase(blocker)
 
+	_ensure_offer_slots()
 	var event_id: String = str(active_offer_ids[offer_index])
-	var cost: int = _get_event_cost(event_id)
-	if not table.score_system.try_spend_doubloons(cost):
-		denied_purchases += 1
-		last_blocker_reason = "Not enough Doubloons"
-		status_changed.emit(last_blocker_reason)
-		event_purchase_blocked.emit(last_blocker_reason)
-		_emit_state()
-		return false
+	return _purchase_event_id(event_id)
 
-	var event_status_messages: Array = _execute_event(event_id)
+
+func request_purchase_boon_offer(boon_offer_index: int) -> bool:
+	var blocker: String = _get_boon_offer_purchase_blocker(boon_offer_index)
+	if not blocker.is_empty():
+		return _deny_purchase(blocker)
+
+	var event_id: String = str(active_boon_offer_ids[boon_offer_index])
+	return _purchase_event_id(event_id)
+
+
+func _purchase_event_id(event_id: String) -> bool:
+	var offer_type: String = _get_offer_type(event_id)
+	var charge_cost: int = _get_event_charge_cost(event_id)
+	var doubloon_cost: int = _get_event_doubloon_cost(event_id)
+	if doubloon_cost > 0 and not table.score_system.try_spend_doubloons(doubloon_cost):
+		return _deny_purchase("Not enough Doubloons")
+
+	var event_status_messages: Array = []
+	if offer_type == OFFER_TYPE_BOON:
+		event_status_messages = _activate_boon_offer(event_id)
+	else:
+		event_status_messages = _execute_event(event_id)
 	purchased_events += 1
 	last_purchase_event_id = event_id
-	last_purchase_cost = cost
+	last_purchase_charge_cost = charge_cost
+	last_purchase_doubloon_cost = doubloon_cost
 	last_blocker_reason = ""
-	_clear_pending_event()
-	status_changed.emit(_get_event_purchase_message(event_id, cost))
+	_consume_pending_intervention_charges(charge_cost)
+	status_changed.emit(_get_event_purchase_message(event_id, charge_cost, doubloon_cost))
 	for status_message_value in event_status_messages:
 		var status_message := str(status_message_value)
 		if not status_message.is_empty():
 			status_changed.emit(status_message)
-	event_purchased.emit(event_id, cost)
-	intervention_executed.emit(event_id, false)
+	event_purchased.emit(event_id, charge_cost)
+	if offer_type == OFFER_TYPE_INTERVENTION:
+		intervention_executed.emit(event_id, false)
 	_emit_state()
 	return true
+
+
+func _deny_purchase(blocker: String) -> bool:
+	denied_purchases += 1
+	last_blocker_reason = blocker
+	status_changed.emit(blocker)
+	event_purchase_blocked.emit(blocker)
+	_emit_state()
+	return false
 
 
 func request_reroll_offer_with_oath(offer_index: int, oath_id: String = OathSystem.OATH_OF_URGENCY) -> bool:
@@ -431,6 +507,14 @@ func get_event_offers_snapshot() -> Array:
 	return offers
 
 
+func get_boon_offers_snapshot() -> Array:
+	var offers: Array = []
+	for boon_offer_index in range(active_boon_offer_ids.size()):
+		var event_id: String = str(active_boon_offer_ids[boon_offer_index])
+		offers.append(_make_boon_offer_snapshot(event_id, boon_offer_index))
+	return offers
+
+
 func get_event_display_name(event_id: String) -> String:
 	return _get_event_name(event_id)
 
@@ -473,12 +557,20 @@ func get_debug_snapshot() -> Dictionary:
 		"automatic_ball_drops_gated": should_disable_automatic_ball_drops(),
 		"shot_active": shot_active,
 		"shot_progress": _get_meter_progress(),
-		"shot_threshold": shot_doubloon_threshold,
+		"shot_threshold": _get_current_segment_goal(),
+		"base_shot_threshold": shot_doubloon_threshold,
 		"progress_percent": _get_progress_percent(),
+		"pending_intervention_charges": pending_intervention_charges,
+		"current_segment_progress": current_segment_progress,
+		"current_segment_goal": _get_current_segment_goal(),
+		"current_segment_index": current_segment_index,
+		"current_shot_doubloons": current_shot_doubloons,
+		"shot_intervention_charges_earned": shot_intervention_charges_earned,
 		"pending_event_available": pending_event_available,
 		"pending_event_ready": pending_event_ready,
 		"event_menu_open": event_menu_open,
 		"active_offer_ids": active_offer_ids.duplicate(),
+		"active_boon_offer_ids": active_boon_offer_ids.duplicate(),
 		"last_award_amount": last_award_amount,
 		"total_tracked_doubloons": total_tracked_doubloons,
 		"pending_events_earned": pending_events_earned,
@@ -490,12 +582,18 @@ func get_debug_snapshot() -> Dictionary:
 		"offers_generated": offers_generated,
 		"ignored_awards_while_pending": ignored_awards_while_pending,
 		"last_purchase_event_id": last_purchase_event_id,
-		"last_purchase_cost": last_purchase_cost,
+		"last_purchase_cost": last_purchase_charge_cost,
+		"last_purchase_charge_cost": last_purchase_charge_cost,
+		"last_purchase_doubloon_cost": last_purchase_doubloon_cost,
 		"last_blocker_reason": last_blocker_reason,
-		"cheap_cargo_cost": cheap_cargo_cost,
+		"cheap_cargo_cost": _get_event_charge_cost(EVENT_CHEAP_CARGO),
+		"cheap_cargo_charge_cost": _get_event_charge_cost(EVENT_CHEAP_CARGO),
+		"cheap_cargo_doubloon_cost": _get_event_doubloon_cost(EVENT_CHEAP_CARGO),
 		"cheap_cargo_ball_count": cheap_cargo_ball_count,
 		"cheap_cargo_treasure_chance": cheap_cargo_treasure_chance,
-		"loose_cargo_cost": loose_cargo_cost,
+		"loose_cargo_cost": _get_event_charge_cost(EVENT_LOOSE_CARGO),
+		"loose_cargo_charge_cost": _get_event_charge_cost(EVENT_LOOSE_CARGO),
+		"loose_cargo_doubloon_cost": _get_event_doubloon_cost(EVENT_LOOSE_CARGO),
 		"loose_cargo_ball_count": loose_cargo_ball_count,
 		"loose_cargo_contraband_chance": loose_cargo_contraband_chance,
 		"loose_cargo_contraband_base_chance": float(contraband_chance_snapshot.get("base_chance", 0.0)),
@@ -514,15 +612,25 @@ func get_debug_snapshot() -> Dictionary:
 		"last_loose_cargo_contraband_replacement_kind": last_loose_cargo_contraband_replacement_kind,
 		"debug_force_loose_cargo_contraband": debug_force_loose_cargo_contraband,
 		"debug_loose_cargo_contraband_kind": debug_loose_cargo_contraband_kind,
-		"wayfinders_favor_cost": wayfinders_favor_cost,
+		"wayfinders_favor_cost": _get_event_charge_cost(EVENT_WAYFINDERS_FAVOR),
+		"wayfinders_favor_charge_cost": _get_event_charge_cost(EVENT_WAYFINDERS_FAVOR),
+		"wayfinders_favor_doubloon_cost": _get_event_doubloon_cost(EVENT_WAYFINDERS_FAVOR),
 		"wayfinders_favor_ball_count": wayfinders_favor_ball_count,
-		"powder_cache_cost": powder_cache_cost,
+		"powder_cache_cost": _get_event_charge_cost(EVENT_POWDER_CACHE),
+		"powder_cache_charge_cost": _get_event_charge_cost(EVENT_POWDER_CACHE),
+		"powder_cache_doubloon_cost": _get_event_doubloon_cost(EVENT_POWDER_CACHE),
 		"powder_cache_ball_count": powder_cache_ball_count,
-		"cannon_warning_cost": cannon_warning_cost,
+		"cannon_warning_cost": _get_event_charge_cost(EVENT_CANNON_WARNING),
+		"cannon_warning_charge_cost": _get_event_charge_cost(EVENT_CANNON_WARNING),
+		"cannon_warning_doubloon_cost": _get_event_doubloon_cost(EVENT_CANNON_WARNING),
 		"cannon_warning_ball_count": CANNON_WARNING_BALL_COUNT,
-		"wayfinder_current_cost": wayfinder_current_cost,
+		"wayfinder_current_cost": _get_event_charge_cost(EVENT_WAYFINDER_CURRENT),
+		"wayfinder_current_charge_cost": _get_event_charge_cost(EVENT_WAYFINDER_CURRENT),
+		"wayfinder_current_doubloon_cost": _get_event_doubloon_cost(EVENT_WAYFINDER_CURRENT),
 		"wayfinder_current_ball_count": WAYFINDER_CURRENT_BALL_COUNT,
-		"broadside_attack_cost": broadside_attack_cost,
+		"broadside_attack_cost": _get_event_charge_cost(EVENT_BROADSIDE_ATTACK),
+		"broadside_attack_charge_cost": _get_event_charge_cost(EVENT_BROADSIDE_ATTACK),
+		"broadside_attack_doubloon_cost": _get_event_doubloon_cost(EVENT_BROADSIDE_ATTACK),
 		"broadside_powder_keg_count": broadside_powder_keg_count,
 		"broadside_cannon_ball_count": broadside_cannon_ball_count,
 		"broadside_warning_delay": broadside_warning_delay,
@@ -532,6 +640,10 @@ func get_debug_snapshot() -> Dictionary:
 	}
 
 
+func get_intervention_segment_goal(segment_index: int) -> int:
+	return _get_segment_goal(segment_index)
+
+
 func _generate_event_offers() -> void:
 	active_offer_ids.clear()
 	var pool: Array = _get_weighted_unique_event_pool()
@@ -539,17 +651,57 @@ func _generate_event_offers() -> void:
 		active_offer_ids.append(str(pool.pop_front()))
 	while active_offer_ids.size() < OFFER_SLOT_COUNT:
 		active_offer_ids.append(EMPTY_OFFER_ID)
+	_ensure_affordable_offer_when_possible()
+	_generate_boon_offers()
 	offers_generated += 1
 	offers_changed.emit(get_event_offers_snapshot())
+	boon_offers_changed.emit(get_boon_offers_snapshot())
+
+
+func _complete_intervention_segment() -> void:
+	var was_pending := pending_intervention_charges > 0
+	pending_intervention_charges += 1
+	pending_events_earned += 1
+	shot_intervention_charges_earned += 1
+	_reset_current_segment_progress()
+	_sync_pending_event_flags()
+
+	if not _has_generated_offer_set():
+		_generate_event_offers()
+
+	if not was_pending:
+		status_changed.emit(_get_next_event_earned_message())
+	elif not shot_additional_charge_message_sent:
+		status_changed.emit(ADDITIONAL_CHARGE_EARNED_MESSAGE)
+		shot_additional_charge_message_sent = true
+
+
+func _consume_pending_intervention_charges(charge_cost: int) -> void:
+	pending_intervention_charges = maxi(pending_intervention_charges - maxi(charge_cost, 0), 0)
+	_reset_current_segment_progress()
+	event_menu_open = false
+	_sync_pending_event_flags()
+	if pending_intervention_charges > 0:
+		pending_event_ready = true
+		_generate_event_offers()
+		return
+
+	active_offer_ids.clear()
+	active_boon_offer_ids.clear()
+	offers_changed.emit(get_event_offers_snapshot())
+	boon_offers_changed.emit(get_boon_offers_snapshot())
 
 
 func _clear_pending_event() -> void:
+	pending_intervention_charges = 0
+	_reset_current_segment_progress()
 	pending_event_available = false
 	pending_event_ready = false
 	event_menu_open = false
-	current_shot_doubloons = 0
 	active_offer_ids.clear()
+	active_boon_offer_ids.clear()
 	offers_changed.emit(get_event_offers_snapshot())
+	boon_offers_changed.emit(get_boon_offers_snapshot())
 
 
 func _execute_event(event_id: String) -> Array:
@@ -584,6 +736,20 @@ func _execute_event(event_id: String) -> Array:
 		EVENT_WAYFINDER_CURRENT:
 			_execute_wayfinder_current()
 	return []
+
+
+func _activate_boon_offer(boon_id: String) -> Array:
+	var boon_system := _get_kraken_boon_system()
+	if boon_system == null:
+		return ["Kraken Boon system not ready."]
+	if not boon_system.activate_boon(boon_id):
+		var blocker := boon_system.get_boon_activation_blocker(boon_id)
+		return [blocker if not blocker.is_empty() else "Kraken Boon activation failed."]
+
+	var activation_message := boon_system.get_boon_activation_message(boon_id)
+	if activation_message.is_empty():
+		return []
+	return [activation_message]
 
 
 func _queue_cargo_event(
@@ -857,23 +1023,64 @@ func _roll_cargo_treasure_replacement_index(event_id: String, spawn_count: int, 
 
 
 func _get_offer_purchase_blocker(offer_index: int) -> String:
+	var base_blocker := _get_purchase_base_blocker()
+	if not base_blocker.is_empty():
+		return base_blocker
+	if not _is_valid_offer_index(offer_index):
+		return "Unknown Table Event offer"
+
+	_ensure_offer_slots()
+	var event_id: String = str(active_offer_ids[offer_index])
+	return _get_purchase_blocker_for_event_id(event_id)
+
+
+func _get_boon_offer_purchase_blocker(boon_offer_index: int) -> String:
+	var base_blocker := _get_purchase_base_blocker()
+	if not base_blocker.is_empty():
+		return base_blocker
+	if boon_offer_index < 0 or boon_offer_index >= active_boon_offer_ids.size():
+		return "Unknown Kraken Boon offer"
+
+	var event_id: String = str(active_boon_offer_ids[boon_offer_index])
+	return _get_purchase_blocker_for_event_id(event_id)
+
+
+func _get_purchase_base_blocker() -> String:
 	if not enabled:
 		return "Table Events disabled"
 	if not pending_event_available:
 		return "No Table Event pending"
 	if not pending_event_ready:
 		return "Wait for cue control"
-	if not _is_valid_offer_index(offer_index):
-		return "Unknown Table Event offer"
+	return ""
 
-	_ensure_offer_slots()
-	var event_id: String = str(active_offer_ids[offer_index])
+
+func _get_purchase_blocker_for_event_id(event_id: String) -> String:
 	if event_id.is_empty():
 		return "No event in this slot yet"
-	if table == null or table.score_system == null or table.spawn_system == null:
+	if table == null:
 		return "Table Event system not ready"
-	if not table.score_system.can_afford_doubloons(_get_event_cost(event_id)):
-		return "Not enough Doubloons"
+	var offer_type: String = _get_offer_type(event_id)
+	if offer_type == OFFER_TYPE_INTERVENTION and table.spawn_system == null:
+		return "Table Event system not ready"
+	if offer_type == OFFER_TYPE_BOON and _get_kraken_boon_system() == null:
+		return "Kraken Boon system not ready"
+
+	var charge_cost: int = _get_event_charge_cost(event_id)
+	var doubloon_cost: int = _get_event_doubloon_cost(event_id)
+	var missing_cost_parts: Array[String] = []
+	if pending_intervention_charges < charge_cost:
+		missing_cost_parts.append(_format_charge_cost(charge_cost))
+	if doubloon_cost > 0 and table.score_system == null:
+		return "Table Event system not ready"
+	if doubloon_cost > 0 and not table.score_system.can_afford_doubloons(doubloon_cost):
+		missing_cost_parts.append(_format_doubloon_cost(doubloon_cost))
+	if not missing_cost_parts.is_empty():
+		return "Need %s" % " + ".join(missing_cost_parts)
+	if offer_type == OFFER_TYPE_BOON:
+		var boon_blocker := _get_kraken_boon_system().get_boon_activation_blocker(event_id)
+		if not boon_blocker.is_empty():
+			return boon_blocker
 	return ""
 
 
@@ -931,19 +1138,30 @@ func _get_oath_system() -> OathSystem:
 	return table.oath_system as OathSystem
 
 
+func _get_kraken_boon_system() -> KrakenBoonSystem:
+	if table == null:
+		return null
+	return table.kraken_boon_system as KrakenBoonSystem
+
+
 func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
 	var reroll_blocker: String = _get_offer_reroll_choice_blocker(offer_index)
 	if event_id.is_empty():
 		return {
 			"id": EMPTY_OFFER_ID,
+			"type": OFFER_TYPE_INTERVENTION,
 			"name": "More Omens Soon",
 			"description": "Future Table Event slot.",
 			"flavor": "The deep is quiet here for now.",
 			"cost": 0,
+			"charge_cost": 0,
+			"doubloon_cost": 0,
+			"cost_currency": "charges",
 			"offer_index": offer_index,
 			"icon_key": "plain_object_ball",
 			"rarity": "",
 			"weight": 0,
+			"duration_shots": 0,
 			"available": false,
 			"affordable": false,
 			"blocked_reason": "Coming soon",
@@ -955,18 +1173,26 @@ func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
 	var event_data: Dictionary = _get_event_data(event_id)
 	var blocker: String = _get_offer_purchase_blocker(offer_index)
 	var description: String = _get_event_description(event_id, event_data)
+	var charge_cost: int = _get_event_charge_cost(event_id)
+	var doubloon_cost: int = _get_event_doubloon_cost(event_id)
+	var offer_type: String = _get_offer_type(event_id)
 	return {
 		"id": event_id,
+		"type": offer_type,
 		"name": str(event_data.get("name", "Table Event")),
 		"description": description,
 		"flavor": str(event_data.get("flavor", "")),
-		"cost": _get_event_cost(event_id),
+		"cost": charge_cost,
+		"charge_cost": charge_cost,
+		"doubloon_cost": doubloon_cost,
+		"cost_currency": "charges",
 		"offer_index": offer_index,
 		"icon_key": str(event_data.get("icon_key", "plain_object_ball")),
 		"rarity": _get_event_rarity(event_id),
 		"weight": _get_event_weight(event_id),
+		"duration_shots": maxi(int(event_data.get("duration_shots", 0)), 0),
 		"available": blocker.is_empty(),
-		"affordable": table != null and table.score_system != null and table.score_system.can_afford_doubloons(_get_event_cost(event_id)),
+		"affordable": blocker.is_empty(),
 		"blocked_reason": blocker,
 		"reroll_available": reroll_blocker.is_empty(),
 		"reroll_blocked_reason": reroll_blocker,
@@ -974,52 +1200,177 @@ func _make_offer_snapshot(event_id: String, offer_index: int) -> Dictionary:
 	}
 
 
+func _make_boon_offer_snapshot(event_id: String, boon_offer_index: int) -> Dictionary:
+	var event_data: Dictionary = _get_event_data(event_id)
+	var blocker: String = _get_boon_offer_purchase_blocker(boon_offer_index)
+	var charge_cost: int = _get_event_charge_cost(event_id)
+	var doubloon_cost: int = _get_event_doubloon_cost(event_id)
+	var boon_system: KrakenBoonSystem = _get_kraken_boon_system()
+	var boon_active: bool = false
+	var remaining_shots: int = 0
+	if boon_system != null:
+		boon_active = boon_system.is_boon_active(event_id)
+		remaining_shots = boon_system.get_active_boon_remaining_shots(event_id)
+	return {
+		"id": event_id,
+		"type": _get_offer_type(event_id),
+		"name": str(event_data.get("name", "Kraken Boon")),
+		"description": _get_event_description(event_id, event_data),
+		"flavor": str(event_data.get("flavor", "")),
+		"cost": charge_cost,
+		"charge_cost": charge_cost,
+		"doubloon_cost": doubloon_cost,
+		"cost_currency": "mixed",
+		"boon_offer_index": boon_offer_index,
+		"icon_key": str(event_data.get("icon_key", "wayfinder_ball")),
+		"rarity": _get_event_rarity(event_id),
+		"weight": _get_event_weight(event_id),
+		"duration_shots": maxi(int(event_data.get("duration_shots", 0)), 0),
+		"active": boon_active,
+		"active_remaining_shots": remaining_shots,
+		"available": blocker.is_empty(),
+		"affordable": blocker.is_empty(),
+		"blocked_reason": blocker,
+		"reroll_available": false,
+		"reroll_blocked_reason": "Boons are purchased, not replaced.",
+		"reroll_oath_id": "",
+	}
+
+
 func _emit_state() -> void:
 	var progress: int = _get_meter_progress()
-	meter_changed.emit(progress, shot_doubloon_threshold, _get_progress_percent(), pending_event_available, pending_event_ready)
+	var threshold: int = _get_current_segment_goal()
+	meter_changed.emit(
+		progress,
+		threshold,
+		_get_progress_percent(),
+		pending_event_available,
+		pending_event_ready,
+		pending_intervention_charges,
+		current_segment_index
+	)
 	pending_event_changed.emit(pending_event_available, pending_event_ready)
 	offers_changed.emit(get_event_offers_snapshot())
+	boon_offers_changed.emit(get_boon_offers_snapshot())
+
+
+func _on_kraken_boons_changed(_snapshot: Dictionary) -> void:
+	if not shot_active and not _should_carry_partial_intervention_progress() and current_segment_progress > 0:
+		_reset_current_segment_progress()
+		_emit_state()
+		return
+	boon_offers_changed.emit(get_boon_offers_snapshot())
 
 
 func _get_meter_progress() -> int:
-	if pending_event_available:
-		return shot_doubloon_threshold
-	return clampi(current_shot_doubloons, 0, shot_doubloon_threshold)
+	return clampi(current_segment_progress, 0, _get_current_segment_goal())
 
 
 func _get_progress_percent() -> float:
-	if shot_doubloon_threshold <= 0:
+	var segment_goal := _get_current_segment_goal()
+	if segment_goal <= 0:
 		return 0.0
-	return clampf(float(_get_meter_progress()) / float(shot_doubloon_threshold), 0.0, 1.0)
+	return clampf(float(_get_meter_progress()) / float(segment_goal), 0.0, 1.0)
+
+
+func _get_current_segment_goal() -> int:
+	return _get_segment_goal(current_segment_index)
+
+
+func _get_segment_goal(segment_index: int) -> int:
+	var goal := maxi(shot_doubloon_threshold, 1)
+	var increase := SEGMENT_GOAL_INITIAL_INCREASE
+	for _segment_offset in range(maxi(segment_index, 0)):
+		goal += increase
+		increase += SEGMENT_GOAL_INCREASE_STEP
+	return goal
+
+
+func _reset_current_segment_progress() -> void:
+	current_segment_progress = 0
+	current_segment_index = maxi(pending_intervention_charges, 0)
+
+
+func _align_current_segment_with_pending_charges() -> void:
+	current_segment_index = maxi(pending_intervention_charges, 0)
+	current_segment_progress = clampi(current_segment_progress, 0, _get_current_segment_goal())
+
+
+func _should_carry_partial_intervention_progress() -> bool:
+	var boon_system: KrakenBoonSystem = _get_kraken_boon_system()
+	if boon_system == null:
+		return false
+	var active_effects: Dictionary = boon_system.get_active_effects_snapshot()
+	return bool(active_effects.get(KrakenBoonSystem.EFFECT_INTERVENTION_PARTIAL_PROGRESS_CARRY_ENABLED, false))
+
+
+func _get_intervention_meter_progress_amount(score_amount: int) -> int:
+	var safe_amount: int = maxi(score_amount, 0)
+	if safe_amount <= 0:
+		return 0
+
+	var multiplier: float = _get_intervention_meter_gain_multiplier()
+	return maxi(int(round(float(safe_amount) * multiplier)), 0)
+
+
+func _get_intervention_meter_gain_multiplier() -> float:
+	var boon_system: KrakenBoonSystem = _get_kraken_boon_system()
+	if boon_system == null:
+		return 1.0
+	var active_effects: Dictionary = boon_system.get_active_effects_snapshot()
+	return maxf(float(active_effects.get(KrakenBoonSystem.EFFECT_INTERVENTION_METER_GAIN_MULTIPLIER, 1.0)), 0.0)
+
+
+func _sync_pending_event_flags() -> void:
+	pending_event_available = pending_intervention_charges > 0
+	if not pending_event_available:
+		pending_event_ready = false
 
 
 func _get_event_data(event_id: String) -> Dictionary:
-	if not EVENT_DATA.has(event_id):
-		return {}
-	return EVENT_DATA[event_id] as Dictionary
+	if EVENT_DATA.has(event_id):
+		return EVENT_DATA[event_id] as Dictionary
+	var boon_system := _get_kraken_boon_system()
+	if boon_system != null:
+		return boon_system.get_boon_definition(event_id)
+	return {}
 
 
 func _get_event_name(event_id: String) -> String:
 	return str(_get_event_data(event_id).get("name", "Table Event"))
 
 
-func _get_event_cost(event_id: String) -> int:
-	match event_id:
-		EVENT_CHEAP_CARGO:
-			return cheap_cargo_cost
-		EVENT_LOOSE_CARGO:
-			return loose_cargo_cost
-		EVENT_POWDER_CACHE:
-			return powder_cache_cost
-		EVENT_WAYFINDERS_FAVOR:
-			return wayfinders_favor_cost
-		EVENT_CANNON_WARNING:
-			return cannon_warning_cost
-		EVENT_BROADSIDE_ATTACK:
-			return broadside_attack_cost
-		EVENT_WAYFINDER_CURRENT:
-			return wayfinder_current_cost
-	return 0
+func _get_offer_type(event_id: String) -> String:
+	return str(_get_event_data(event_id).get("type", OFFER_TYPE_INTERVENTION))
+
+
+func _get_event_charge_cost(event_id: String) -> int:
+	return maxi(int(_get_event_data(event_id).get("charge_cost", 0)), 0)
+
+
+func _get_event_doubloon_cost(event_id: String) -> int:
+	return maxi(int(_get_event_data(event_id).get("doubloon_cost", 0)), 0)
+
+
+func _format_purchase_cost_text(charge_cost: int, doubloon_cost: int) -> String:
+	var parts: Array[String] = []
+	if charge_cost > 0:
+		parts.append(_format_charge_cost(charge_cost))
+	if doubloon_cost > 0:
+		parts.append(_format_doubloon_cost(doubloon_cost))
+	if parts.is_empty():
+		return "No cost"
+	return " + ".join(parts)
+
+
+func _format_charge_cost(charge_cost: int) -> String:
+	var safe_cost := maxi(charge_cost, 0)
+	return "%s Charge%s" % [safe_cost, "" if safe_cost == 1 else "s"]
+
+
+func _format_doubloon_cost(doubloon_cost: int) -> String:
+	var safe_cost := maxi(doubloon_cost, 0)
+	return "%s Doubloon%s" % [safe_cost, "" if safe_cost == 1 else "s"]
 
 
 func _get_event_rarity(event_id: String) -> String:
@@ -1039,23 +1390,26 @@ func _get_next_event_earned_message() -> String:
 	return message
 
 
-func _get_event_purchase_message(event_id: String, cost: int) -> String:
+func _get_event_purchase_message(event_id: String, charge_cost: int, doubloon_cost: int) -> String:
+	var cost_text: String = _format_purchase_cost_text(charge_cost, doubloon_cost)
+	if _get_offer_type(event_id) == OFFER_TYPE_BOON:
+		return "%s accepted! %s spent." % [_get_event_name(event_id), cost_text]
 	match event_id:
 		EVENT_CHEAP_CARGO:
-			return "Cheap Cargo released! %s Doubloons spent." % cost
+			return "Cheap Cargo released! %s spent." % cost_text
 		EVENT_LOOSE_CARGO:
-			return "Loose Cargo released! %s Doubloons spent." % cost
+			return "Loose Cargo released! %s spent." % cost_text
 		EVENT_POWDER_CACHE:
-			return "Powder Cache dropped! %s Doubloons spent." % cost
+			return "Powder Cache dropped! %s spent." % cost_text
 		EVENT_WAYFINDERS_FAVOR:
-			return "Wayfinder's Favor accepted! %s Doubloons spent." % cost
+			return "Wayfinder's Favor accepted! %s spent." % cost_text
 		EVENT_CANNON_WARNING:
-			return "Cannon Warning sounded! %s Doubloons spent." % cost
+			return "Cannon Warning sounded! %s spent." % cost_text
 		EVENT_BROADSIDE_ATTACK:
-			return "Cannons on the horizon! %s Doubloons spent." % cost
+			return "Cannons on the horizon! %s spent." % cost_text
 		EVENT_WAYFINDER_CURRENT:
-			return "Wayfinder Current released! %s Doubloons spent." % cost
-	return "%s unleashed for %s Doubloons." % [_get_event_name(event_id), cost]
+			return "Wayfinder Current released! %s spent." % cost_text
+	return "%s unleashed for %s." % [_get_event_name(event_id), cost_text]
 
 
 func _get_event_description(event_id: String, event_data: Dictionary) -> String:
@@ -1184,6 +1538,13 @@ func _ensure_offer_slots() -> void:
 		active_offer_ids.resize(OFFER_SLOT_COUNT)
 
 
+func _has_generated_offer_set() -> bool:
+	for event_id_value in active_offer_ids:
+		if str(event_id_value) != EMPTY_OFFER_ID:
+			return true
+	return false
+
+
 func _is_valid_offer_index(offer_index: int) -> bool:
 	return offer_index >= 0 and offer_index < OFFER_SLOT_COUNT
 
@@ -1198,6 +1559,87 @@ func _get_weighted_unique_event_pool() -> Array:
 		selected_events.append(str(remaining_events[picked_index]))
 		remaining_events.remove_at(picked_index)
 	return selected_events
+
+
+func _ensure_affordable_offer_when_possible() -> void:
+	if pending_intervention_charges <= 0:
+		return
+	_ensure_offer_slots()
+	for event_id_value in active_offer_ids:
+		if _is_event_fully_affordable(str(event_id_value)):
+			return
+
+	var candidates: Array = _get_affordable_event_candidates(true)
+	if candidates.is_empty():
+		candidates = _get_affordable_event_candidates(false)
+	if candidates.is_empty():
+		return
+
+	var replacement_event_id: String = _pick_weighted_event_from_candidates(candidates)
+	if replacement_event_id.is_empty() or replacement_event_id == EMPTY_OFFER_ID:
+		return
+	var replacement_index: int = _get_affordable_offer_replacement_index()
+	if not _is_valid_offer_index(replacement_index):
+		return
+	active_offer_ids[replacement_index] = replacement_event_id
+
+
+func _generate_boon_offers() -> void:
+	active_boon_offer_ids.clear()
+	if pending_intervention_charges <= 0:
+		return
+	for boon_id_value in BOON_OFFER_POOL:
+		var boon_id: String = str(boon_id_value)
+		if _is_boon_offer_visible(boon_id):
+			active_boon_offer_ids.append(boon_id)
+
+
+func _get_affordable_event_candidates(avoid_active_offers: bool) -> Array:
+	var candidates: Array = []
+	for event_value in EVENT_POOL:
+		var event_id := str(event_value)
+		if event_id.is_empty() or not _is_event_fully_affordable(event_id):
+			continue
+		if avoid_active_offers and active_offer_ids.has(event_id):
+			continue
+		candidates.append(event_id)
+	return candidates
+
+
+func _is_boon_offer_visible(event_id: String) -> bool:
+	if event_id.is_empty() or event_id == EMPTY_OFFER_ID:
+		return false
+	if _get_offer_type(event_id) != OFFER_TYPE_BOON:
+		return false
+	var boon_system := _get_kraken_boon_system()
+	if boon_system == null:
+		return false
+	return boon_system.has_boon_definition(event_id)
+
+
+func _is_event_fully_affordable(event_id: String) -> bool:
+	if event_id.is_empty() or event_id == EMPTY_OFFER_ID:
+		return false
+	if pending_intervention_charges < _get_event_charge_cost(event_id):
+		return false
+	var doubloon_cost := _get_event_doubloon_cost(event_id)
+	if doubloon_cost <= 0:
+		return true
+	return table != null and table.score_system != null and table.score_system.can_afford_doubloons(doubloon_cost)
+
+
+func _get_affordable_offer_replacement_index() -> int:
+	var replacement_index := -1
+	var highest_charge_cost := -1
+	for offer_index in range(active_offer_ids.size()):
+		var event_id := str(active_offer_ids[offer_index])
+		if event_id.is_empty() or event_id == EMPTY_OFFER_ID:
+			return offer_index
+		var charge_cost := _get_event_charge_cost(event_id)
+		if charge_cost > highest_charge_cost:
+			highest_charge_cost = charge_cost
+			replacement_index = offer_index
+	return replacement_index
 
 
 func _pick_reroll_replacement_event_id(offer_index: int) -> String:

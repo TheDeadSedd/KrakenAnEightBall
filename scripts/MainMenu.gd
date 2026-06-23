@@ -18,12 +18,15 @@ const CUE_LOCKER_PANEL_SCRIPT := preload("res://scripts/MainMenuCueLockerPanel.g
 const RUN_HISTORY_SCRIPT := preload("res://scripts/RunHistorySystem.gd")
 const PROGRESSION_SCRIPT := preload("res://scripts/ProgressionSystem.gd")
 const CUE_PROGRESSION_SCRIPT := preload("res://scripts/CueProgressionSystem.gd")
+const CREDITS_MARGIN := Vector2(34.0, 28.0)
+const CREDITS_HEIGHT := 154.0
 
 var background_layer: TextureRect
 var behind_foreground_overlay: MainMenuPresentationOverlay
 var foreground_layer: TextureRect
 var fog_overlay: MainMenuPresentationOverlay
 var menu_panel: PanelContainer
+var credits_panel: PanelContainer
 var title_label: Label
 var subtitle_label: Label
 var status_label: Label
@@ -187,6 +190,8 @@ func _build_interface() -> void:
 	run_history_button.pressed.connect(_on_run_history_pressed)
 	quit_button.pressed.connect(_on_quit_pressed)
 
+	_build_credits_block()
+
 	options_panel = OPTIONS_MENU_SCRIPT.new()
 	options_panel.name = "OptionsPanel"
 	options_panel.visible = false
@@ -269,6 +274,77 @@ func _make_button_style(background_color: Color, border_color: Color) -> StyleBo
 	return style
 
 
+func _build_credits_block() -> void:
+	credits_panel = PanelContainer.new()
+	credits_panel.name = "CreditsPanel"
+	credits_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	credits_panel.add_theme_stylebox_override("panel", _make_credits_style())
+	add_child(credits_panel)
+
+	var margin := MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 11)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_bottom", 11)
+	credits_panel.add_child(margin)
+
+	var stack := VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 2)
+	margin.add_child(stack)
+
+	var title := Label.new()
+	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title.text = "Credits"
+	title.add_theme_font_override("font", UI_FONT)
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", Color(1.0, 0.88, 0.50, 0.96))
+	title.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.76))
+	title.add_theme_constant_override("outline_size", 2)
+	stack.add_child(title)
+
+	var credit_lines := Label.new()
+	credit_lines.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	credit_lines.text = "Background music by: Little Robot Sound Factory\nSome SFX by: Vrymaa\nFont by: Not Jam (Old Style 11)\nPlaceholder art: ChatGPT"
+	credit_lines.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	credit_lines.add_theme_font_override("font", UI_FONT)
+	credit_lines.add_theme_font_size_override("font_size", 15)
+	credit_lines.add_theme_color_override("font_color", Color(0.88, 0.78, 0.56, 0.88))
+	credit_lines.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.68))
+	credit_lines.add_theme_constant_override("outline_size", 2)
+	stack.add_child(credit_lines)
+
+	var artist_line := Label.new()
+	artist_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	artist_line.text = "Looking for artists to work with for final release"
+	artist_line.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	artist_line.add_theme_font_override("font", UI_FONT)
+	artist_line.add_theme_font_size_override("font_size", 13)
+	artist_line.add_theme_color_override("font_color", Color(0.78, 0.86, 0.80, 0.72))
+	artist_line.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.62))
+	artist_line.add_theme_constant_override("outline_size", 2)
+	stack.add_child(artist_line)
+
+
+func _make_credits_style() -> StyleBoxFlat:
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color(0.018, 0.015, 0.019, 0.54)
+	style.border_color = Color(0.83, 0.64, 0.28, 0.30)
+	style.border_width_left = 1
+	style.border_width_top = 1
+	style.border_width_right = 1
+	style.border_width_bottom = 1
+	style.corner_radius_top_left = 8
+	style.corner_radius_top_right = 8
+	style.corner_radius_bottom_left = 8
+	style.corner_radius_bottom_right = 8
+	style.shadow_color = Color(0.0, 0.0, 0.0, 0.38)
+	style.shadow_size = 11
+	style.shadow_offset = Vector2(0.0, 4.0)
+	return style
+
+
 func _create_run_history_panel() -> void:
 	run_history_panel = RUN_HISTORY_PANEL_SCRIPT.new()
 	run_history_panel.name = "RunHistoryPanel"
@@ -303,6 +379,17 @@ func _update_menu_layout() -> void:
 	menu_panel.offset_top = -panel_height * 0.5
 	menu_panel.offset_bottom = panel_height * 0.5
 
+	if credits_panel != null:
+		var credits_width: float = clampf(viewport_size.x * 0.30, 340.0, 480.0)
+		credits_panel.anchor_left = 0.0
+		credits_panel.anchor_right = 0.0
+		credits_panel.anchor_top = 1.0
+		credits_panel.anchor_bottom = 1.0
+		credits_panel.offset_left = CREDITS_MARGIN.x
+		credits_panel.offset_right = CREDITS_MARGIN.x + credits_width
+		credits_panel.offset_top = -CREDITS_MARGIN.y - CREDITS_HEIGHT
+		credits_panel.offset_bottom = -CREDITS_MARGIN.y
+
 	if options_panel != null:
 		var options_width: float = clampf(viewport_size.x * 0.34, 560.0, 700.0)
 		var options_height: float = clampf(viewport_size.y * 0.48, 430.0, 560.0)
@@ -330,6 +417,13 @@ func _update_progression_display() -> void:
 		kraken_favor_label.text = "Kraken Favor: %s" % total_favor
 
 
+func _set_menu_chrome_visible(is_visible: bool) -> void:
+	if menu_panel != null:
+		menu_panel.visible = is_visible
+	if credits_panel != null:
+		credits_panel.visible = is_visible
+
+
 func _on_start_pressed() -> void:
 	start_button.disabled = true
 	status_label.text = "Casting off..."
@@ -340,7 +434,7 @@ func _on_start_pressed() -> void:
 
 
 func _on_options_pressed() -> void:
-	menu_panel.visible = false
+	_set_menu_chrome_visible(false)
 	if run_history_panel != null:
 		run_history_panel.close_panel()
 	if cue_locker_panel != null:
@@ -352,14 +446,14 @@ func _on_options_pressed() -> void:
 
 func _on_options_back_requested() -> void:
 	options_panel.visible = false
-	menu_panel.visible = true
+	_set_menu_chrome_visible(true)
 	status_label.text = "The moon is high. The table waits."
 	_update_progression_display()
 	options_button.grab_focus()
 
 
 func _on_cue_locker_pressed() -> void:
-	menu_panel.visible = false
+	_set_menu_chrome_visible(false)
 	if options_panel != null:
 		options_panel.visible = false
 	if run_history_panel != null:
@@ -368,7 +462,7 @@ func _on_cue_locker_pressed() -> void:
 
 
 func _on_cue_locker_back_requested() -> void:
-	menu_panel.visible = true
+	_set_menu_chrome_visible(true)
 	_update_progression_display()
 	status_label.text = "The locker shuts with a salt-stiff click."
 	cue_locker_button.grab_focus()
@@ -385,7 +479,7 @@ func _on_cue_progression_status_changed(text: String) -> void:
 
 
 func _on_run_history_pressed() -> void:
-	menu_panel.visible = false
+	_set_menu_chrome_visible(false)
 	if options_panel != null:
 		options_panel.visible = false
 	if cue_locker_panel != null:
@@ -395,7 +489,7 @@ func _on_run_history_pressed() -> void:
 
 
 func _on_run_history_back_requested() -> void:
-	menu_panel.visible = true
+	_set_menu_chrome_visible(true)
 	status_label.text = "The moon is high. The ledger waits."
 	run_history_button.grab_focus()
 

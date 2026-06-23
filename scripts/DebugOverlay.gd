@@ -705,6 +705,22 @@ func _make_ball_drop_performance_lines(snapshot: Dictionary) -> Array:
 			_debug_bool_text(bool(snapshot["table_event_ready"])),
 			_debug_bool_text(bool(snapshot["table_event_menu_open"])),
 		],
+		"Table Event charges: %s pending / %s earned this shot / segment %s / shot %s Doubloons" % [
+			snapshot["table_event_pending_charges"],
+			snapshot["table_event_shot_charges_earned"],
+			snapshot["table_event_segment_index"],
+			snapshot["table_event_current_shot_doubloons"],
+		],
+		"Kraken Boons: %s / effects %s" % [
+			snapshot["kraken_boon_active_summary"],
+			str(snapshot["kraken_boon_active_effects"]),
+		],
+		"Kraken Boon counts: %s active / %s activated / %s refreshed / %s expired" % [
+			snapshot["kraken_boon_active_count"],
+			snapshot["kraken_boon_activations_total"],
+			snapshot["kraken_boon_refreshes_total"],
+			snapshot["kraken_boon_expirations_total"],
+		],
 		"Table Event offers: %s" % str(snapshot["table_event_active_offer_ids"]),
 		"Table Event counts: %s earned / %s readied / %s bought / %s denied" % [
 			snapshot["table_event_pending_earned"],
@@ -712,7 +728,7 @@ func _make_ball_drop_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["table_event_purchased"],
 			snapshot["table_event_denied_purchases"],
 		],
-		"Table Event tuning: Cheap %s/%s, Loose %s/%s, Wayfinder %s/%s, Current %s/%s, Powder %s/%s, Cannon %s/%s" % [
+		"Table Event charge costs: Cheap %s balls/%s, Loose %s/%s, Wayfinder %s/%s, Current %s/%s, Powder %s/%s, Cannon %s/%s" % [
 			snapshot["table_event_cheap_cargo_ball_count"],
 			snapshot["table_event_cheap_cargo_cost"],
 			snapshot["table_event_loose_cargo_ball_count"],
@@ -726,10 +742,7 @@ func _make_ball_drop_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["table_event_cannon_warning_ball_count"],
 			snapshot["table_event_cannon_warning_cost"],
 		],
-		"Table Event ignored awards while pending: %s / blocker: %s" % [
-			snapshot["table_event_ignored_awards_while_pending"],
-			snapshot["table_event_last_blocker_reason"],
-		],
+		"Table Event last blocker: %s" % snapshot["table_event_last_blocker_reason"],
 		"Legacy BallDrop progress: %s/%s Doubloons" % [
 			snapshot["ball_drop_progress"],
 			snapshot["ball_drop_threshold"],

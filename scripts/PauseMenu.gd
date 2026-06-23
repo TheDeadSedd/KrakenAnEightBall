@@ -19,6 +19,11 @@ signal debug_oath_fail_requested(oath_id: String)
 signal debug_oath_complete_requested(oath_id: String)
 signal debug_back_room_force_available_toggled(enabled: bool)
 signal debug_back_room_open_requested
+signal debug_activate_long_sight_requested
+signal debug_activate_krakens_patience_requested
+signal debug_activate_deep_ledger_requested
+signal debug_activate_iron_wake_requested
+signal debug_expire_all_boons_requested
 signal quartermaster_cancel_placement_requested
 
 const PANEL_CORE_PERFORMANCE := "core_performance"
@@ -47,6 +52,12 @@ const EVENT_TEST_OBSTACLE_COLLISION_DRAW_TEXT := "Show Debris Collision Shape"
 const BACK_ROOM_TEST_SECTION_TITLE := "Back Room Testing"
 const BACK_ROOM_TEST_FORCE_AVAILABLE_TEXT := "Force Back Room Available"
 const BACK_ROOM_TEST_OPEN_TEXT := "Open Back Room Deal"
+const BOON_TEST_SECTION_TITLE := "Boon Testing"
+const BOON_TEST_ACTIVATE_LONG_SIGHT_TEXT := "Activate Long Sight"
+const BOON_TEST_ACTIVATE_KRAKENS_PATIENCE_TEXT := "Activate Kraken's Patience"
+const BOON_TEST_ACTIVATE_DEEP_LEDGER_TEXT := "Activate Deep Ledger"
+const BOON_TEST_ACTIVATE_IRON_WAKE_TEXT := "Activate Iron Wake"
+const BOON_TEST_EXPIRE_ALL_TEXT := "Expire All Boons"
 const OATH_TEST_SECTION_TITLE := "Oath Testing"
 const OATH_TESTING_SELECTOR_ITEMS := [
 	{"label": "Oath of Urgency", "oath_id": OathSystem.OATH_OF_URGENCY},
@@ -105,6 +116,12 @@ var obstacle_collision_debug_check_box: CheckBox
 var back_room_testing_section_label: Label
 var force_back_room_available_check_box: CheckBox
 var open_back_room_deal_button: Button
+var boon_testing_section_label: Label
+var activate_long_sight_button: Button
+var activate_krakens_patience_button: Button
+var activate_deep_ledger_button: Button
+var activate_iron_wake_button: Button
+var expire_all_boons_button: Button
 var oath_testing_section_label: Label
 var oath_testing_selector: OptionButton
 var oath_activate_button: Button
@@ -151,6 +168,7 @@ func _ready() -> void:
 	_ensure_end_run_controls()
 	_ensure_event_test_controls()
 	_ensure_back_room_testing_controls()
+	_ensure_boon_testing_controls()
 	_ensure_oath_testing_controls()
 	_connect_debug_panel_toggles()
 	_show_pause_panel()
@@ -194,6 +212,16 @@ func _connect_debug_panel_toggles() -> void:
 		force_back_room_available_check_box.toggled.connect(_on_back_room_force_available_toggled)
 	if not open_back_room_deal_button.pressed.is_connected(_on_open_back_room_deal_pressed):
 		open_back_room_deal_button.pressed.connect(_on_open_back_room_deal_pressed)
+	if not activate_long_sight_button.pressed.is_connected(_on_activate_long_sight_pressed):
+		activate_long_sight_button.pressed.connect(_on_activate_long_sight_pressed)
+	if not activate_krakens_patience_button.pressed.is_connected(_on_activate_krakens_patience_pressed):
+		activate_krakens_patience_button.pressed.connect(_on_activate_krakens_patience_pressed)
+	if not activate_deep_ledger_button.pressed.is_connected(_on_activate_deep_ledger_pressed):
+		activate_deep_ledger_button.pressed.connect(_on_activate_deep_ledger_pressed)
+	if not activate_iron_wake_button.pressed.is_connected(_on_activate_iron_wake_pressed):
+		activate_iron_wake_button.pressed.connect(_on_activate_iron_wake_pressed)
+	if not expire_all_boons_button.pressed.is_connected(_on_expire_all_boons_pressed):
+		expire_all_boons_button.pressed.connect(_on_expire_all_boons_pressed)
 	if not oath_activate_button.pressed.is_connected(_on_oath_activate_pressed):
 		oath_activate_button.pressed.connect(_on_oath_activate_pressed)
 	if not oath_clear_button.pressed.is_connected(_on_oath_clear_pressed):
@@ -632,6 +660,41 @@ func _ensure_back_room_testing_controls() -> void:
 	_move_dev_options_controls_into_scroll()
 
 
+func _ensure_boon_testing_controls() -> void:
+	if boon_testing_section_label == null:
+		boon_testing_section_label = Label.new()
+		boon_testing_section_label.text = BOON_TEST_SECTION_TITLE
+		_apply_debug_section_label_style(boon_testing_section_label)
+		debug_section.add_child(boon_testing_section_label)
+
+	if activate_long_sight_button == null:
+		activate_long_sight_button = _make_event_test_button(BOON_TEST_ACTIVATE_LONG_SIGHT_TEXT, "ActivateLongSightButton")
+		activate_long_sight_button.tooltip_text = "Debug-only: activates or refreshes Long Sight through KrakenBoonSystem."
+		debug_section.add_child(activate_long_sight_button)
+
+	if activate_krakens_patience_button == null:
+		activate_krakens_patience_button = _make_event_test_button(BOON_TEST_ACTIVATE_KRAKENS_PATIENCE_TEXT, "ActivateKrakensPatienceButton")
+		activate_krakens_patience_button.tooltip_text = "Debug-only: activates or refreshes Kraken's Patience through KrakenBoonSystem."
+		debug_section.add_child(activate_krakens_patience_button)
+
+	if activate_deep_ledger_button == null:
+		activate_deep_ledger_button = _make_event_test_button(BOON_TEST_ACTIVATE_DEEP_LEDGER_TEXT, "ActivateDeepLedgerButton")
+		activate_deep_ledger_button.tooltip_text = "Debug-only: activates or refreshes Deep Ledger through KrakenBoonSystem."
+		debug_section.add_child(activate_deep_ledger_button)
+
+	if activate_iron_wake_button == null:
+		activate_iron_wake_button = _make_event_test_button(BOON_TEST_ACTIVATE_IRON_WAKE_TEXT, "ActivateIronWakeButton")
+		activate_iron_wake_button.tooltip_text = "Debug-only: activates or refreshes Iron Wake through KrakenBoonSystem."
+		debug_section.add_child(activate_iron_wake_button)
+
+	if expire_all_boons_button == null:
+		expire_all_boons_button = _make_event_test_button(BOON_TEST_EXPIRE_ALL_TEXT, "ExpireAllBoonsButton")
+		expire_all_boons_button.tooltip_text = "Debug-only: expires every active Kraken Boon."
+		debug_section.add_child(expire_all_boons_button)
+
+	_move_dev_options_controls_into_scroll()
+
+
 func _ensure_oath_testing_controls() -> void:
 	if oath_testing_section_label == null:
 		oath_testing_section_label = Label.new()
@@ -965,13 +1028,13 @@ func _format_intervention_purchase_history(value: Variant) -> String:
 		var record: Dictionary = record_value
 		var name := str(record.get("name", "Intervention"))
 		var count := maxi(int(record.get("count", 0)), 0)
-		var total_cost := maxi(int(record.get("total_cost", 0)), 0)
+		var total_cost := maxi(int(record.get("total_charge_cost", record.get("total_cost", 0))), 0)
 		if count <= 0:
 			continue
 		if count > 1:
-			lines.append("%s x%s - %s total" % [name, count, total_cost])
+			lines.append("%s x%s - %s Charges total" % [name, count, total_cost])
 		else:
-			lines.append("%s - %s" % [name, total_cost])
+			lines.append("%s - %s Charge%s" % [name, total_cost, "" if total_cost == 1 else "s"])
 
 	if lines.is_empty():
 		return "None purchased yet."
@@ -1096,6 +1159,26 @@ func _on_back_room_force_available_toggled(enabled: bool) -> void:
 
 func _on_open_back_room_deal_pressed() -> void:
 	debug_back_room_open_requested.emit()
+
+
+func _on_activate_long_sight_pressed() -> void:
+	debug_activate_long_sight_requested.emit()
+
+
+func _on_activate_krakens_patience_pressed() -> void:
+	debug_activate_krakens_patience_requested.emit()
+
+
+func _on_activate_deep_ledger_pressed() -> void:
+	debug_activate_deep_ledger_requested.emit()
+
+
+func _on_activate_iron_wake_pressed() -> void:
+	debug_activate_iron_wake_requested.emit()
+
+
+func _on_expire_all_boons_pressed() -> void:
+	debug_expire_all_boons_requested.emit()
 
 
 func _on_oath_activate_pressed() -> void:

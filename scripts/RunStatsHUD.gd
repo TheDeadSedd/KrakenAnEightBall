@@ -299,13 +299,13 @@ func _format_intervention_purchase_history(value: Variant) -> String:
 		var record: Dictionary = record_value
 		var name := str(record.get("name", "Intervention"))
 		var count := maxi(int(record.get("count", 0)), 0)
-		var total_cost := maxi(int(record.get("total_cost", 0)), 0)
+		var total_cost := maxi(int(record.get("total_charge_cost", record.get("total_cost", 0))), 0)
 		if count <= 0:
 			continue
 		if count > 1:
-			lines.append("%s x%s - %s total" % [name, count, total_cost])
+			lines.append("%s x%s - %s Charges total" % [name, count, total_cost])
 		else:
-			lines.append("%s - %s" % [name, total_cost])
+			lines.append("%s - %s Charge%s" % [name, total_cost, "" if total_cost == 1 else "s"])
 
 	if lines.is_empty():
 		return "None purchased yet."
