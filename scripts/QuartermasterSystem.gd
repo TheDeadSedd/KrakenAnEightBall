@@ -10,36 +10,108 @@ signal stock_refresh_purchased(cost: int, refresh_count: int)
 # Owns shop inventory, prices, affordability, and purchase intent. Purchases
 # fill ReserveSystem slots; reserve deployment is handled outside this shop.
 const ITEM_PLAIN_OBJECT_BALL := "plain_object_ball"
+const ITEM_PLAIN_OBJECT_BALL_X3 := "plain_object_ball_x3"
+const ITEM_PLAIN_OBJECT_BALL_X10 := "plain_object_ball_x10"
 const ITEM_WAYFINDER_BALL := "wayfinder_ball"
+const ITEM_WAYFINDER_BALL_X2 := "wayfinder_ball_x2"
 const ITEM_POWDER_KEG_BALL := "powder_keg_ball"
+const ITEM_POWDER_KEG_BALL_X2 := "powder_keg_ball_x2"
 const SPAWN_TYPE_PLAIN_OBJECT_BALL := "plain_object_ball"
 const SPAWN_TYPE_WAYFINDER_BALL := "wayfinder_ball"
 const SPAWN_TYPE_POWDER_KEG_BALL := "powder_keg_ball"
 const OFFER_SLOT_COUNT := 3
 const STOCK_RNG_SEED := 802408
 const CUE_MODIFIER_QUARTERMASTER_REFRESH_SHOT_DECAY_BONUS := "quartermaster_refresh_shot_decay_bonus"
-const SHOP_ITEM_IDS := ["plain_object_ball", "wayfinder_ball", "powder_keg_ball"]
+const SHOP_ITEM_IDS := [
+	ITEM_PLAIN_OBJECT_BALL,
+	ITEM_PLAIN_OBJECT_BALL_X3,
+	ITEM_PLAIN_OBJECT_BALL_X10,
+	ITEM_WAYFINDER_BALL,
+	ITEM_WAYFINDER_BALL_X2,
+	ITEM_POWDER_KEG_BALL,
+	ITEM_POWDER_KEG_BALL_X2,
+]
 const SHOP_ITEMS := {
-	"plain_object_ball": {
+	ITEM_PLAIN_OBJECT_BALL: {
 		"id": ITEM_PLAIN_OBJECT_BALL,
-		"name": "Loose Object Ball",
+		"name": "Loose Object Ball x1",
 		"description": "Adds another normal ball to the table.",
 		"price": 10,
 		"spawn_type": SPAWN_TYPE_PLAIN_OBJECT_BALL,
+		"icon_key": SPAWN_TYPE_PLAIN_OBJECT_BALL,
+		"quantity": 1,
+		"quantity_total": 1,
+		"weight": 14,
 	},
-	"wayfinder_ball": {
+	ITEM_PLAIN_OBJECT_BALL_X3: {
+		"id": ITEM_PLAIN_OBJECT_BALL_X3,
+		"name": "Loose Object Ball x3",
+		"description": "Stows three normal balls in one Reserve slot.",
+		"price": 25,
+		"spawn_type": SPAWN_TYPE_PLAIN_OBJECT_BALL,
+		"icon_key": SPAWN_TYPE_PLAIN_OBJECT_BALL,
+		"quantity": 3,
+		"quantity_total": 3,
+		"weight": 3,
+		"bundle_glow_tier": 1,
+	},
+	ITEM_PLAIN_OBJECT_BALL_X10: {
+		"id": ITEM_PLAIN_OBJECT_BALL_X10,
+		"name": "Loose Object Ball x10",
+		"description": "A heavy bundle of ten normal balls for one Reserve slot.",
+		"price": 75,
+		"spawn_type": SPAWN_TYPE_PLAIN_OBJECT_BALL,
+		"icon_key": SPAWN_TYPE_PLAIN_OBJECT_BALL,
+		"quantity": 10,
+		"quantity_total": 10,
+		"weight": 1,
+		"bundle_glow_tier": 3,
+	},
+	ITEM_WAYFINDER_BALL: {
 		"id": ITEM_WAYFINDER_BALL,
-		"name": "Wayfinder Ball",
+		"name": "Wayfinder Ball x1",
 		"description": "Helps guide shots toward pockets.",
 		"price": 35,
 		"spawn_type": SPAWN_TYPE_WAYFINDER_BALL,
+		"icon_key": SPAWN_TYPE_WAYFINDER_BALL,
+		"quantity": 1,
+		"quantity_total": 1,
+		"weight": 5,
 	},
-	"powder_keg_ball": {
+	ITEM_WAYFINDER_BALL_X2: {
+		"id": ITEM_WAYFINDER_BALL_X2,
+		"name": "Wayfinder Ball x2",
+		"description": "Stows two Wayfinder Balls in one Reserve slot.",
+		"price": 60,
+		"spawn_type": SPAWN_TYPE_WAYFINDER_BALL,
+		"icon_key": SPAWN_TYPE_WAYFINDER_BALL,
+		"quantity": 2,
+		"quantity_total": 2,
+		"weight": 1,
+		"bundle_glow_tier": 2,
+	},
+	ITEM_POWDER_KEG_BALL: {
 		"id": ITEM_POWDER_KEG_BALL,
-		"name": "Powder Keg",
+		"name": "Powder Keg x1",
 		"description": "Explodes when struck by cue ball or Cannon Ball.",
 		"price": 55,
 		"spawn_type": SPAWN_TYPE_POWDER_KEG_BALL,
+		"icon_key": SPAWN_TYPE_POWDER_KEG_BALL,
+		"quantity": 1,
+		"quantity_total": 1,
+		"weight": 4,
+	},
+	ITEM_POWDER_KEG_BALL_X2: {
+		"id": ITEM_POWDER_KEG_BALL_X2,
+		"name": "Powder Keg x2",
+		"description": "Stows two Powder Kegs in one Reserve slot.",
+		"price": 95,
+		"spawn_type": SPAWN_TYPE_POWDER_KEG_BALL,
+		"icon_key": SPAWN_TYPE_POWDER_KEG_BALL,
+		"quantity": 2,
+		"quantity_total": 2,
+		"weight": 1,
+		"bundle_glow_tier": 3,
 	},
 }
 
@@ -172,6 +244,23 @@ func request_refresh_stock() -> bool:
 	last_blocker_reason = ""
 	stock_refresh_purchased.emit(refresh_cost, manual_stock_refreshes)
 	status_changed.emit("Quartermaster refreshed stock for %s Doubloons." % refresh_cost)
+	_emit_shop_state_changed()
+	return true
+
+
+func request_free_refresh_stock(source_label: String = "Sunken Spoils") -> bool:
+	_ensure_active_offers_filled()
+	var blocker: String = _get_free_refresh_blocker()
+	if not blocker.is_empty():
+		denied_stock_refresh_attempts += 1
+		last_blocker_reason = blocker
+		status_changed.emit(blocker)
+		_emit_shop_state_changed()
+		return false
+
+	_reroll_all_offer_slots()
+	last_blocker_reason = ""
+	status_changed.emit("%s refreshed Quartermaster stock for free." % source_label)
 	_emit_shop_state_changed()
 	return true
 
@@ -309,6 +398,15 @@ func _get_refresh_blocker() -> String:
 		return oath_blocker
 	if not table.score_system.can_afford_doubloons(get_current_refresh_cost()):
 		return "Not enough Doubloons"
+	return ""
+
+
+func _get_free_refresh_blocker() -> String:
+	if table == null:
+		return "Quartermaster not ready"
+	var oath_blocker := _get_oath_quartermaster_blocker()
+	if not oath_blocker.is_empty():
+		return oath_blocker
 	return ""
 
 
@@ -466,8 +564,30 @@ func _is_item_active_in_other_offer(item_id: String, offer_index: int) -> bool:
 func _pick_random_item_id(candidates: Array) -> String:
 	if candidates.is_empty():
 		return ""
-	var candidate_index := stock_rng.randi_range(0, candidates.size() - 1)
-	return str(candidates[candidate_index])
+	var total_weight: int = 0
+	for candidate_value in candidates:
+		var candidate_id: String = str(candidate_value)
+		total_weight += _get_item_weight(candidate_id)
+
+	if total_weight <= 0:
+		var candidate_index: int = stock_rng.randi_range(0, candidates.size() - 1)
+		return str(candidates[candidate_index])
+
+	var roll: int = stock_rng.randi_range(1, total_weight)
+	var running_weight: int = 0
+	for weighted_candidate_value in candidates:
+		var weighted_candidate_id: String = str(weighted_candidate_value)
+		running_weight += _get_item_weight(weighted_candidate_id)
+		if roll <= running_weight:
+			return weighted_candidate_id
+	return str(candidates.back())
+
+
+func _get_item_weight(item_id: String) -> int:
+	var item: Dictionary = _get_item(item_id)
+	if item.is_empty():
+		return 0
+	return maxi(int(item.get("weight", 1)), 0)
 
 
 func _is_valid_offer_index(offer_index: int) -> bool:
@@ -543,8 +663,11 @@ func _make_reserve_item_payload(item: Dictionary) -> Dictionary:
 	return {
 		"item_id": str(item["id"]),
 		"item_name": str(item["name"]),
+		"display_name": str(item["name"]),
 		"description": str(item.get("description", "")),
 		"price": int(item.get("price", 0)),
 		"spawn_type": str(item["spawn_type"]),
-		"icon_key": str(item["id"]),
+		"icon_key": str(item.get("icon_key", item["id"])),
+		"quantity": int(item.get("quantity", 1)),
+		"quantity_total": int(item.get("quantity_total", item.get("quantity", 1))),
 	}

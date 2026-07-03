@@ -322,6 +322,18 @@ func try_spend_doubloons(amount: int) -> bool:
 	return true
 
 
+func grant_doubloons(amount: int, source_label: String = "Reward") -> int:
+	var grant_amount: int = max(amount, 0)
+	if grant_amount <= 0:
+		return 0
+
+	doubloons_total += grant_amount
+	doubloons_changed.emit(doubloons_total)
+	doubloons_awarded.emit(grant_amount, doubloons_total)
+	score_feed_message.emit("%s: +%s Doubloons" % [source_label, grant_amount])
+	return grant_amount
+
+
 func apply_doubloons_penalty(amount: int) -> int:
 	var penalty_amount: int = max(amount, 0)
 	if penalty_amount <= 0:

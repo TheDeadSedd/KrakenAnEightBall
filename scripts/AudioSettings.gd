@@ -73,6 +73,10 @@ static func get_sfx_volume() -> float:
 	return _sfx_volume
 
 
+static func is_web_build() -> bool:
+	return OS.has_feature("web")
+
+
 static func _load() -> void:
 	var config := ConfigFile.new()
 	var error_code: int = config.load(CONFIG_PATH)

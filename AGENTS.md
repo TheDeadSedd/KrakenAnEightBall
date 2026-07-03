@@ -6,7 +6,7 @@ Kraken An Eight Ball is a Godot 4 / GDScript pirate-eldritch systemic arcade-cha
 
 The project is now a playable escalation sandbox with multiple interacting systems. The current core loop is:
 
-better shots -> more Doubloons and scoring feats -> Passage reduction and Kraken Intervention opportunities -> player-chosen Table Events / Quartermaster tools / Oath-backed rerolls -> more balls/anomalies/chaos -> stronger scoring opportunities -> complete Passage and earn persistent Kraken Favor.
+better shots -> more Doubloons and scoring feats -> Passage reduction and Kraken Intervention Charges -> player-chosen Table Events / temporary Kraken Boons / Quartermaster tools / Oath-backed rerolls -> more balls/anomalies/chaos -> stronger scoring opportunities -> Sunken Spoils and Passage completion -> persistent Kraken Favor.
 
 Core pillars:
 
@@ -14,12 +14,14 @@ Core pillars:
 - Pirate/kraken table presentation and in-engine charm.
 - Doubloons scoring driven by trick-shot event history.
 - Pocket-side score celebrations instead of generic center-screen scoring spam.
-- Kraken Intervention, a shot-earned Table Event economy that replaces automatic score-triggered BallDrop rewards with player-chosen chaos.
+- Kraken Intervention, a shot-earned Charge economy that replaces automatic score-triggered BallDrop rewards with player-chosen chaos.
+- Kraken Boons, temporary shot-duration upgrades purchased from the Intervention menu with Charges + Doubloons.
 - Passage, the current run objective spine: earn enough wealth and satisfy Kraken Requests to bargain safe passage.
 - Data-driven Oaths that can replace individual Kraken Intervention offers and temporarily impose risk/restriction.
+- Sunken Spoils, a run-local object-ball sink milestone reward track with claim/reroll/cast-back choices.
 - Pocket Streak scoring and localized pocket wake-up presentation for repeated same-pocket sinks in one shot.
 - Rolling HudFeed captain's-log messages for readable scoring, penalty, anomaly, and intervention history.
-- The Quartermaster tactical shop, rotating offers, paid stock refresh, Back Room Deals, reserve slots, and reusable ball placement flow.
+- The Quartermaster tactical shop, rotating single/bundle offers, paid stock refresh, Back Room Deals, stacked reserve slots, and reusable ball placement flow.
 - Current-run Run Stats, persistent Run History, persistent Kraken Favor, Cue Locker unlocks/equipment, and cue modifier plumbing.
 - Active anomaly balls: Wayfinder Ball, Powder Keg, Anchor curse seeds, Cannon Ball, Treasure Ball, and Embezzler experiments.
 - Expanded foundational, skilled, heroic, and legendary trick-shot event rewards.
@@ -32,7 +34,8 @@ Core pillars:
 
 Target platforms:
 
-- Windows first.
+- Windows downloadable build.
+- Experimental Web / itch browser build.
 - Android later.
 
 ## Architecture Ownership
@@ -81,11 +84,13 @@ Does not own shot power, shot velocity, aim prediction, or real ball movement.
 
 ### `scripts/AimPreview.gd`
 
-Owns polished cue-ball aim line presentation, shot-power color, swept cue-ball preview collision checks, AimPreview-only broad-phase filtering, ghost cue-ball prediction, one-bank preview, hit-ball prediction line presentation, hit-ball first-collision stopping against rails/balls/pockets, visual-only endpoint markers, read-only Treasure/Embezzler perception snapshots, and predicted-vs-actual shot path debug visualization.
+Owns polished cue-ball aim line presentation, shot-power color, swept cue-ball preview collision checks, AimPreview-only broad-phase filtering, ghost cue-ball prediction, one-bank preview, hit-ball prediction line presentation, Long Sight secondary chain-line prediction, hit-ball first-collision stopping against rails/balls/pockets, visual-only endpoint markers, read-only Treasure/Embezzler perception snapshots, and predicted-vs-actual shot path debug visualization.
 
 Does not mutate real gameplay state. Prediction must stay side-effect-free and should use shared boundary/pocket helpers so preview stays aligned with real movement.
 
 Aim preview rebuilds should be coalesced by `Table.gd`: input events mark the preview dirty, and a single centralized update performs at most one rebuild per frame while dragging. Do not reintroduce coarse angle/power tolerance reuse; graze shots need reliable rebuilds when the visible aim changes.
+
+Long Sight is a Kraken Boon effect read from the generic boon effect snapshot. It adds faint secondary chain lines after the normal cue-ball preview, follows one likely next ball per chain step, and stops on no next hit, pocket, rail/end condition, stop/max distance, or the depth limit. Current base Long Sight chain depth is 5. It must remain side-effect-free prediction/presentation only.
 
 AimPreview.gd must remain prediction/presentation only. It must not change real physics, shot power, cue feel, scoring, anomalies, or spawn systems.
 
@@ -105,7 +110,19 @@ Does not own shop inventory, Reserve slot contents, Doubloon spending, score pro
 
 Owns Quartermaster shop inventory, item IDs, prices, descriptions, affordability checks, purchase state, active rotating offer slots, paid deterministic/event-driven stock refresh, refresh cost scaling/shot decay, Quartermaster access blockers such as Oath of Isolation, and shop debug snapshots/counters.
 
-Current economy flow is Quartermaster buy -> first open Reserve slot fills. Purchases are allowed only when the player can afford the item, Quartermaster is available, and Reserve has space. A successful purchase spends Doubloons, fills the first empty Reserve slot, and refreshes only the purchased offer slot.
+Current economy flow is Quartermaster buy -> first open Reserve slot fills. Purchases are allowed only when the player can afford the item, Quartermaster is available, and Reserve has space. A successful purchase spends Doubloons, fills the first empty Reserve slot with a normalized payload, and refreshes only the purchased offer slot.
+
+Current normal stock pool:
+
+- Loose Object Ball x1: 10 Doubloons, weight 14.
+- Loose Object Ball x3: 25 Doubloons, weight 3.
+- Loose Object Ball x10: 75 Doubloons, weight 1.
+- Wayfinder Ball x1: 35 Doubloons, weight 5.
+- Wayfinder Ball x2: 60 Doubloons, weight 1.
+- Powder Keg x1: 55 Doubloons, weight 4.
+- Powder Keg x2: 95 Doubloons, weight 1.
+
+Bundles use Reserve quantity fields and should feel less common than x1 stock. Cannon, Treasure, and Embezzler are not normal Quartermaster offers; they remain Back Room / Contraband / future special reward territory.
 
 Quartermaster Refresh is run-local economic pressure: base cost 10 Doubloons, cost doubles after each refresh, and shot decay lowers the current refresh cost toward the base. Cue modifiers may alter the decay amount through generic modifier snapshots, not equipped-item checks.
 
@@ -133,7 +150,7 @@ Does not own stock selection, prices, affordability, Reserve behavior, spending,
 
 ### `scripts/QuartermasterHUD.gd`
 
-Owns the active live-gameplay Quartermaster side-rail shop presentation: compact right-side square item slots, cost text, refresh button/cost state, Back Room entry button, hover tooltip content, affordability tinting, refresh shimmer, shared item icon drawing, and cue-input-safe click routing into `QuartermasterSystem.gd`.
+Owns the active live-gameplay Quartermaster side-rail shop presentation: compact right-side square item slots, cost text, refresh button/cost state, Back Room entry button, hover tooltip content, affordability tinting, refresh shimmer, bundle xN badges, bundle rotating glow/aura tier presentation, shared item icon drawing, and cue-input-safe click routing into `QuartermasterSystem.gd`.
 
 This replaces the old active shop purchasing presentation that once lived in `PauseMenu.gd`. Tooltips should stay lightweight and only appear on hover; item descriptions should not become permanent inventory-panel text again. Empty HUD space should pass through to gameplay, hover should not interrupt an active cue drag, and clicks on actual item slots should intentionally consume UI input.
 
@@ -147,13 +164,13 @@ Does not own item definitions, prices, spawn behavior, Reserve contents, or game
 
 ### `scripts/ReserveSystem.gd`
 
-Owns the tactical Reserve data model: three slot contents, selected/deploying slot index, deployment start/confirm/cancel state, snapshots, and simple debug counters.
+Owns the tactical Reserve data model: three slot contents, stacked placeable payload fields (`quantity`, `quantity_total`, `display_name`, `spawn_type`), selected/deploying slot index, deployment start/confirm/cancel state, snapshots, and simple debug counters.
 
-Does not own visual slot drawing, cursor tether presentation, placement validation, ball spawning, Doubloon spending, or Quartermaster offer generation. Confirming a valid Reserve deployment clears the slot; canceling keeps the stored item.
+Does not own visual slot drawing, cursor tether presentation, placement validation, ball spawning, Doubloon spending, or Quartermaster offer generation. Confirming a valid Reserve deployment places exactly one ball and decrements quantity by 1; the slot clears only when quantity reaches 0. Canceling or invalid placement does not decrement quantity. No multi-placement exists yet; if it is added later, it should require an explicit hotkey/modifier and never be the default behavior.
 
 ### `scripts/ReserveSlotsUI.gd`
 
-Owns the visible icon-only Reserve slots mounted on the upper-right table frame, hover glow/outline, slot click input, and forwarding filled-slot deployment requests.
+Owns the visible icon-only Reserve slots mounted on the upper-right table frame, stack quantity badges, hover glow/outline, slot click input, and forwarding filled-slot deployment requests.
 
 Slot UI consumes click input when starting Reserve interaction, but it should not steal an already active cue drag through hover/mouse motion. It does not own slot contents, placement validation, or ball spawning.
 
@@ -279,7 +296,7 @@ Does not own object-ball scoring values, score popup presentation, Kraken Interv
 
 ### `scripts/TableEventSystem.gd`
 
-Owns the active Kraken Intervention / Table Event economy: per-shot Doubloon threshold tracking, pending intervention state, cue-control-gated readiness, weighted/rarity-based offer selection, single-offer replacement/reroll, purchase validation/spending, event execution routing, cargo Treasure/Contraband discovery decisions, debug event triggers, Table Event debug snapshots, and the default gate that disables old automatic BallDrop reward spawning.
+Owns the active Kraken Intervention / Table Event economy: per-shot Doubloon-to-meter tracking, multi-charge banking, pending intervention state, cue-control-gated readiness, weighted/rarity-based offer selection, single-offer replacement/reroll, charge-cost purchase validation, Boon offer routing, event execution routing, cargo Treasure/Contraband discovery decisions, debug event triggers, Table Event debug snapshots, and the default gate that disables old automatic BallDrop reward spawning.
 
 This is the chosen-chaos spine: strong shots earn a paid opportunity instead of invisible score-to-spawn plumbing. Keep the fuller design philosophy in the Kraken Intervention boundary below as the canonical wording.
 
@@ -287,22 +304,25 @@ Current flow:
 
 - Scoring still awards Doubloons immediately through `ScoreSystem.gd`.
 - Only Doubloons earned during an active shot advance the Kraken Intervention meter.
-- The current first-pass threshold is 30 shot-earned Doubloons.
-- Reaching the threshold creates a pending intervention opportunity instead of automatically spawning balls.
+- The first segment goal is 30 shot-earned Doubloons, then goals scale upward: 50, 75, 105, 140, 180...
+- Completing a segment banks one pending Kraken Intervention Charge.
+- Multiple charges can be earned from one big shot.
+- The next segment goal is based on current banked charge count.
 - The opportunity becomes clickable only after cue control returns / the player has a decision window.
-- The player opens the intervention menu manually and chooses one offer, or closes/cancels and keeps the opportunity.
-- Buying an offer spends Doubloons through the safe spend path and must not refill the meter.
+- The player opens the intervention menu manually and chooses one normal Intervention offer or a separate Kraken Boon, or closes/cancels and keeps the opportunity.
+- Core Intervention offers cost Kraken Intervention Charges only, not Doubloons.
+- Kraken Boons cost Charges + Doubloons.
 - Replacing one offer swears a selectable Oath and rerolls only that slot without spending Doubloons, executing the offer, or refilling the meter.
 
 Current offer pool:
 
-- Cheap Cargo: Common, weight 10, cost 20, drops 5 regular object balls.
-- Loose Cargo: Common, weight 8, cost 40, drops 10 regular object balls.
-- Wayfinder's Favor: Uncommon, weight 5, cost 55, drops 2 Wayfinder Balls.
-- Powder Cache: Uncommon, weight 4, cost 75, drops 3 Powder Kegs.
-- Cannon Warning: Rare, weight 2, cost 90, drops 1 Cannon Ball.
-- Broadside Attack: Rare, weight 1, cost 140, drops staged Powder Kegs first, then delayed Cannon Balls.
-- Wayfinder Current: Rare, weight 3, cost 120, drops 2 Wayfinders and triggers temporary current behavior.
+- Cheap Cargo: Common, weight 10, cost 1 Charge, drops 5 regular object balls.
+- Loose Cargo: Common, weight 8, cost 2 Charges, drops 10 regular object balls.
+- Wayfinder's Favor: Uncommon, weight 5, cost 2 Charges, drops 2 Wayfinder Balls.
+- Powder Cache: Uncommon, weight 4, cost 2 Charges, drops 3 Powder Kegs.
+- Cannon Warning: Rare, weight 2, cost 3 Charges, drops 1 Cannon Ball.
+- Wayfinder Current: Rare, weight 3, cost 4 Charges, drops 2 Wayfinders and triggers temporary current behavior.
+- Broadside Attack: Rare, weight 1, cost 5 Charges, drops staged Powder Kegs first, then delayed Cannon Balls.
 
 Signature intervention notes:
 
@@ -317,23 +337,79 @@ Cargo discovery notes:
 
 - Cheap Cargo has a rare Treasure replacement chance.
 - Loose Cargo has one event-level Contraband roll; on success exactly one regular cargo ball is replaced through the weighted Contraband Cargo table.
+- Base Loose Cargo Contraband chance is 20%.
+- Lucky Chalk adds +1% absolute chance while cue modifiers are active, making it 21%.
 - Current Contraband table: Wayfinder Ball 50, Powder Keg 30, Treasure Ball 15, Cannon Ball 4, Embezzler 1.
 - Anchor curse seeds are not Contraband Cargo.
-- Debug force controls must not change the normal 1% Loose Cargo Contraband chance when disabled.
+- Cargo RNG should be randomized for normal runs, not fixed-seeded. Cheap Cargo Treasure replacement, Loose Cargo Treasure fallback, and true Contraband result sources should stay distinct in debug/logging.
+- Debug force controls must not change normal Contraband odds when disabled.
 
 Does not own scoring values, pocket capture, physics, cue feel, anomaly behavior after spawn, Reserve/Quartermaster inventory, or UI drawing. `Table.gd` should coordinate wiring only.
 
 ### `scripts/TableEventMeter.gd`
 
-Owns the horizontal bottom-center Kraken Intervention meter presentation: `KRAKEN INTERVENTION` label, shot-earned progress text, percentage text, smooth bar fill, pending/ready pulse feedback, and the clickable ready icon.
+Owns the horizontal bottom-center Kraken Intervention meter presentation: `KRAKEN INTERVENTION` label, multi-charge segment display, shot-earned progress text, percentage text, theatrical tally-up animation, short bass tick presentation where supported, authored ready button texture (`res://assets/ui/kraken_intervention_button.png`), pending charge badge (`x2`, `x3`, etc.), smooth bar fill, pending/ready pulse feedback, and the clickable ready icon.
 
 Does not own threshold math, offer generation, spending, event execution, scoring, cue control, or old BallDrop progress. Empty meter space should not steal cue input; the ready icon should consume only intentional clicks.
 
 ### `scripts/TableEventMenu.gd`
 
-Owns the compact `Request Kraken Intervention...` choice menu: modal presentation, three weighted unique offer cards, cost/rarity/description/status text, affordability state, hover highlighting, close/cancel behavior, per-offer Replace controls, the compact Oath choice panel for replacement, and forwarding selected offer indexes / replacement choices to `TableEventSystem.gd`.
+Owns the compact `Request Kraken Intervention...` choice menu: modal presentation, three weighted unique normal Intervention offer cards, a separate compact Kraken Boons row, custom boon tooltip styling matching the game UI, cost/rarity/description/status text, affordability state, hover highlighting, close/cancel behavior, per-offer Replace controls only on normal Intervention cards, the compact Oath choice panel for replacement, and forwarding selected offer/boon indexes / replacement choices to `TableEventSystem.gd`.
 
 Does not own offer pool contents, weights, costs, purchase rules, Oath state, event execution, scoring, physics, or HUD meters. The menu should feel like a tactical ritual/omen choice, not a debug panel or full-screen RPG inventory.
+
+### `scripts/KrakenBoonSystem.gd`
+
+Owns data-driven Kraken Boon definitions, active Boon state, shot countdowns, activation/refresh tracking, active effect snapshots, debug activation/expiry helpers, and Boon-specific blocker/status data.
+
+Boons appear in a separate compact row below the three normal Kraken Intervention cards. They cost Kraken Intervention Charges + Doubloons, are temporary shot-duration upgrades, refresh back to their base duration when repurchased while active, and do not stack duration above their base value. Gameplay systems should consume generic effect keys from the active Boon snapshot, not hardcode Boon IDs.
+
+Current Boons:
+
+- Long Sight: costs 1 Charge + 60 Doubloons, lasts 5 shots, exposes `aim_preview_long_sight_enabled = true` and `aim_preview_chain_depth = 5`, and lets AimPreview draw a side-effect-free predictive chain of likely future hit-ball paths.
+- Kraken's Patience: costs 2 Charges + 100 Doubloons, lasts 3 shots, exposes `intervention_partial_progress_carry_enabled = true`, and lets partial Kraken Intervention meter progress carry between shots.
+- Deep Ledger: costs 1 Charge + 80 Doubloons, lasts 3 shots, exposes `intervention_meter_gain_multiplier = 1.5`, and makes earned Doubloons fill the Intervention meter 50% faster without changing actual Doubloons earned, Run Stats, or Passage contribution.
+- Iron Wake: costs 2 Charges + 125 Doubloons, lasts 3 shots, exposes cue-ball Cannon-wake style effect keys, and gives cue-ball impacts temporary Cannon-like authority. It does not mark the cue ball as an actual Cannon Ball and must not make it pass Cannon Ball identity checks.
+
+Does not own the Intervention menu UI, right-side Boon HUD drawing, scoring, cue equipment, or raw progression save data.
+
+### `scripts/KrakenBoonHUD.gd`
+
+Owns the right-side active Kraken Boons HUD indicator. It is display-only, supports multiple active Boon rows, pulses when a Boon is activated/refreshed, and should not be clickable or own purchase/refresh behavior.
+
+Does not own Boon activation, costs, shot countdowns, effect snapshots, or Intervention menu purchasing.
+
+### `scripts/SunkenSpoilsSystem.gd`
+
+Owns the current-run Sunken Spoils reward track based on qualifying object balls sunk. Milestones are `1, 3, 7, 12, 18, 25, 35, 50`; after the final listed milestone, the 50 requirement repeats. Progress is milestone-local. Cue ball and eight ball do not count.
+
+When a milestone fills, a pending Spoils reward becomes ready after shot resolution. Passage completion has priority over Sunken Spoils if both happen from the same shot. Claiming a reward applies it, advances to the next milestone, and resets progress to 0.
+
+Current safe reward categories are Doubloons, Kraken Intervention Charge, Reserve stack payloads, Passage reduction, and Free Quartermaster Refresh. Treasure, Cannon, and Embezzler are intentionally not Sunken Spoils rewards yet.
+
+Reroll rules:
+
+- Doubloon reroll first cost is `round(15 * pow(1.6, current_milestone_index))`.
+- Additional Doubloon rerolls in the same panel double the current cost.
+- Reroll cost resets every time a new Spoils menu is earned.
+- Spending uses the normal safe Doubloon spend path, counts as Doubloons Spent, does not count as Doubloons Lost, and does not refill Kraken Intervention.
+- Cast Back costs no Doubloons, closes the panel, does not claim a reward, does not advance the milestone, resets current milestone progress to 0, and keeps the same milestone requirement active.
+
+Reward cards use rarity metadata (`common`, `uncommon`, `rare`) and flavorful display labels while still showing the real effect. The first milestone guarantees at least one obvious satisfying reward option from +25 Doubloons, +50 Doubloons, +1 Intervention Charge, or Object Ball x3.
+
+Does not own UI panel drawing, HUD drawing, scoring values, Reserve deployment, Quartermaster refresh math, Passage core values, or Intervention meter rules.
+
+### `scripts/SunkenSpoilsPanel.gd`
+
+Owns the modal Sunken Spoils reward-choice panel: three reward cards, rarity styling, flavorful/effect text, claim forwarding, Doubloon reroll forwarding, Cast Back forwarding, close behavior, and cue-hover suppression.
+
+Does not own reward generation, reward application, reroll costs, Reserve mutation, Passage reduction, or Doubloon spending.
+
+### `scripts/SunkenSpoilsHUD.gd`
+
+Owns the compact Sunken Spoils live HUD progress indicator. It displays current milestone progress/requirement and pending reward state.
+
+Does not own milestone math, reward state, claim/reroll behavior, or gameplay state.
 
 ### `scripts/EventMetadata.gd`
 
@@ -473,6 +549,14 @@ Owns title-screen presentation, main menu input, button wiring, and safe transit
 
 Current main menu uses layered UI over authored art: `assets/ui/mainmenu_bg.png` for sky/moon/ocean/distant scenery, lightweight animated overlay passes, then `assets/ui/mainmenu_fg.png` for ship/tentacles/foreground waves, then fog and menu UI. Start Run loads `Main.tscn`, Options opens the shared first-pass Options menu with audio sliders, Cue Locker and Run History open focused progression/history panels, and Quit exits the game. The same Options menu is also reachable from the in-game pause menu.
 
+The public itch build exists. The main menu includes a small bottom-left Credits block:
+
+- Background music by: Little Robot Sound Factory.
+- Some SFX by: Vrymaa.
+- Font by: Not Jam (Old Style 11).
+- Placeholder art: ChatGPT.
+- Looking for artists to work with for final release.
+
 Does not own gameplay systems, pause menu state, debug systems, physics, scoring, Kraken Intervention/BallDrop systems, Quartermaster/Reserve behavior, raw run-history persistence, raw progression persistence, cue definitions, or audio settings storage.
 
 ### `scripts/OptionsMenu.gd`
@@ -485,7 +569,9 @@ Does not own gameplay audio playback logic, scoring, pause state, or raw bus def
 
 Owns first-pass audio settings persistence in `user://settings.cfg`, audio bus lookups, linear/decibel conversion, and applying Master/Music/SFX slider values to Godot audio buses.
 
-Does not own collision audio behavior, Pocket Streak audio behavior, gameplay music playback, UI layout, or gameplay state.
+Current public/export targets include a Windows downloadable build and an experimental Web / itch browser build. Web audio has compatibility fallbacks: unsupported or effect-heavy audio paths may be simplified on Web, procedural Intervention tally tick audio may be disabled there, and Pocket Streak reverb/effects may be disabled while preserving base audio. `default_bus_layout.tres` defines editor buses: Master, Music, SFX, and PocketStreakSFX. Windows audio should remain richer where supported.
+
+Does not own collision audio behavior, Pocket Streak audio behavior, gameplay music playback, UI layout, export presets, or gameplay state.
 
 ### `scripts/MainMenuPresentationOverlay.gd`
 
@@ -636,15 +722,17 @@ Preferred flow:
 
 - `ShotEventSystem.gd` records causal shot history.
 - `ScoreSystem.gd` awards Doubloons immediately and emits award amounts.
-- `TableEventSystem.gd` tracks only shot-active earned Doubloons toward the Kraken Intervention threshold.
-- Reaching the threshold creates a pending intervention opportunity, not an automatic spawn.
+- `TableEventSystem.gd` tracks only shot-active earned Doubloons toward the Kraken Intervention meter.
+- The first segment goal is 30 shot-earned Doubloons, then goals scale upward: 50, 75, 105, 140, 180...
+- Completing a segment banks one pending Kraken Intervention Charge; a big shot can bank multiple charges.
+- Reaching at least one banked Charge creates a pending intervention opportunity, not an automatic spawn.
 - Cue-control regain marks the pending intervention ready and makes the icon clickable.
-- `TableEventMenu.gd` presents three weighted unique offers.
-- `TableEventSystem.gd` validates purchases, spends Doubloons through the safe score/economy path, and routes event execution to the owning systems.
+- `TableEventMenu.gd` presents three weighted unique normal Intervention offers plus a separate compact Boon row.
+- `TableEventSystem.gd` validates Charge costs, spends Doubloons only for Boons where required, and routes event execution or Boon activation to the owning systems.
 - `SpawnSystem.gd` performs actual ball drops/launch setup, while anomaly systems own behavior after balls exist.
 - `Table.gd` coordinates wiring and shot lifecycle only.
 
-Spending Doubloons on interventions is not scoring and must not refill Kraken Intervention. Automatic score-triggered BallDrop spawning is gated/disabled by default and should stay retired unless explicitly requested; it is not a parallel active economy.
+Core Interventions are purchased with Kraken Intervention Charges, not Doubloons. Boons are purchased with Charges + Doubloons. Spending Doubloons on Boons, Quartermaster, Back Room, or Sunken Spoils rerolls is not scoring and must not refill Kraken Intervention. Automatic score-triggered BallDrop spawning is gated/disabled by default and should stay retired unless explicitly requested; it is not a parallel active economy.
 
 Do not bury Table Event choice/economy decisions inside `ScoreSystem.gd`, and do not add large event logic directly to `Table.gd`.
 
@@ -665,7 +753,7 @@ Do not bury Table Event choice/economy decisions inside `ScoreSystem.gd`, and do
 - Pocket Streak tracks repeated object-ball sinks into the same pocket during one shot. It is separate from `MULTI_SINK`, uses same-pocket scoring context, awards immediately through normal Doubloon flow, and logs compact HudFeed flavor lines.
 - Wayfinder Current can score eligible current-caused sinks through a focused current snapshot path without pretending a normal cue shot is active.
 - Treasure claims award a large Doubloon payout through the normal award flow while preserving double-award safety.
-- Quartermaster and Kraken Intervention spending are not score awarding. Purchases should not emit `doubloons_awarded`, feed Kraken Intervention progress, revive BallDrop progress, or appear as sink-score rewards.
+- Quartermaster, Kraken Boon, and Sunken Spoils reroll spending are not score awarding. Core Kraken Interventions spend banked Charges. Purchases should not emit `doubloons_awarded`, feed Kraken Intervention progress, revive BallDrop progress, or appear as sink-score rewards.
 - Run Stats tracks positive Doubloons earned separately from Doubloons spent and Doubloons lost to penalties. Purchases are spending, not "lost" score.
 - Do not add coin sprays, progression, or large score VFX without permission.
 - Normal gameplay reward drops should come from player-chosen Kraken Intervention/Table Event purchases, not automatic score-triggered BallDrop progress.
@@ -677,7 +765,7 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 ## Quartermaster, Reserve, And Placement Rules
 
 - Quartermaster currently presents three rotating tactical offers selected from the purchasable item pool through the live gameplay-mounted `QuartermasterHUD.gd` side rail.
-- Current purchasable items are Loose Object Ball, Wayfinder Ball, and Powder Keg.
+- Current normal purchasable stock is Loose Object Ball x1/x3/x10, Wayfinder Ball x1/x2, and Powder Keg x1/x2.
 - Quartermaster Refresh is a paid live-HUD action. It rerolls current offers, scales from 10 Doubloons upward by doubling, and cools down after shots without refreshing.
 - Back Room Deal unlocks from high refresh pressure, is presented separately from normal stock, costs 250 Doubloons, and adds a chosen special item to Reserve when valid.
 - Oath of Isolation makes Quartermaster purchases, refreshes, and Back Room Deals unavailable while active.
@@ -686,7 +774,7 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 - Quartermaster tooltips appear on hover and should stay compact. Permanent item-description panels should not return unless specifically requested.
 - Reserve has exactly three slots in the current implementation.
 - Reserve deployment clicks a filled slot, pauses gameplay if needed, enters `BallPlacementSystem.gd`, and keeps the item in the slot until valid confirm.
-- Confirming a valid deployment places the ball and clears the Reserve slot.
+- Confirming a valid deployment places one ball and decrements quantity; the Reserve slot clears only when quantity reaches 0.
 - Canceling deployment keeps the item and restores the previous pause state.
 - Ball placement must use existing safe placement helpers and must not fight cue drag/release input.
 - Cursor-attached Reserve icons and dotted tethers are presentation-only and should not affect placement validity.
@@ -705,9 +793,11 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 
 ## Presentation And HUD Rules
 
-- The player-facing progression meter is the horizontal bottom-center `KRAKEN INTERVENTION` meter, with progress count below/left, percentage to the right, and a nearby ready icon.
+- The player-facing intervention meter is the horizontal bottom-center `KRAKEN INTERVENTION` meter, with multi-charge segment progress, progress count below/left, percentage to the right, theatrical tally-up, and a nearby authored ready button using `assets/ui/kraken_intervention_button.png`.
 - Passage and Kraken Request information should remain compact and atmospheric, with tooltips sourced from event/request metadata rather than hardcoded HUD text.
 - Active Oaths should show a compact HUD indicator while active, with tooltip details from `OathSystem.gd`.
+- Active Kraken Boons should show in the right-side display-only Boon HUD, not as clickable purchase controls.
+- Sunken Spoils should show compact live progress and use its modal reward panel only when a reward is ready after shot resolution.
 - Run Stats can be opened from a small top-left ledger button without pausing gameplay.
 - The BALLS/SUNK run ledger cluster belongs with the lower Kraken Intervention HUD group, not with table geometry.
 - The intervention menu title is `Request Kraken Intervention...`; keep it compact, centered over the playfield, and styled as an ominous tactical choice rather than a full-screen shop.
@@ -725,7 +815,10 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 - The pause menu keeps debug controls hidden behind Dev Options. Dev Options content is scrollable so all controls remain reachable.
 - The pause/debug menu exposes temporary Event Test Button checkboxes for Wayfinder Current and Broadside Attack. They should be off by default and debug-only.
 - The right-side `Current` / `Broadside` test buttons call the same event behavior as real Table Events while bypassing only cost/readiness. They must not spend Doubloons, refill Kraken Intervention, alter offer state, or duplicate event logic.
-- Useful current debug surfaces include Table Event threshold/progress/pending/readiness/offers, Contraband force controls, table debris spawn/collision controls, Oath Testing controls, Pocket Streak multiplier/queue/audio/whirlpool counters, Wayfinder Current carriers/affected/transfers/current-caused sinks, cue modifier suppression readouts, and Pocket Streak audio cooldown/player-pool state.
+- Useful current debug surfaces include Table Event Charges/segment index/goal/progress/pending/readiness/offers, Contraband odds/roll/source force controls, Boon activation/expiry controls, Reserve stack tests, Sunken Spoils progress/reward/reset controls, table debris spawn/collision controls, Oath Testing controls, Pocket Streak multiplier/queue/audio/whirlpool counters, Wayfinder Current carriers/affected/transfers/current-caused sinks, cue modifier suppression readouts, and Pocket Streak audio cooldown/player-pool state.
+- Boon Dev Options include Activate Long Sight, Activate Kraken's Patience, Activate Deep Ledger, Activate Iron Wake, and Expire All Boons.
+- Reserve stack Dev Options include Add Object Ball x3, Add Object Ball x10, Add Wayfinder x2, Add Powder Keg x2, and Add Cannon Ball x2.
+- Sunken Spoils Dev Options include Advance Spoils Progress +1, Trigger Spoils Reward, and Reset Spoils.
 - Debug buttons and panels must consume their own intentional clicks without stealing cue dragging outside their active rectangles.
 
 ## Audio Rules
@@ -740,6 +833,8 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 - Audio should feel responsive to visible impact timing, but must not change collision math, cue feel, shot velocity, scoring, or anomaly behavior.
 - Add rail, pocket, UI, or anomaly-specific audio only in focused future passes.
 - `AudioSettings.gd` may change bus volumes from Options; it should not change playback logic or route-specific audio ownership.
+- Web export audio should prioritize basic music/SFX compatibility. Web-specific fallbacks may disable or simplify unsupported paths; procedural Intervention tally tick audio and Pocket Streak reverb/effects may be disabled on Web while base audio remains. Windows can keep richer audio where supported.
+- Browser/mobile web currently runs, but mobile control polish is not an official target yet. Future web/mobile QoL may need an on-screen pause/menu button.
 
 ## Performance Rules
 
@@ -837,13 +932,15 @@ The first playable Passage, Oath, Quartermaster Refresh, Back Room, Run History,
 
 Current Kraken Intervention offers are:
 
-- Cheap Cargo
-- Loose Cargo
-- Powder Cache
-- Wayfinder's Favor
-- Cannon Warning
-- Broadside Attack
-- Wayfinder Current
+- Cheap Cargo: 1 Charge
+- Loose Cargo: 2 Charges
+- Wayfinder's Favor: 2 Charges
+- Powder Cache: 2 Charges
+- Cannon Warning: 3 Charges
+- Wayfinder Current: 4 Charges
+- Broadside Attack: 5 Charges
+
+Current Kraken Boons are Long Sight, Kraken's Patience, Deep Ledger, and Iron Wake. They appear in the separate Boon row below the three normal Intervention cards and cost Charges + Doubloons.
 
 The player-facing intervention meter is the horizontal bottom-center `KRAKEN INTERVENTION` meter, while Passage/Kraken Request state is the run-objective HUD. The old vertical BallDrop meter and automatic reward spawning are retired/gated legacy support unless explicitly re-enabled for a focused test.
 

@@ -87,6 +87,7 @@ var table: BilliardsTable
 var rng := RandomNumberGenerator.new()
 var request_index := -1
 var passage_reduced_by_requests := 0
+var passage_reduced_by_spoils := 0
 var passage_added_by_request_rerolls := 0
 var passage_added_by_oaths := 0
 var request_rerolls_used := 0
@@ -106,6 +107,7 @@ func _ready() -> void:
 func setup(table_ref: BilliardsTable) -> void:
 	table = table_ref
 	passage_reduced_by_requests = 0
+	passage_reduced_by_spoils = 0
 	passage_added_by_request_rerolls = 0
 	passage_added_by_oaths = 0
 	request_rerolls_used = 0
@@ -130,6 +132,7 @@ func get_passage_snapshot() -> Dictionary:
 		"passage_required": maxi(passage_required, 0),
 		"remaining_passage": maxi(remaining_passage, 0),
 		"passage_reduced_by_requests": maxi(passage_reduced_by_requests, 0),
+		"passage_reduced_by_spoils": maxi(passage_reduced_by_spoils, 0),
 		"passage_added_by_request_rerolls": maxi(passage_added_by_request_rerolls, 0),
 		"passage_added_by_oaths": maxi(passage_added_by_oaths, 0),
 		"request_rerolls_used": maxi(request_rerolls_used, 0),
@@ -207,6 +210,16 @@ func add_passage_pressure(amount: int) -> void:
 
 	passage_added_by_oaths += pressure_amount
 	_recalculate_remaining_passage()
+
+
+func reduce_passage_from_spoils(amount: int) -> int:
+	var reduction_amount: int = maxi(amount, 0)
+	if reduction_amount <= 0 or completed:
+		return 0
+
+	passage_reduced_by_spoils += reduction_amount
+	_recalculate_remaining_passage()
+	return reduction_amount
 
 
 func _connect_event_sources() -> void:
@@ -382,7 +395,7 @@ func _recalculate_remaining_passage() -> void:
 	if table != null and table.score_system != null:
 		held_doubloons = maxi(table.score_system.get_doubloons_total(), 0)
 
-	remaining_passage = maxi(passage_required + passage_added_by_request_rerolls + passage_added_by_oaths - passage_reduced_by_requests - held_doubloons, 0)
+	remaining_passage = maxi(passage_required + passage_added_by_request_rerolls + passage_added_by_oaths - passage_reduced_by_requests - passage_reduced_by_spoils - held_doubloons, 0)
 	var snapshot := get_passage_snapshot()
 	passage_changed.emit(snapshot)
 	if not completed and remaining_passage <= 0:

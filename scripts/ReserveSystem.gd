@@ -53,12 +53,18 @@ func get_slots_snapshot() -> Array:
 	for slot_index in range(SLOT_COUNT):
 		var content: Dictionary = _get_slot_content(slot_index)
 		var filled := not content.is_empty()
+		var quantity: int = _get_item_quantity(content) if filled else 0
+		var quantity_total: int = _get_item_quantity_total(content, quantity) if filled else 0
 		snapshot.append({
 			"index": slot_index,
 			"filled": filled,
 			"item_id": str(content.get("item_id", "")),
 			"item_name": str(content.get("item_name", "")),
+			"display_name": str(content.get("display_name", content.get("item_name", ""))),
+			"spawn_type": str(content.get("spawn_type", "")),
 			"icon_key": str(content.get("icon_key", "")),
+			"quantity": quantity,
+			"quantity_total": quantity_total,
 			"selected": slot_index == selected_slot_index,
 			"deploying": slot_index == deploying_slot_index,
 		})
@@ -136,7 +142,12 @@ func store_item_in_slot(slot_index: int, item: Dictionary) -> bool:
 		failed_store_attempts += 1
 		return false
 
-	slot_contents[slot_index] = item.duplicate(true)
+	var normalized_item: Dictionary = _normalize_reserve_item_payload(item)
+	if normalized_item.is_empty():
+		failed_store_attempts += 1
+		return false
+
+	slot_contents[slot_index] = normalized_item
 	_emit_slots_changed()
 	return true
 
@@ -147,7 +158,7 @@ func set_slot_content(slot_index: int, item: Dictionary) -> bool:
 		return false
 
 	_ensure_slots_initialized()
-	slot_contents[slot_index] = item.duplicate(true)
+	slot_contents[slot_index] = _normalize_reserve_item_payload(item)
 	_emit_slots_changed()
 	return true
 
@@ -238,6 +249,8 @@ func _get_deploy_blocker(slot_index: int) -> String:
 		return "Invalid reserve slot"
 	if _get_slot_content(slot_index).is_empty():
 		return "Reserve slot empty"
+	if _get_item_quantity(_get_slot_content(slot_index)) <= 0:
+		return "Reserve slot empty"
 	return ""
 
 
@@ -259,7 +272,7 @@ func _on_placement_confirmed(item_id: String, position: Vector2) -> void:
 		deployment_finished.emit(false, slot_index)
 		return
 
-	clear_slot(slot_index)
+	_consume_one_from_slot(slot_index, content)
 	deploy_confirmed_count += 1
 	deployment_finished.emit(true, slot_index)
 
@@ -280,6 +293,47 @@ func _finish_deployment(_confirmed: bool, slot_index: int) -> void:
 	if deploying_slot_index == slot_index:
 		deploying_slot_index = -1
 	_emit_slots_changed()
+
+
+func _consume_one_from_slot(slot_index: int, content: Dictionary) -> void:
+	var remaining_quantity: int = _get_item_quantity(content) - 1
+	if remaining_quantity <= 0:
+		clear_slot(slot_index)
+		return
+
+	var updated_content: Dictionary = content.duplicate(true)
+	updated_content["quantity"] = remaining_quantity
+	slot_contents[slot_index] = _normalize_reserve_item_payload(updated_content)
+	_finish_deployment(true, slot_index)
+
+
+func _normalize_reserve_item_payload(item: Dictionary) -> Dictionary:
+	if item.is_empty():
+		return {}
+
+	var normalized_item: Dictionary = item.duplicate(true)
+	var quantity: int = maxi(int(normalized_item.get("quantity", 1)), 0)
+	if quantity <= 0:
+		return {}
+
+	var quantity_total: int = maxi(int(normalized_item.get("quantity_total", quantity)), quantity)
+	normalized_item["quantity"] = quantity
+	normalized_item["quantity_total"] = quantity_total
+	if not normalized_item.has("display_name"):
+		normalized_item["display_name"] = str(normalized_item.get("item_name", normalized_item.get("item_id", "Reserve item")))
+	return normalized_item
+
+
+func _get_item_quantity(content: Dictionary) -> int:
+	if content.is_empty():
+		return 0
+	return maxi(int(content.get("quantity", 1)), 0)
+
+
+func _get_item_quantity_total(content: Dictionary, fallback_quantity: int = 1) -> int:
+	if content.is_empty():
+		return 0
+	return maxi(int(content.get("quantity_total", fallback_quantity)), fallback_quantity)
 
 
 func _spawn_reserved_item(content: Dictionary, position: Vector2) -> bool:

@@ -742,6 +742,33 @@ func _make_ball_drop_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["table_event_cannon_warning_ball_count"],
 			snapshot["table_event_cannon_warning_cost"],
 		],
+		"Loose Cargo special odds: Contraband %.1f%% = base %.1f%% + cue %.1f%% / Treasure fallback %.1f%%" % [
+			float(snapshot["table_event_loose_cargo_contraband_final_chance"]) * 100.0,
+			float(snapshot["table_event_loose_cargo_contraband_base_chance"]) * 100.0,
+			float(snapshot["table_event_loose_cargo_contraband_cue_bonus"]) * 100.0,
+			float(snapshot["table_event_loose_cargo_treasure_chance"]) * 100.0,
+		],
+		"Last cargo special: %s / Treasure source %s roll %.3f index %s" % [
+			snapshot["table_event_last_cargo_special_source"],
+			snapshot["table_event_last_cargo_treasure_source"],
+			float(snapshot["table_event_last_cargo_treasure_roll"]),
+			snapshot["table_event_last_cargo_treasure_replacement_index"],
+		],
+		"Last Contraband: success %s / roll %.3f / weight %s / %s (%s) / fallback %s" % [
+			_debug_bool_text(bool(snapshot["table_event_last_loose_cargo_contraband_succeeded"])),
+			float(snapshot["table_event_last_loose_cargo_contraband_roll"]),
+			snapshot["table_event_last_loose_cargo_contraband_weight_roll"],
+			snapshot["table_event_last_loose_cargo_contraband_replacement_label"],
+			snapshot["table_event_last_loose_cargo_contraband_replacement_kind"],
+			_debug_bool_text(bool(snapshot["table_event_last_loose_cargo_treasure_fallback_succeeded"])),
+		],
+		"Cargo RNG: seed %s / state %s / fixed-debug %s / force %s %s" % [
+			snapshot["table_event_cargo_rng_seed"],
+			snapshot["table_event_cargo_rng_state"],
+			_debug_bool_text(bool(snapshot["table_event_cargo_rng_debug_fixed"])),
+			_debug_bool_text(bool(snapshot["table_event_debug_force_loose_cargo_contraband"])),
+			snapshot["table_event_debug_loose_cargo_contraband_kind"],
+		],
 		"Table Event last blocker: %s" % snapshot["table_event_last_blocker_reason"],
 		"Legacy BallDrop progress: %s/%s Doubloons" % [
 			snapshot["ball_drop_progress"],

@@ -39,7 +39,10 @@ var passage_completion_confirm_button: Button
 var passage_completion_progression_award: Dictionary = {}
 var latest_cue_progression_snapshot: Dictionary = {}
 var latest_back_room_deal_snapshot: Dictionary = {}
+var latest_sunken_spoils_snapshot: Dictionary = {}
 var back_room_panel: BackRoomDealPanel
+var sunken_spoils_panel: SunkenSpoilsPanel
+var sunken_spoils_hud: SunkenSpoilsHUD
 
 
 func _ready() -> void:
@@ -64,6 +67,8 @@ func _connect_table_signals() -> void:
 	table.score_system.score_feed_message.connect(_on_score_feed_message)
 	table.table_event_system.status_changed.connect(_on_table_event_status_changed)
 	table.table_event_system.event_purchased.connect(_on_table_event_purchased)
+	table.sunken_spoils_system.spoils_changed.connect(_on_sunken_spoils_changed)
+	table.sunken_spoils_system.status_changed.connect(_on_sunken_spoils_status_changed)
 	table.run_stats_system.run_stats_changed.connect(_on_run_stats_changed)
 	table.passage_system.request_completed.connect(_on_passage_request_completed)
 	table.passage_system.request_rerolled.connect(_on_passage_request_rerolled)
@@ -127,6 +132,14 @@ func _connect_pause_menu_signals() -> void:
 		pause_menu.debug_activate_iron_wake_requested.connect(_on_pause_debug_activate_iron_wake_requested)
 	if not pause_menu.debug_expire_all_boons_requested.is_connected(_on_pause_debug_expire_all_boons_requested):
 		pause_menu.debug_expire_all_boons_requested.connect(_on_pause_debug_expire_all_boons_requested)
+	if not pause_menu.debug_reserve_stack_payload_requested.is_connected(_on_pause_debug_reserve_stack_payload_requested):
+		pause_menu.debug_reserve_stack_payload_requested.connect(_on_pause_debug_reserve_stack_payload_requested)
+	if not pause_menu.debug_sunken_spoils_advance_requested.is_connected(_on_pause_debug_sunken_spoils_advance_requested):
+		pause_menu.debug_sunken_spoils_advance_requested.connect(_on_pause_debug_sunken_spoils_advance_requested)
+	if not pause_menu.debug_sunken_spoils_trigger_requested.is_connected(_on_pause_debug_sunken_spoils_trigger_requested):
+		pause_menu.debug_sunken_spoils_trigger_requested.connect(_on_pause_debug_sunken_spoils_trigger_requested)
+	if not pause_menu.debug_sunken_spoils_reset_requested.is_connected(_on_pause_debug_sunken_spoils_reset_requested):
+		pause_menu.debug_sunken_spoils_reset_requested.connect(_on_pause_debug_sunken_spoils_reset_requested)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 
@@ -163,6 +176,7 @@ func _setup_hud_presenters() -> void:
 	passage_hud.setup(table.passage_system)
 	oath_hud.setup(table.oath_system)
 	kraken_boon_hud.setup(table.kraken_boon_system)
+	_build_sunken_spoils_ui()
 	_on_run_stats_changed(table.run_stats_system.get_run_stats_snapshot())
 	reserve_slots_ui.setup(table.reserve_system, table)
 	quartermaster_hud.setup(table.quartermaster_system, table)
@@ -234,6 +248,45 @@ func _position_back_room_deal_panel() -> void:
 	back_room_panel.position = panel_position
 
 
+func _build_sunken_spoils_ui() -> void:
+	if sunken_spoils_hud == null:
+		sunken_spoils_hud = SunkenSpoilsHUD.new()
+		sunken_spoils_hud.name = "SunkenSpoilsHUD"
+		debug_overlay.add_child(sunken_spoils_hud)
+		sunken_spoils_hud.setup(table.sunken_spoils_system)
+
+	if sunken_spoils_panel == null:
+		sunken_spoils_panel = SunkenSpoilsPanel.new()
+		sunken_spoils_panel.name = "SunkenSpoilsPanel"
+		debug_overlay.add_child(sunken_spoils_panel)
+		sunken_spoils_panel.reward_selected.connect(_on_sunken_spoils_reward_selected)
+		sunken_spoils_panel.doubloon_reroll_requested.connect(_on_sunken_spoils_doubloon_reroll_requested)
+		sunken_spoils_panel.cast_back_requested.connect(_on_sunken_spoils_cast_back_requested)
+		sunken_spoils_panel.set_hover_ui_suppressed(table.should_suppress_hover_ui())
+
+	if not latest_sunken_spoils_snapshot.is_empty():
+		_set_sunken_spoils_snapshot(latest_sunken_spoils_snapshot)
+	else:
+		_set_sunken_spoils_snapshot(table.sunken_spoils_system.get_spoils_snapshot())
+
+
+func _set_sunken_spoils_snapshot(snapshot: Dictionary) -> void:
+	latest_sunken_spoils_snapshot = snapshot.duplicate(true)
+	if sunken_spoils_hud != null:
+		sunken_spoils_hud.set_spoils_snapshot(latest_sunken_spoils_snapshot)
+	if sunken_spoils_panel != null:
+		sunken_spoils_panel.set_spoils_snapshot(latest_sunken_spoils_snapshot)
+		if bool(latest_sunken_spoils_snapshot.get("pending_reward_ready", false)):
+			if passage_completion_in_progress:
+				sunken_spoils_panel.close_panel()
+				return
+			if table_event_menu != null and table_event_menu.visible:
+				table_event_menu.close_menu()
+			sunken_spoils_panel.open_panel(latest_sunken_spoils_snapshot)
+		elif sunken_spoils_panel.visible:
+			sunken_spoils_panel.close_panel()
+
+
 func _sync_initial_hud_state() -> void:
 	pause_menu.set_debug_panel_states(debug_overlay.get_modular_debug_panel_states())
 	pause_menu.set_debris_collision_debug_state(table.table_obstacle_system.obstacle_collision_enabled)
@@ -241,6 +294,7 @@ func _sync_initial_hud_state() -> void:
 	pause_menu.set_back_room_force_available_debug_state(bool(table.back_room_deal_system.get_deal_snapshot().get("debug_force_available", false)))
 	quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 	_set_back_room_deal_snapshot(table.back_room_deal_system.get_deal_snapshot())
+	_set_sunken_spoils_snapshot(table.sunken_spoils_system.get_spoils_snapshot())
 	cue_start_selector_hud.set_cue_start_snapshot(table.get_cue_start_selection_snapshot())
 	_on_gameplay_mouse_lock_changed(table.should_suppress_hover_ui())
 
@@ -401,6 +455,16 @@ func _on_table_event_status_changed(text: String) -> void:
 	hud_feed.add_message(text, "event")
 
 
+func _on_sunken_spoils_changed(snapshot: Dictionary) -> void:
+	_set_sunken_spoils_snapshot(snapshot)
+
+
+func _on_sunken_spoils_status_changed(text: String) -> void:
+	if text.is_empty():
+		return
+	hud_feed.add_message(text, "event")
+
+
 func _on_gameplay_mouse_lock_changed(locked: bool) -> void:
 	oath_hud.set_hover_ui_suppressed(locked)
 	passage_hud.set_hover_ui_suppressed(locked)
@@ -413,6 +477,10 @@ func _on_gameplay_mouse_lock_changed(locked: bool) -> void:
 	reserve_slots_ui.set_hover_ui_suppressed(locked)
 	if back_room_panel != null:
 		back_room_panel.set_hover_ui_suppressed(locked)
+	if sunken_spoils_hud != null:
+		sunken_spoils_hud.set_hover_ui_suppressed(locked)
+	if sunken_spoils_panel != null:
+		sunken_spoils_panel.set_hover_ui_suppressed(locked)
 
 
 func _on_cue_start_selection_changed(snapshot: Dictionary) -> void:
@@ -437,6 +505,18 @@ func _on_table_event_offer_replace_requested(offer_index: int, oath_id: String) 
 
 func _on_table_event_purchased(_event_id: String, _charge_cost: int) -> void:
 	table_event_menu.close_menu()
+
+
+func _on_sunken_spoils_reward_selected(reward_id: String) -> void:
+	table.sunken_spoils_system.claim_reward(reward_id)
+
+
+func _on_sunken_spoils_doubloon_reroll_requested() -> void:
+	table.sunken_spoils_system.request_doubloon_reroll()
+
+
+func _on_sunken_spoils_cast_back_requested() -> void:
+	table.sunken_spoils_system.cast_back()
 
 
 func _on_run_stats_changed(snapshot: Dictionary) -> void:
@@ -469,6 +549,8 @@ func _on_passage_completed(passage_snapshot: Dictionary) -> void:
 	_finalize_successful_passage_progression(passage_snapshot)
 	if table_event_menu != null and table_event_menu.visible:
 		table_event_menu.close_menu()
+	if sunken_spoils_panel != null and sunken_spoils_panel.visible:
+		sunken_spoils_panel.close_panel()
 	if run_stats_hud != null:
 		run_stats_hud.close_panel()
 	if table != null and table.is_ball_placement_active():
@@ -638,6 +720,63 @@ func _on_pause_debug_expire_all_boons_requested() -> void:
 		hud_feed.add_message("Debug Boon expire skipped: no active boons.", "event")
 	else:
 		hud_feed.add_message("Debug Boons expired: %s." % expired_count, "event")
+
+
+func _on_pause_debug_reserve_stack_payload_requested(payload: Dictionary) -> void:
+	if table == null or table.reserve_system == null:
+		hud_feed.add_message("Reserve stack test blocked: Reserve unavailable.", "shop")
+		return
+
+	if table.reserve_system.is_full():
+		hud_feed.add_message("Reserve stack test blocked: Reserve is full.", "shop")
+		return
+
+	var stored_slot_index: int = table.reserve_system.store_item_in_first_empty_slot(payload)
+	if stored_slot_index < 0:
+		hud_feed.add_message("Reserve stack test failed: payload could not be stowed.", "shop")
+		return
+
+	var item_name: String = str(payload.get("display_name", payload.get("item_name", "Reserve item")))
+	var quantity: int = maxi(int(payload.get("quantity", 1)), 1)
+	hud_feed.add_message("Debug Reserve stack: %s x%s stowed in slot %s." % [
+		item_name,
+		quantity,
+		stored_slot_index + 1,
+	], "shop")
+
+
+func _on_pause_debug_sunken_spoils_advance_requested() -> void:
+	if table == null or table.sunken_spoils_system == null:
+		hud_feed.add_message("Sunken Spoils debug blocked: system unavailable.", "event")
+		return
+
+	table.sunken_spoils_system.debug_advance_progress(1)
+	_unpause_if_sunken_spoils_ready()
+
+
+func _on_pause_debug_sunken_spoils_trigger_requested() -> void:
+	if table == null or table.sunken_spoils_system == null:
+		hud_feed.add_message("Sunken Spoils debug blocked: system unavailable.", "event")
+		return
+
+	table.sunken_spoils_system.debug_trigger_reward()
+	_unpause_if_sunken_spoils_ready()
+
+
+func _on_pause_debug_sunken_spoils_reset_requested() -> void:
+	if table == null or table.sunken_spoils_system == null:
+		hud_feed.add_message("Sunken Spoils debug blocked: system unavailable.", "event")
+		return
+
+	table.sunken_spoils_system.debug_reset_spoils()
+
+
+func _unpause_if_sunken_spoils_ready() -> void:
+	if table == null or table.sunken_spoils_system == null:
+		return
+	var snapshot: Dictionary = table.sunken_spoils_system.get_spoils_snapshot()
+	if bool(snapshot.get("pending_reward_ready", false)):
+		_set_game_paused(false)
 
 
 func _get_oath_label(oath_id: String) -> String:

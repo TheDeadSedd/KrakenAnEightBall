@@ -132,6 +132,7 @@ const CUE_BALL_CANNON_WAKE_DEFAULT_RETENTION := 0.22
 @onready var table_event_system: TableEventSystem = $TableEventSystem
 @onready var kraken_boon_system: KrakenBoonSystem = $KrakenBoonSystem
 @onready var run_stats_system: RunStatsSystem = $RunStatsSystem
+@onready var sunken_spoils_system: SunkenSpoilsSystem = $SunkenSpoilsSystem
 @onready var passage_system: PassageSystem = $PassageSystem
 @onready var oath_system: OathSystem = $OathSystem
 @onready var table_obstacle_system: TableObstacleSystem = $TableObstacleSystem
@@ -249,6 +250,7 @@ func _ready() -> void:
 	quartermaster_system.setup(self)
 	reserve_system.setup(self)
 	back_room_deal_system.setup(self)
+	sunken_spoils_system.setup(self)
 	run_stats_system.setup(self)
 	_cache_table_geometry()
 	cue_controller.setup()
@@ -1366,6 +1368,7 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 
 	var score_context: Dictionary = _make_sink_score_context(ball)
 	_note_run_ball_sunk(ball)
+	sunken_spoils_system.record_qualifying_object_ball_sunk(ball)
 	anchor_ball_system.handle_ball_pocketed(ball)
 	if embezzler_system.handle_ball_captured(ball, score_context):
 		status_text_changed.emit("Embezzler caught.")
@@ -1733,6 +1736,7 @@ func _try_finish_shot() -> void:
 	shot_finished.emit(shots_taken_count)
 	if should_advance_anchor_chains:
 		_handle_cue_control_regained_after_shot()
+	sunken_spoils_system.handle_shot_resolved()
 
 
 func _handle_cue_control_regained_after_shot() -> void:
@@ -2073,6 +2077,25 @@ func _get_ball_drop_performance_snapshot(ball_drop_snapshot: Dictionary) -> Dict
 		"table_event_cheap_cargo_ball_count": table_event_snapshot["cheap_cargo_ball_count"],
 		"table_event_loose_cargo_cost": table_event_snapshot["loose_cargo_cost"],
 		"table_event_loose_cargo_ball_count": table_event_snapshot["loose_cargo_ball_count"],
+		"table_event_loose_cargo_contraband_base_chance": table_event_snapshot["loose_cargo_contraband_base_chance"],
+		"table_event_loose_cargo_contraband_cue_bonus": table_event_snapshot["loose_cargo_contraband_cue_bonus"],
+		"table_event_loose_cargo_contraband_final_chance": table_event_snapshot["loose_cargo_contraband_final_chance"],
+		"table_event_loose_cargo_treasure_chance": table_event_snapshot["loose_cargo_treasure_chance"],
+		"table_event_last_cargo_special_source": table_event_snapshot["last_cargo_special_source"],
+		"table_event_last_cargo_treasure_source": table_event_snapshot["last_cargo_treasure_source"],
+		"table_event_last_cargo_treasure_roll": table_event_snapshot["last_cargo_treasure_roll"],
+		"table_event_last_cargo_treasure_replacement_index": table_event_snapshot["last_cargo_treasure_replacement_index"],
+		"table_event_last_loose_cargo_contraband_roll": table_event_snapshot["last_loose_cargo_contraband_roll"],
+		"table_event_last_loose_cargo_contraband_succeeded": table_event_snapshot["last_loose_cargo_contraband_succeeded"],
+		"table_event_last_loose_cargo_contraband_weight_roll": table_event_snapshot["last_loose_cargo_contraband_weight_roll"],
+		"table_event_last_loose_cargo_contraband_replacement_kind": table_event_snapshot["last_loose_cargo_contraband_replacement_kind"],
+		"table_event_last_loose_cargo_contraband_replacement_label": table_event_snapshot["last_loose_cargo_contraband_replacement_label"],
+		"table_event_last_loose_cargo_treasure_fallback_succeeded": table_event_snapshot["last_loose_cargo_treasure_fallback_succeeded"],
+		"table_event_cargo_rng_seed": table_event_snapshot["cargo_stowaway_rng_seed"],
+		"table_event_cargo_rng_state": table_event_snapshot["cargo_stowaway_rng_state"],
+		"table_event_cargo_rng_debug_fixed": table_event_snapshot["cargo_stowaway_rng_debug_fixed"],
+		"table_event_debug_force_loose_cargo_contraband": table_event_snapshot["debug_force_loose_cargo_contraband"],
+		"table_event_debug_loose_cargo_contraband_kind": table_event_snapshot["debug_loose_cargo_contraband_kind"],
 		"table_event_wayfinders_favor_cost": table_event_snapshot["wayfinders_favor_cost"],
 		"table_event_wayfinders_favor_ball_count": table_event_snapshot["wayfinders_favor_ball_count"],
 		"table_event_powder_cache_cost": table_event_snapshot["powder_cache_cost"],

@@ -88,7 +88,8 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
 	pivot_offset = size * 0.5
 	AudioSettings.load_and_apply()
-	_ensure_tally_tick_audio()
+	if not AudioSettings.is_web_build():
+		_ensure_tally_tick_audio()
 	set_process(false)
 	queue_redraw()
 
@@ -374,6 +375,8 @@ func _make_tally_tick_stream() -> AudioStreamWAV:
 
 
 func _play_tally_tick() -> void:
+	if AudioSettings.is_web_build():
+		return
 	if tally_tick_cooldown_remaining > 0.0:
 		return
 	if tally_tick_stream == null:

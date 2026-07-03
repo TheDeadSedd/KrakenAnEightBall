@@ -29,14 +29,20 @@ const OFFER_TYPE_INTERVENTION := "intervention"
 const OFFER_TYPE_BOON := "boon"
 const OFFER_SLOT_COUNT := 3
 const OFFER_RNG_SEED := 1742026
-const CARGO_STOWAWAY_RNG_SEED := 580813
+const DEBUG_CARGO_STOWAWAY_RNG_SEED := 580813
 const EMPTY_OFFER_ID := ""
 const CANNON_WARNING_BALL_COUNT := 1
 const WAYFINDER_CURRENT_BALL_COUNT := 2
 const BROADSIDE_PHASE_NONE := 0
 const BROADSIDE_PHASE_WARNING := 1
 const BROADSIDE_PHASE_CANNON := 2
-const CARGO_TREASURE_FOUND_MESSAGE := "Something glittered in the cargo..."
+const CARGO_SPECIAL_SOURCE_NONE := "none"
+const CARGO_SPECIAL_SOURCE_CHEAP_TREASURE_REPLACEMENT := "cheap_cargo_treasure_replacement"
+const CARGO_SPECIAL_SOURCE_LOOSE_CONTRABAND := "loose_cargo_contraband"
+const CARGO_SPECIAL_SOURCE_LOOSE_TREASURE_FALLBACK := "loose_cargo_treasure_fallback"
+const CARGO_SPECIAL_SOURCE_DEBUG_CONTRABAND := "debug_loose_cargo_contraband"
+const CHEAP_CARGO_TREASURE_FOUND_MESSAGE := "Cheap Cargo Treasure replacement: something glittered in the cargo."
+const LOOSE_CARGO_TREASURE_FALLBACK_MESSAGE := "Loose Cargo Treasure fallback: something glittered in the cargo."
 const LOOSE_CARGO_CONTRABAND_FOUND_MESSAGES := [
 	"Contraband found in the hold...",
 	"Something illegal crawled out of the cargo.",
@@ -186,7 +192,7 @@ const EVENT_DATA := {
 @export_range(1, 50, 1) var cheap_cargo_ball_count := 5
 @export_range(0.0, 1.0, 0.01) var cheap_cargo_treasure_chance := 0.05
 @export_range(1, 50, 1) var loose_cargo_ball_count := 10
-@export_range(0.0, 1.0, 0.001) var loose_cargo_contraband_chance := 0.01
+@export_range(0.0, 1.0, 0.001) var loose_cargo_contraband_chance := 0.20
 @export_range(0.0, 1.0, 0.01) var loose_cargo_treasure_chance := 0.10
 @export_range(1, 8, 1) var wayfinders_favor_ball_count := 2
 @export_range(1, 12, 1) var powder_cache_ball_count := 3
@@ -195,6 +201,7 @@ const EVENT_DATA := {
 @export_range(0.1, 1.0, 0.05) var broadside_warning_delay := 0.35
 @export_range(0.1, 2.5, 0.05) var broadside_stage_delay := 0.75
 @export_range(80.0, 900.0, 10.0) var broadside_cannon_launch_speed := 420.0
+@export var use_debug_fixed_cargo_rng_seed := false
 
 var table: BilliardsTable
 var shot_active := false
@@ -209,6 +216,7 @@ var active_offer_ids: Array = []
 var active_boon_offer_ids: Array = []
 var offer_rng := RandomNumberGenerator.new()
 var cargo_stowaway_rng := RandomNumberGenerator.new()
+var cargo_stowaway_rng_seed := 0
 
 var total_tracked_doubloons := 0
 var pending_events_earned := 0
@@ -236,11 +244,15 @@ var cargo_treasure_stowaways_found := 0
 var last_cargo_treasure_event_id := ""
 var last_cargo_treasure_roll := 1.0
 var last_cargo_treasure_replacement_index := -1
+var last_cargo_treasure_source := CARGO_SPECIAL_SOURCE_NONE
+var last_cargo_special_source := CARGO_SPECIAL_SOURCE_NONE
 var loose_cargo_contraband_stowaways_found := 0
 var last_loose_cargo_contraband_roll := 1.0
+var last_loose_cargo_contraband_succeeded := false
 var last_loose_cargo_contraband_weight_roll := 0
 var last_loose_cargo_contraband_replacement_index := -1
 var last_loose_cargo_contraband_replacement_kind := ""
+var last_loose_cargo_treasure_fallback_succeeded := false
 var debug_force_loose_cargo_contraband := false
 var debug_loose_cargo_contraband_kind := DEBUG_LOOSE_CARGO_CONTRABAND_RANDOM
 var cue_modifier_snapshot: Dictionary = {}
@@ -249,13 +261,21 @@ var cue_modifier_snapshot: Dictionary = {}
 func setup(table_ref: BilliardsTable) -> void:
 	table = table_ref
 	offer_rng.seed = OFFER_RNG_SEED
-	cargo_stowaway_rng.seed = CARGO_STOWAWAY_RNG_SEED
+	_reset_cargo_stowaway_rng()
 	active_offer_ids.clear()
 	active_boon_offer_ids.clear()
 	if table != null and table.kraken_boon_system != null and not table.kraken_boon_system.boons_changed.is_connected(_on_kraken_boons_changed):
 		table.kraken_boon_system.boons_changed.connect(_on_kraken_boons_changed)
 	set_process(false)
 	_emit_state()
+
+
+func _reset_cargo_stowaway_rng() -> void:
+	if use_debug_fixed_cargo_rng_seed:
+		cargo_stowaway_rng.seed = DEBUG_CARGO_STOWAWAY_RNG_SEED
+	else:
+		cargo_stowaway_rng.randomize()
+	cargo_stowaway_rng_seed = int(cargo_stowaway_rng.seed)
 
 
 func _process(delta: float) -> void:
@@ -360,6 +380,30 @@ func is_event_menu_open() -> bool:
 
 func is_event_icon_clickable() -> bool:
 	return enabled and pending_event_available and pending_event_ready and not event_menu_open
+
+
+func grant_intervention_charges(charge_count: int, source_label: String = "Sunken Spoils") -> int:
+	var granted_count: int = maxi(charge_count, 0)
+	if not enabled or granted_count <= 0:
+		return 0
+
+	var was_pending: bool = pending_intervention_charges > 0
+	pending_intervention_charges += granted_count
+	pending_events_earned += granted_count
+	_reset_current_segment_progress()
+	_sync_pending_event_flags()
+	pending_event_ready = true
+	if not _has_generated_offer_set():
+		_generate_event_offers()
+	status_changed.emit("%s granted %s Kraken Intervention Charge%s." % [
+		source_label,
+		granted_count,
+		"" if granted_count == 1 else "s",
+	])
+	if not was_pending and pending_intervention_charges > 0:
+		status_changed.emit("Kraken Intervention is ready.")
+	_emit_state()
+	return granted_count
 
 
 func debug_trigger_wayfinder_current() -> void:
@@ -551,7 +595,7 @@ func get_loose_cargo_contraband_chance_snapshot() -> Dictionary:
 
 
 func get_debug_snapshot() -> Dictionary:
-	var contraband_chance_snapshot := get_loose_cargo_contraband_chance_snapshot()
+	var contraband_chance_snapshot: Dictionary = get_loose_cargo_contraband_chance_snapshot()
 	return {
 		"enabled": enabled,
 		"automatic_ball_drops_gated": should_disable_automatic_ball_drops(),
@@ -605,11 +649,19 @@ func get_debug_snapshot() -> Dictionary:
 		"last_cargo_treasure_event_id": last_cargo_treasure_event_id,
 		"last_cargo_treasure_roll": last_cargo_treasure_roll,
 		"last_cargo_treasure_replacement_index": last_cargo_treasure_replacement_index,
+		"last_cargo_treasure_source": last_cargo_treasure_source,
+		"last_cargo_special_source": last_cargo_special_source,
+		"cargo_stowaway_rng_seed": cargo_stowaway_rng_seed,
+		"cargo_stowaway_rng_state": int(cargo_stowaway_rng.state),
+		"cargo_stowaway_rng_debug_fixed": use_debug_fixed_cargo_rng_seed,
 		"loose_cargo_contraband_stowaways_found": loose_cargo_contraband_stowaways_found,
 		"last_loose_cargo_contraband_roll": last_loose_cargo_contraband_roll,
+		"last_loose_cargo_contraband_succeeded": last_loose_cargo_contraband_succeeded,
 		"last_loose_cargo_contraband_weight_roll": last_loose_cargo_contraband_weight_roll,
 		"last_loose_cargo_contraband_replacement_index": last_loose_cargo_contraband_replacement_index,
 		"last_loose_cargo_contraband_replacement_kind": last_loose_cargo_contraband_replacement_kind,
+		"last_loose_cargo_contraband_replacement_label": _get_loose_cargo_contraband_kind_label(last_loose_cargo_contraband_replacement_kind),
+		"last_loose_cargo_treasure_fallback_succeeded": last_loose_cargo_treasure_fallback_succeeded,
 		"debug_force_loose_cargo_contraband": debug_force_loose_cargo_contraband,
 		"debug_loose_cargo_contraband_kind": debug_loose_cargo_contraband_kind,
 		"wayfinders_favor_cost": _get_event_charge_cost(EVENT_WAYFINDERS_FAVOR),
@@ -768,7 +820,9 @@ func _queue_cargo_event(
 	)
 	if treasure_index < 0:
 		return []
-	return [CARGO_TREASURE_FOUND_MESSAGE]
+	if event_id == EVENT_CHEAP_CARGO:
+		return [CHEAP_CARGO_TREASURE_FOUND_MESSAGE]
+	return [LOOSE_CARGO_TREASURE_FALLBACK_MESSAGE]
 
 
 func _queue_loose_cargo_event() -> Array:
@@ -808,10 +862,14 @@ func _roll_loose_cargo_replacement() -> Dictionary:
 	last_cargo_treasure_event_id = EVENT_LOOSE_CARGO
 	last_cargo_treasure_replacement_index = -1
 	last_cargo_treasure_roll = 1.0
+	last_cargo_treasure_source = CARGO_SPECIAL_SOURCE_NONE
+	last_cargo_special_source = CARGO_SPECIAL_SOURCE_NONE
 	last_loose_cargo_contraband_replacement_index = -1
 	last_loose_cargo_contraband_replacement_kind = SpawnSystem.CARGO_REPLACEMENT_NONE
 	last_loose_cargo_contraband_roll = 1.0
+	last_loose_cargo_contraband_succeeded = false
 	last_loose_cargo_contraband_weight_roll = 0
+	last_loose_cargo_treasure_fallback_succeeded = false
 	if safe_spawn_count <= 0:
 		return replacement
 	if debug_force_loose_cargo_contraband:
@@ -829,13 +887,16 @@ func _roll_loose_cargo_replacement() -> Dictionary:
 		var contraband_index := cargo_stowaway_rng.randi_range(0, safe_spawn_count - 1)
 		replacement["index"] = contraband_index
 		replacement["kind"] = contraband_kind
-		replacement["message"] = _get_loose_cargo_contraband_message()
+		replacement["message"] = _get_loose_cargo_contraband_message(contraband_kind)
 		last_loose_cargo_contraband_replacement_index = contraband_index
 		last_loose_cargo_contraband_replacement_kind = contraband_kind
+		last_loose_cargo_contraband_succeeded = true
+		last_cargo_special_source = CARGO_SPECIAL_SOURCE_LOOSE_CONTRABAND
 		loose_cargo_contraband_stowaways_found += 1
 		contraband_found.emit(contraband_kind)
 		if contraband_kind == SpawnSystem.CARGO_REPLACEMENT_TREASURE:
 			last_cargo_treasure_replacement_index = contraband_index
+			last_cargo_treasure_source = CARGO_SPECIAL_SOURCE_LOOSE_CONTRABAND
 			cargo_treasure_stowaways_found += 1
 		return replacement
 
@@ -843,8 +904,11 @@ func _roll_loose_cargo_replacement() -> Dictionary:
 		var treasure_index := cargo_stowaway_rng.randi_range(0, safe_spawn_count - 1)
 		replacement["index"] = treasure_index
 		replacement["kind"] = SpawnSystem.CARGO_REPLACEMENT_TREASURE
-		replacement["message"] = CARGO_TREASURE_FOUND_MESSAGE
+		replacement["message"] = LOOSE_CARGO_TREASURE_FALLBACK_MESSAGE
 		last_cargo_treasure_replacement_index = treasure_index
+		last_cargo_treasure_source = CARGO_SPECIAL_SOURCE_LOOSE_TREASURE_FALLBACK
+		last_cargo_special_source = CARGO_SPECIAL_SOURCE_LOOSE_TREASURE_FALLBACK
+		last_loose_cargo_treasure_fallback_succeeded = true
 		cargo_treasure_stowaways_found += 1
 	return replacement
 
@@ -874,25 +938,31 @@ func _apply_debug_forced_loose_cargo_contraband(replacement: Dictionary, safe_sp
 	replacement["index"] = contraband_index
 	replacement["kind"] = contraband_kind
 	messages.append("Debug Contraband forced: %s." % _get_loose_cargo_contraband_kind_label(contraband_kind))
-	messages.append(_get_loose_cargo_contraband_message())
+	messages.append(_get_loose_cargo_contraband_message(contraband_kind))
 	replacement["messages"] = messages
 	last_loose_cargo_contraband_replacement_index = contraband_index
 	last_loose_cargo_contraband_replacement_kind = contraband_kind
 	last_loose_cargo_contraband_roll = 0.0
+	last_loose_cargo_contraband_succeeded = true
+	last_cargo_special_source = CARGO_SPECIAL_SOURCE_DEBUG_CONTRABAND
 	loose_cargo_contraband_stowaways_found += 1
 	contraband_found.emit(contraband_kind)
 	if contraband_kind == SpawnSystem.CARGO_REPLACEMENT_TREASURE:
 		last_cargo_treasure_replacement_index = contraband_index
 		last_cargo_treasure_roll = 0.0
+		last_cargo_treasure_source = CARGO_SPECIAL_SOURCE_DEBUG_CONTRABAND
 		cargo_treasure_stowaways_found += 1
 	return replacement
 
 
-func _get_loose_cargo_contraband_message() -> String:
+func _get_loose_cargo_contraband_message(contraband_kind: String) -> String:
 	if LOOSE_CARGO_CONTRABAND_FOUND_MESSAGES.is_empty():
-		return ""
+		return "Contraband result: %s found in Loose Cargo." % _get_loose_cargo_contraband_kind_label(contraband_kind)
 	var message_index := loose_cargo_contraband_stowaways_found % LOOSE_CARGO_CONTRABAND_FOUND_MESSAGES.size()
-	return str(LOOSE_CARGO_CONTRABAND_FOUND_MESSAGES[message_index])
+	return "Contraband result: %s found in Loose Cargo. %s" % [
+		_get_loose_cargo_contraband_kind_label(contraband_kind),
+		str(LOOSE_CARGO_CONTRABAND_FOUND_MESSAGES[message_index]),
+	]
 
 
 func _pick_loose_cargo_contraband_replacement_kind() -> String:
@@ -1004,12 +1074,23 @@ func _get_loose_cargo_contraband_kind_label(kind: String) -> String:
 	return "None"
 
 
+func _get_cargo_treasure_source_for_event(event_id: String) -> String:
+	match event_id:
+		EVENT_CHEAP_CARGO:
+			return CARGO_SPECIAL_SOURCE_CHEAP_TREASURE_REPLACEMENT
+		EVENT_LOOSE_CARGO:
+			return CARGO_SPECIAL_SOURCE_LOOSE_TREASURE_FALLBACK
+	return CARGO_SPECIAL_SOURCE_NONE
+
+
 func _roll_cargo_treasure_replacement_index(event_id: String, spawn_count: int, treasure_chance: float) -> int:
 	var safe_spawn_count := maxi(spawn_count, 0)
 	var clamped_chance := clampf(treasure_chance, 0.0, 1.0)
 	last_cargo_treasure_event_id = event_id
 	last_cargo_treasure_replacement_index = -1
 	last_cargo_treasure_roll = 1.0
+	last_cargo_treasure_source = CARGO_SPECIAL_SOURCE_NONE
+	last_cargo_special_source = CARGO_SPECIAL_SOURCE_NONE
 	if safe_spawn_count <= 0 or clamped_chance <= 0.0:
 		return -1
 
@@ -1018,6 +1099,8 @@ func _roll_cargo_treasure_replacement_index(event_id: String, spawn_count: int, 
 		return -1
 
 	last_cargo_treasure_replacement_index = cargo_stowaway_rng.randi_range(0, safe_spawn_count - 1)
+	last_cargo_treasure_source = _get_cargo_treasure_source_for_event(event_id)
+	last_cargo_special_source = last_cargo_treasure_source
 	cargo_treasure_stowaways_found += 1
 	return last_cargo_treasure_replacement_index
 

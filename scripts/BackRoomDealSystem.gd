@@ -237,11 +237,14 @@ func _make_reserve_item_payload(item: Dictionary, cost: int) -> Dictionary:
 	return {
 		"item_id": str(item["id"]),
 		"item_name": str(item["name"]),
+		"display_name": str(item["name"]),
 		"description": str(item.get("description", "")),
 		"price": maxi(cost, 0),
 		"spawn_type": str(item["spawn_type"]),
 		"icon_key": str(item.get("icon_key", item["id"])),
 		"source": "back_room_deal",
+		"quantity": int(item.get("quantity", 1)),
+		"quantity_total": int(item.get("quantity_total", item.get("quantity", 1))),
 	}
 
 

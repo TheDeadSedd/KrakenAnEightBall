@@ -19,6 +19,10 @@ run/main_scene="res://scenes/MainMenu.tscn"
 config/features=PackedStringArray("4.6")
 config/icon="res://icon.svg"
 
+[audio]
+
+general/default_playback_type.web=2
+
 [display]
 
 window/size/viewport_width=1920

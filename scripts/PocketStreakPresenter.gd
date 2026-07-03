@@ -524,6 +524,11 @@ func _ensure_pocket_streak_audio_bus() -> void:
 		AudioServer.set_bus_name(pocket_streak_audio_bus_index, audio_bus_name)
 	AudioServer.set_bus_send(pocket_streak_audio_bus_index, AudioSettings.SFX_BUS_NAME)
 
+	if AudioSettings.is_web_build():
+		reverb_effect_index = -1
+		reverb_wet_level = 0.0
+		return
+
 	_ensure_pocket_streak_reverb_effect()
 
 

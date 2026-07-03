@@ -17,6 +17,11 @@ const SLOT_ROW_Y := 30.0
 const COST_Y_OFFSET := 94.0
 const COST_DRAW_WIDTH := 58.0
 const COST_FONT_SIZE := 17
+const QUANTITY_BADGE_SIZE := Vector2(26.0, 16.0)
+const QUANTITY_BADGE_FONT_SIZE := 12
+const BUNDLE_GLOW_RADIUS := 29.0
+const BUNDLE_AURA_RADIUS := 37.0
+const BUNDLE_GLOW_BASE_SPEED := 0.36
 const REFRESH_BUTTON_SIZE := Vector2(126.0, 27.0)
 const REFRESH_BUTTON_Y := 118.0
 const REFRESH_BUTTON_FONT_SIZE := 14
@@ -45,6 +50,12 @@ const REFRESH_SWEEP := Color(1.0, 0.94, 0.58, 0.42)
 const COST_AVAILABLE := Color(1.0, 0.84, 0.36, 1.0)
 const COST_UNAVAILABLE := Color(0.62, 0.55, 0.44, 0.76)
 const COST_SHADOW := Color(0.04, 0.02, 0.0, 0.78)
+const QUANTITY_BADGE_FILL := Color(0.05, 0.035, 0.018, 0.88)
+const QUANTITY_BADGE_BORDER := Color(1.0, 0.82, 0.34, 0.72)
+const QUANTITY_BADGE_TEXT := Color(1.0, 0.9, 0.54, 1.0)
+const BUNDLE_GLOW_OBJECT := Color(1.0, 0.76, 0.28, 1.0)
+const BUNDLE_GLOW_WAYFINDER := Color(0.35, 1.0, 0.88, 1.0)
+const BUNDLE_GLOW_POWDER := Color(1.0, 0.45, 0.20, 1.0)
 const TITLE_COLOR := Color(0.96, 0.88, 0.66, 0.96)
 const TITLE_SHADOW := Color(0.08, 0.04, 0.01, 0.82)
 const SHOP_X_OFFSET_FROM_TABLE := 140.0
@@ -115,6 +126,7 @@ func set_quartermaster_items(items: Array) -> void:
 	_update_preview_colors()
 	_note_refresh_state(offer_snapshots)
 	_update_tooltip()
+	_update_process_state()
 	queue_redraw()
 
 
@@ -137,15 +149,16 @@ func set_hover_ui_suppressed(suppressed: bool) -> void:
 
 
 func _process(delta: float) -> void:
-	if refresh_timer <= 0.0:
-		set_process(false)
-		return
+	var should_redraw: bool = _has_bundle_offer()
+	if refresh_timer > 0.0:
+		refresh_timer = maxf(refresh_timer - delta, 0.0)
+		should_redraw = true
+		if refresh_timer <= 0.0:
+			refresh_offer_index = -1
 
-	refresh_timer = maxf(refresh_timer - delta, 0.0)
-	queue_redraw()
-	if refresh_timer <= 0.0:
-		refresh_offer_index = -1
-		set_process(false)
+	if should_redraw:
+		queue_redraw()
+	_update_process_state()
 
 
 func _gui_input(event: InputEvent) -> void:
@@ -194,6 +207,9 @@ func _draw() -> void:
 		var available: bool = bool(item.get("available", false))
 		var affordable: bool = bool(item.get("affordable", false))
 
+		if has_item:
+			_draw_bundle_glow(item, slot_rect, offer_index)
+
 		if offer_index == hovered_offer_index:
 			draw_style_box(hover_glow_style, slot_rect.grow(GLOW_OUTSET))
 			draw_style_box(hover_slot_style, slot_rect)
@@ -206,6 +222,7 @@ func _draw() -> void:
 			_draw_offer_preview(offer_index, item, slot_rect)
 			if not available or not affordable:
 				draw_rect(slot_rect.grow(-1.0), UNAFFORDABLE_TINT, true)
+			_draw_offer_quantity_badge(item, slot_rect)
 			_draw_offer_cost(offer_index, item, available and affordable)
 
 		if offer_index == refresh_offer_index and refresh_timer > 0.0:
@@ -409,6 +426,73 @@ func _draw_offer_preview(offer_index: int, item: Dictionary, slot_rect: Rect2) -
 	ITEM_ICON_DRAW.draw_icon(self, slot_rect, item_id, preview_color)
 
 
+func _draw_bundle_glow(item: Dictionary, slot_rect: Rect2, offer_index: int) -> void:
+	var quantity: int = maxi(int(item.get("quantity", 1)), 1)
+	if quantity <= 1:
+		return
+
+	var tier: int = clampi(int(item.get("bundle_glow_tier", 1)), 1, 3)
+	var center: Vector2 = slot_rect.get_center()
+	var base_color: Color = _get_bundle_glow_color(item)
+	var elapsed: float = float(Time.get_ticks_msec()) * 0.001
+	var speed: float = BUNDLE_GLOW_BASE_SPEED + float(tier) * 0.055
+	var phase: float = fmod(elapsed * speed + float(offer_index) * 0.72, TAU)
+	var pulse: float = 0.5 + sin(elapsed * (1.25 + float(tier) * 0.18) + float(offer_index)) * 0.5
+	var alpha: float = 0.070 + float(tier) * 0.050
+	var radius: float = BUNDLE_GLOW_RADIUS + float(tier) * 1.4
+	var soft_color: Color = Color(base_color.r, base_color.g, base_color.b, alpha * (0.18 + pulse * 0.08))
+	var arc_color: Color = Color(base_color.r, base_color.g, base_color.b, alpha)
+	var accent_color: Color = Color(base_color.r, base_color.g, base_color.b, alpha * 0.86)
+
+	_draw_bundle_aura(center, base_color, tier, pulse)
+	draw_circle(center, radius + 4.0, soft_color)
+	draw_arc(center, radius, phase, phase + PI * 0.70, 30, arc_color, 1.25 + float(tier) * 0.45, true)
+	draw_arc(center, radius + 3.5, phase + PI, phase + PI * 1.52, 26, accent_color, 1.0 + float(tier) * 0.28, true)
+
+
+func _draw_bundle_aura(center: Vector2, base_color: Color, tier: int, pulse: float) -> void:
+	var aura_radius: float = BUNDLE_AURA_RADIUS + float(tier) * 5.5
+	var aura_alpha: float = 0.012 + float(tier) * 0.014 + pulse * (0.006 + float(tier) * 0.004)
+	var layers: int = 2 + tier
+	for layer_index in range(layers):
+		var layer_ratio: float = float(layer_index) / maxf(float(layers - 1), 1.0)
+		var layer_radius: float = lerpf(aura_radius, aura_radius * 0.46, layer_ratio)
+		var layer_alpha: float = aura_alpha * lerpf(0.34, 1.0, layer_ratio)
+		var layer_color: Color = Color(base_color.r, base_color.g, base_color.b, layer_alpha)
+		draw_circle(center, layer_radius, layer_color)
+
+
+func _get_bundle_glow_color(item: Dictionary) -> Color:
+	match str(item.get("spawn_type", "")):
+		QuartermasterSystem.SPAWN_TYPE_WAYFINDER_BALL:
+			return BUNDLE_GLOW_WAYFINDER
+		QuartermasterSystem.SPAWN_TYPE_POWDER_KEG_BALL:
+			return BUNDLE_GLOW_POWDER
+	return BUNDLE_GLOW_OBJECT
+
+
+func _draw_offer_quantity_badge(item: Dictionary, slot_rect: Rect2) -> void:
+	var quantity: int = maxi(int(item.get("quantity", 1)), 1)
+	if quantity <= 1:
+		return
+
+	var badge_rect := Rect2(
+		slot_rect.end - QUANTITY_BADGE_SIZE + Vector2(3.0, -1.0),
+		QUANTITY_BADGE_SIZE
+	)
+	draw_rect(badge_rect, QUANTITY_BADGE_FILL, true)
+	draw_rect(badge_rect, QUANTITY_BADGE_BORDER, false, 1.0)
+	draw_string(
+		UI_FONT,
+		badge_rect.position + Vector2(0.0, 12.0),
+		"x%s" % quantity,
+		HORIZONTAL_ALIGNMENT_CENTER,
+		badge_rect.size.x,
+		QUANTITY_BADGE_FONT_SIZE,
+		QUANTITY_BADGE_TEXT
+	)
+
+
 func _draw_refresh_cue(slot_rect: Rect2) -> void:
 	var ratio: float = 1.0 - (refresh_timer / REFRESH_CUE_SECONDS)
 	var glow_alpha: float = sin(ratio * PI)
@@ -455,8 +539,9 @@ func _update_hover_state(local_position: Vector2) -> void:
 func _update_preview_colors() -> void:
 	for offer_index in range(OFFER_SLOT_COUNT):
 		var item: Dictionary = _get_offer_snapshot(offer_index)
-		var item_id := str(item.get("id", ""))
-		if item_id != QuartermasterSystem.ITEM_PLAIN_OBJECT_BALL:
+		var item_id: String = str(item.get("id", ""))
+		var spawn_type: String = str(item.get("spawn_type", ""))
+		if spawn_type != QuartermasterSystem.SPAWN_TYPE_PLAIN_OBJECT_BALL:
 			preview_colors_by_offer_index.erase(offer_index)
 			preview_signatures_by_offer_index.erase(offer_index)
 			continue
@@ -507,10 +592,12 @@ func _update_tooltip() -> void:
 
 
 func _make_tooltip_text(item: Dictionary) -> String:
-	var item_id := str(item.get("id", ""))
-	var flavor := str(FLAVOR_BY_ITEM_ID.get(item_id, "A curious bit of cursed table cargo."))
-	var blocker := str(item.get("blocked_reason", ""))
-	var status_line := "Cost: %s Doubloons" % int(item.get("price", 0))
+	var item_id: String = str(item.get("id", ""))
+	var flavor_key: String = str(item.get("icon_key", item.get("spawn_type", item_id)))
+	var fallback_flavor: String = str(FLAVOR_BY_ITEM_ID.get(flavor_key, "A curious bit of cursed table cargo."))
+	var flavor: String = str(FLAVOR_BY_ITEM_ID.get(item_id, fallback_flavor))
+	var blocker: String = str(item.get("blocked_reason", ""))
+	var status_line: String = "Cost: %s Doubloons" % int(item.get("price", 0))
 	if not blocker.is_empty():
 		status_line = "%s - %s" % [status_line, blocker]
 	return "%s\n%s\n%s\n%s" % [
@@ -666,6 +753,20 @@ func _update_refresh_snapshot() -> void:
 			refresh_snapshot = (refresh_value as Dictionary).duplicate(true)
 	if refresh_snapshot.is_empty() and quartermaster_system != null:
 		refresh_snapshot = quartermaster_system.get_refresh_snapshot()
+
+
+func _has_bundle_offer() -> bool:
+	for offer_value in offer_snapshots:
+		if not offer_value is Dictionary:
+			continue
+		var offer: Dictionary = offer_value
+		if int(offer.get("quantity", 1)) > 1:
+			return true
+	return false
+
+
+func _update_process_state() -> void:
+	set_process(refresh_timer > 0.0 or _has_bundle_offer())
 
 
 func _is_valid_offer_index(offer_index: int) -> bool:

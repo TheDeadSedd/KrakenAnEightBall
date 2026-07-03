@@ -24,6 +24,10 @@ signal debug_activate_krakens_patience_requested
 signal debug_activate_deep_ledger_requested
 signal debug_activate_iron_wake_requested
 signal debug_expire_all_boons_requested
+signal debug_reserve_stack_payload_requested(payload: Dictionary)
+signal debug_sunken_spoils_advance_requested
+signal debug_sunken_spoils_trigger_requested
+signal debug_sunken_spoils_reset_requested
 signal quartermaster_cancel_placement_requested
 
 const PANEL_CORE_PERFORMANCE := "core_performance"
@@ -58,6 +62,58 @@ const BOON_TEST_ACTIVATE_KRAKENS_PATIENCE_TEXT := "Activate Kraken's Patience"
 const BOON_TEST_ACTIVATE_DEEP_LEDGER_TEXT := "Activate Deep Ledger"
 const BOON_TEST_ACTIVATE_IRON_WAKE_TEXT := "Activate Iron Wake"
 const BOON_TEST_EXPIRE_ALL_TEXT := "Expire All Boons"
+const RESERVE_STACK_TEST_SECTION_TITLE := "Reserve Stack Tests"
+const RESERVE_STACK_TEST_ITEMS := [
+	{
+		"label": "Add Object Ball x3",
+		"item_id": "debug_object_ball_x3",
+		"item_name": "Loose Object Ball",
+		"display_name": "Loose Object Ball",
+		"spawn_type": "plain_object_ball",
+		"icon_key": "plain_object_ball",
+		"quantity": 3,
+	},
+	{
+		"label": "Add Object Ball x10",
+		"item_id": "debug_object_ball_x10",
+		"item_name": "Loose Object Ball",
+		"display_name": "Loose Object Ball",
+		"spawn_type": "plain_object_ball",
+		"icon_key": "plain_object_ball",
+		"quantity": 10,
+	},
+	{
+		"label": "Add Wayfinder x2",
+		"item_id": "debug_wayfinder_x2",
+		"item_name": "Wayfinder Ball",
+		"display_name": "Wayfinder Ball",
+		"spawn_type": "wayfinder_ball",
+		"icon_key": "wayfinder_ball",
+		"quantity": 2,
+	},
+	{
+		"label": "Add Powder Keg x2",
+		"item_id": "debug_powder_keg_x2",
+		"item_name": "Powder Keg",
+		"display_name": "Powder Keg",
+		"spawn_type": "powder_keg_ball",
+		"icon_key": "powder_keg_ball",
+		"quantity": 2,
+	},
+	{
+		"label": "Add Cannon Ball x2",
+		"item_id": "debug_cannon_ball_x2",
+		"item_name": "Cannon Ball",
+		"display_name": "Cannon Ball",
+		"spawn_type": "cannon_ball",
+		"icon_key": "cannon_ball",
+		"quantity": 2,
+	},
+]
+const SUNKEN_SPOILS_TEST_SECTION_TITLE := "Sunken Spoils Testing"
+const SUNKEN_SPOILS_TEST_ADVANCE_TEXT := "Advance Spoils Progress +1"
+const SUNKEN_SPOILS_TEST_TRIGGER_TEXT := "Trigger Spoils Reward"
+const SUNKEN_SPOILS_TEST_RESET_TEXT := "Reset Spoils"
 const OATH_TEST_SECTION_TITLE := "Oath Testing"
 const OATH_TESTING_SELECTOR_ITEMS := [
 	{"label": "Oath of Urgency", "oath_id": OathSystem.OATH_OF_URGENCY},
@@ -122,6 +178,12 @@ var activate_krakens_patience_button: Button
 var activate_deep_ledger_button: Button
 var activate_iron_wake_button: Button
 var expire_all_boons_button: Button
+var reserve_stack_testing_section_label: Label
+var reserve_stack_test_buttons: Array = []
+var sunken_spoils_testing_section_label: Label
+var sunken_spoils_advance_button: Button
+var sunken_spoils_trigger_button: Button
+var sunken_spoils_reset_button: Button
 var oath_testing_section_label: Label
 var oath_testing_selector: OptionButton
 var oath_activate_button: Button
@@ -169,6 +231,8 @@ func _ready() -> void:
 	_ensure_event_test_controls()
 	_ensure_back_room_testing_controls()
 	_ensure_boon_testing_controls()
+	_ensure_reserve_stack_testing_controls()
+	_ensure_sunken_spoils_testing_controls()
 	_ensure_oath_testing_controls()
 	_connect_debug_panel_toggles()
 	_show_pause_panel()
@@ -222,6 +286,12 @@ func _connect_debug_panel_toggles() -> void:
 		activate_iron_wake_button.pressed.connect(_on_activate_iron_wake_pressed)
 	if not expire_all_boons_button.pressed.is_connected(_on_expire_all_boons_pressed):
 		expire_all_boons_button.pressed.connect(_on_expire_all_boons_pressed)
+	if not sunken_spoils_advance_button.pressed.is_connected(_on_sunken_spoils_advance_pressed):
+		sunken_spoils_advance_button.pressed.connect(_on_sunken_spoils_advance_pressed)
+	if not sunken_spoils_trigger_button.pressed.is_connected(_on_sunken_spoils_trigger_pressed):
+		sunken_spoils_trigger_button.pressed.connect(_on_sunken_spoils_trigger_pressed)
+	if not sunken_spoils_reset_button.pressed.is_connected(_on_sunken_spoils_reset_pressed):
+		sunken_spoils_reset_button.pressed.connect(_on_sunken_spoils_reset_pressed)
 	if not oath_activate_button.pressed.is_connected(_on_oath_activate_pressed):
 		oath_activate_button.pressed.connect(_on_oath_activate_pressed)
 	if not oath_clear_button.pressed.is_connected(_on_oath_clear_pressed):
@@ -695,6 +765,51 @@ func _ensure_boon_testing_controls() -> void:
 	_move_dev_options_controls_into_scroll()
 
 
+func _ensure_reserve_stack_testing_controls() -> void:
+	if reserve_stack_testing_section_label == null:
+		reserve_stack_testing_section_label = Label.new()
+		reserve_stack_testing_section_label.text = RESERVE_STACK_TEST_SECTION_TITLE
+		_apply_debug_section_label_style(reserve_stack_testing_section_label)
+		debug_section.add_child(reserve_stack_testing_section_label)
+
+	while reserve_stack_test_buttons.size() < RESERVE_STACK_TEST_ITEMS.size():
+		var test_index: int = reserve_stack_test_buttons.size()
+		var test_item: Dictionary = RESERVE_STACK_TEST_ITEMS[test_index]
+		var button_name: String = "ReserveStackTestButton%s" % test_index
+		var button: Button = _make_event_test_button(str(test_item.get("label", "Add Reserve Stack")), button_name)
+		button.tooltip_text = "Debug-only: inserts this stacked payload into the first open Reserve slot."
+		button.pressed.connect(_on_reserve_stack_test_pressed.bind(test_index))
+		reserve_stack_test_buttons.append(button)
+		debug_section.add_child(button)
+
+	_move_dev_options_controls_into_scroll()
+
+
+func _ensure_sunken_spoils_testing_controls() -> void:
+	if sunken_spoils_testing_section_label == null:
+		sunken_spoils_testing_section_label = Label.new()
+		sunken_spoils_testing_section_label.text = SUNKEN_SPOILS_TEST_SECTION_TITLE
+		_apply_debug_section_label_style(sunken_spoils_testing_section_label)
+		debug_section.add_child(sunken_spoils_testing_section_label)
+
+	if sunken_spoils_advance_button == null:
+		sunken_spoils_advance_button = _make_event_test_button(SUNKEN_SPOILS_TEST_ADVANCE_TEXT, "AdvanceSunkenSpoilsButton")
+		sunken_spoils_advance_button.tooltip_text = "Debug-only: advances current Sunken Spoils milestone progress by one."
+		debug_section.add_child(sunken_spoils_advance_button)
+
+	if sunken_spoils_trigger_button == null:
+		sunken_spoils_trigger_button = _make_event_test_button(SUNKEN_SPOILS_TEST_TRIGGER_TEXT, "TriggerSunkenSpoilsButton")
+		sunken_spoils_trigger_button.tooltip_text = "Debug-only: opens a ready Sunken Spoils reward for the current milestone."
+		debug_section.add_child(sunken_spoils_trigger_button)
+
+	if sunken_spoils_reset_button == null:
+		sunken_spoils_reset_button = _make_event_test_button(SUNKEN_SPOILS_TEST_RESET_TEXT, "ResetSunkenSpoilsButton")
+		sunken_spoils_reset_button.tooltip_text = "Debug-only: resets Sunken Spoils progress and pending rewards."
+		debug_section.add_child(sunken_spoils_reset_button)
+
+	_move_dev_options_controls_into_scroll()
+
+
 func _ensure_oath_testing_controls() -> void:
 	if oath_testing_section_label == null:
 		oath_testing_section_label = Label.new()
@@ -845,6 +960,22 @@ func _get_selected_debug_oath_id() -> String:
 	if selected_index < 0 or selected_index >= oath_testing_selector.get_item_count():
 		return OathSystem.OATH_OF_URGENCY
 	return str(oath_testing_selector.get_item_metadata(selected_index))
+
+
+func _make_debug_reserve_stack_payload(test_item: Dictionary) -> Dictionary:
+	var quantity: int = maxi(int(test_item.get("quantity", 1)), 1)
+	return {
+		"item_id": str(test_item.get("item_id", "")),
+		"item_name": str(test_item.get("item_name", "Reserve Item")),
+		"display_name": str(test_item.get("display_name", test_item.get("item_name", "Reserve Item"))),
+		"description": "Debug Reserve stack test payload.",
+		"price": 0,
+		"spawn_type": str(test_item.get("spawn_type", "")),
+		"icon_key": str(test_item.get("icon_key", test_item.get("spawn_type", ""))),
+		"source": "debug_reserve_stack_test",
+		"quantity": quantity,
+		"quantity_total": quantity,
+	}
 
 
 func _apply_debug_section_label_style(label: Label) -> void:
@@ -1179,6 +1310,25 @@ func _on_activate_iron_wake_pressed() -> void:
 
 func _on_expire_all_boons_pressed() -> void:
 	debug_expire_all_boons_requested.emit()
+
+
+func _on_reserve_stack_test_pressed(test_index: int) -> void:
+	if test_index < 0 or test_index >= RESERVE_STACK_TEST_ITEMS.size():
+		return
+	var test_item: Dictionary = RESERVE_STACK_TEST_ITEMS[test_index]
+	debug_reserve_stack_payload_requested.emit(_make_debug_reserve_stack_payload(test_item))
+
+
+func _on_sunken_spoils_advance_pressed() -> void:
+	debug_sunken_spoils_advance_requested.emit()
+
+
+func _on_sunken_spoils_trigger_pressed() -> void:
+	debug_sunken_spoils_trigger_requested.emit()
+
+
+func _on_sunken_spoils_reset_pressed() -> void:
+	debug_sunken_spoils_reset_requested.emit()
 
 
 func _on_oath_activate_pressed() -> void:

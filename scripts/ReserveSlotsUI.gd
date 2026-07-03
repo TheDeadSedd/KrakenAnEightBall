@@ -12,6 +12,7 @@ signal reserve_slot_clicked(slot_index: int)
 # Draw-only reserve slot UI. ReserveSystem owns slot data and deployment state.
 const SLOT_COUNT := 3
 const ITEM_ICON_DRAW := preload("res://scripts/ItemIconDraw.gd")
+const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const SLOT_SIZE := Vector2(44, 44)
 const SLOT_GAP := 12.0
 const SLOT_PADDING := 8.0
@@ -28,6 +29,11 @@ const DEPLOYING_SLOT_GLOW := Color(1.0, 0.75, 0.28, 0.24)
 const DEPLOYING_SLOT_RING := Color(1.0, 0.86, 0.42, 0.62)
 const CORNER_RADIUS := 9
 const GLOW_OUTSET := 5.0
+const QUANTITY_BADGE_SIZE := Vector2(25.0, 16.0)
+const QUANTITY_BADGE_FONT_SIZE := 12
+const QUANTITY_BADGE_FILL := Color(0.035, 0.022, 0.012, 0.94)
+const QUANTITY_BADGE_BORDER := Color(1.0, 0.82, 0.36, 0.78)
+const QUANTITY_BADGE_TEXT := Color(1.0, 0.91, 0.62, 0.96)
 
 var reserve_system: ReserveSystem
 var table
@@ -142,6 +148,7 @@ func _draw() -> void:
 			_draw_deploying_slot_source(slot_rect)
 		elif filled:
 			_draw_slot_icon(slot_rect, str(snapshot.get("icon_key", "")))
+			_draw_quantity_badge(slot_rect, int(snapshot.get("quantity", 1)))
 
 
 func _configure_styles() -> void:
@@ -260,3 +267,24 @@ func _draw_deploying_slot_source(slot_rect: Rect2) -> void:
 
 func _draw_slot_icon(slot_rect: Rect2, icon_key: String) -> void:
 	ITEM_ICON_DRAW.draw_icon(self, slot_rect, icon_key)
+
+
+func _draw_quantity_badge(slot_rect: Rect2, quantity: int) -> void:
+	if quantity <= 1:
+		return
+
+	var badge_rect := Rect2(
+		slot_rect.end - QUANTITY_BADGE_SIZE + Vector2(3.0, -1.0),
+		QUANTITY_BADGE_SIZE
+	)
+	draw_rect(badge_rect, QUANTITY_BADGE_FILL, true)
+	draw_rect(badge_rect, QUANTITY_BADGE_BORDER, false, 1.0)
+	draw_string(
+		UI_FONT,
+		badge_rect.position + Vector2(0.0, 12.0),
+		"x%s" % quantity,
+		HORIZONTAL_ALIGNMENT_CENTER,
+		badge_rect.size.x,
+		QUANTITY_BADGE_FONT_SIZE,
+		QUANTITY_BADGE_TEXT
+	)

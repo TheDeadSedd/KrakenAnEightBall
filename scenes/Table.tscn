@@ -1,4 +1,4 @@
-[gd_scene load_steps=32 format=3]
+[gd_scene load_steps=33 format=3]
 
 [ext_resource type="Script" path="res://scripts/Table.gd" id="1_table_script"]
 [ext_resource type="Script" path="res://scripts/CueController.gd" id="2_cue_controller"]
@@ -31,6 +31,7 @@
 [ext_resource type="Script" path="res://scripts/OathSystem.gd" id="28_oath_system"]
 [ext_resource type="Script" path="res://scripts/BackRoomDealSystem.gd" id="29_back_room_deal_system"]
 [ext_resource type="Script" path="res://scripts/KrakenBoonSystem.gd" id="30_kraken_boon_system"]
+[ext_resource type="Script" path="res://scripts/SunkenSpoilsSystem.gd" id="31_sunken_spoils_system"]
 
 [node name="Table" type="Node2D"]
 script = ExtResource("1_table_script")
@@ -61,6 +62,9 @@ script = ExtResource("30_kraken_boon_system")
 
 [node name="RunStatsSystem" type="Node" parent="."]
 script = ExtResource("25_run_stats_system")
+
+[node name="SunkenSpoilsSystem" type="Node" parent="."]
+script = ExtResource("31_sunken_spoils_system")
 
 [node name="PassageSystem" type="Node" parent="."]
 script = ExtResource("27_passage_system")
