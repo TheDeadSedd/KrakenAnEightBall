@@ -18,6 +18,7 @@ const CUE_LOCKER_PANEL_SCRIPT := preload("res://scripts/MainMenuCueLockerPanel.g
 const RUN_HISTORY_SCRIPT := preload("res://scripts/RunHistorySystem.gd")
 const PROGRESSION_SCRIPT := preload("res://scripts/ProgressionSystem.gd")
 const CUE_PROGRESSION_SCRIPT := preload("res://scripts/CueProgressionSystem.gd")
+const GAME_MODE_SCRIPT := preload("res://scripts/GameModeSystem.gd")
 const CREDITS_MARGIN := Vector2(34.0, 28.0)
 const CREDITS_HEIGHT := 154.0
 
@@ -26,12 +27,16 @@ var behind_foreground_overlay: MainMenuPresentationOverlay
 var foreground_layer: TextureRect
 var fog_overlay: MainMenuPresentationOverlay
 var menu_panel: PanelContainer
+var mode_select_panel: PanelContainer
 var credits_panel: PanelContainer
 var title_label: Label
 var subtitle_label: Label
 var status_label: Label
 var kraken_favor_label: Label
 var start_button: Button
+var passage_mode_button: Button
+var roguelite_mode_button: Button
+var mode_select_back_button: Button
 var options_button: Button
 var cue_locker_button: Button
 var run_history_button: Button
@@ -191,6 +196,7 @@ func _build_interface() -> void:
 	quit_button.pressed.connect(_on_quit_pressed)
 
 	_build_credits_block()
+	_create_mode_select_panel()
 
 	options_panel = OPTIONS_MENU_SCRIPT.new()
 	options_panel.name = "OptionsPanel"
@@ -230,11 +236,26 @@ func _make_menu_button(text: String) -> Button:
 	button.add_theme_color_override("font_color", Color(1.0, 0.91, 0.62, 1.0))
 	button.add_theme_color_override("font_hover_color", Color(1.0, 0.98, 0.78, 1.0))
 	button.add_theme_color_override("font_pressed_color", Color(0.18, 0.09, 0.03, 1.0))
+	button.add_theme_color_override("font_disabled_color", Color(0.62, 0.58, 0.50, 0.58))
 	button.add_theme_stylebox_override("normal", _make_button_style(Color(0.09, 0.063, 0.041, 0.90), Color(0.88, 0.68, 0.32, 0.58)))
 	button.add_theme_stylebox_override("hover", _make_button_style(Color(0.15, 0.096, 0.044, 0.98), Color(1.0, 0.82, 0.38, 0.94)))
 	button.add_theme_stylebox_override("pressed", _make_button_style(Color(0.88, 0.67, 0.31, 0.98), Color(1.0, 0.91, 0.62, 1.0)))
 	button.add_theme_stylebox_override("focus", _make_button_style(Color(0.11, 0.070, 0.038, 0.96), Color(0.64, 0.95, 0.88, 0.78)))
+	button.add_theme_stylebox_override("disabled", _make_button_style(Color(0.050, 0.044, 0.043, 0.74), Color(0.45, 0.40, 0.32, 0.36)))
 	return button
+
+
+func _make_description_label(text: String) -> Label:
+	var label := Label.new()
+	label.text = text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_override("font", UI_FONT)
+	label.add_theme_font_size_override("font_size", 18)
+	label.add_theme_color_override("font_color", Color(0.77, 0.86, 0.78, 0.88))
+	label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.68))
+	label.add_theme_constant_override("outline_size", 2)
+	return label
 
 
 func _make_panel_style() -> StyleBoxFlat:
@@ -363,6 +384,58 @@ func _create_cue_locker_panel() -> void:
 	add_child(cue_locker_panel)
 
 
+func _create_mode_select_panel() -> void:
+	mode_select_panel = PanelContainer.new()
+	mode_select_panel.name = "ModeSelectPanel"
+	mode_select_panel.visible = false
+	mode_select_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	mode_select_panel.add_theme_stylebox_override("panel", _make_panel_style())
+	add_child(mode_select_panel)
+
+	var margin := MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 34)
+	margin.add_theme_constant_override("margin_top", 30)
+	margin.add_theme_constant_override("margin_right", 34)
+	margin.add_theme_constant_override("margin_bottom", 30)
+	mode_select_panel.add_child(margin)
+
+	var stack := VBoxContainer.new()
+	stack.alignment = BoxContainer.ALIGNMENT_CENTER
+	stack.add_theme_constant_override("separation", 12)
+	margin.add_child(stack)
+
+	var title := Label.new()
+	title.text = "Choose Your Voyage"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.add_theme_font_override("font", UI_FONT)
+	title.add_theme_font_size_override("font_size", 38)
+	title.add_theme_color_override("font_color", Color(1.0, 0.88, 0.48, 1.0))
+	title.add_theme_color_override("font_outline_color", Color(0.03, 0.018, 0.012, 0.95))
+	title.add_theme_constant_override("outline_size", 5)
+	stack.add_child(title)
+
+	stack.add_child(_make_gap(8.0))
+
+	passage_mode_button = _make_menu_button("Passage")
+	stack.add_child(passage_mode_button)
+	stack.add_child(_make_description_label("The current full Kraken An Eight Ball run."))
+
+	stack.add_child(_make_gap(8.0))
+
+	roguelite_mode_button = _make_menu_button("The Long Sink")
+	stack.add_child(roguelite_mode_button)
+	stack.add_child(_make_description_label("A round-based roguelite voyage through escalating score quotas."))
+
+	stack.add_child(_make_gap(12.0))
+
+	mode_select_back_button = _make_menu_button("Back")
+	stack.add_child(mode_select_back_button)
+
+	passage_mode_button.pressed.connect(_on_passage_mode_pressed)
+	roguelite_mode_button.pressed.connect(_on_roguelite_mode_pressed)
+	mode_select_back_button.pressed.connect(_on_mode_select_back_pressed)
+
+
 func _update_menu_layout() -> void:
 	if menu_panel == null:
 		return
@@ -402,6 +475,18 @@ func _update_menu_layout() -> void:
 		options_panel.offset_top = -options_height * 0.5
 		options_panel.offset_bottom = options_height * 0.5
 
+	if mode_select_panel != null:
+		var mode_width: float = clampf(viewport_size.x * 0.32, 540.0, 660.0)
+		var mode_height: float = clampf(viewport_size.y * 0.48, 480.0, 560.0)
+		mode_select_panel.anchor_left = 0.5
+		mode_select_panel.anchor_right = 0.5
+		mode_select_panel.anchor_top = 0.5
+		mode_select_panel.anchor_bottom = 0.5
+		mode_select_panel.offset_left = -mode_width * 0.5
+		mode_select_panel.offset_right = mode_width * 0.5
+		mode_select_panel.offset_top = -mode_height * 0.5
+		mode_select_panel.offset_bottom = mode_height * 0.5
+
 	if run_history_panel != null:
 		run_history_panel.update_layout_for_viewport(viewport_size)
 
@@ -425,16 +510,67 @@ func _set_menu_chrome_visible(is_visible: bool) -> void:
 
 
 func _on_start_pressed() -> void:
+	_open_mode_select_panel()
+
+
+func _start_game(mode_id: String, travel_message: String) -> void:
 	start_button.disabled = true
-	status_label.text = "Casting off..."
+	if passage_mode_button != null:
+		passage_mode_button.disabled = true
+	if roguelite_mode_button != null:
+		roguelite_mode_button.disabled = true
+	status_label.text = travel_message
+	GAME_MODE_SCRIPT.set_pending_mode(get_tree(), mode_id)
+
 	var error_code: int = get_tree().change_scene_to_file(GAMEPLAY_SCENE_PATH)
 	if error_code != OK:
 		start_button.disabled = false
+		if passage_mode_button != null:
+			passage_mode_button.disabled = false
+		if roguelite_mode_button != null:
+			roguelite_mode_button.disabled = false
+		if mode_select_panel != null:
+			mode_select_panel.visible = false
+		_set_menu_chrome_visible(true)
 		status_label.text = "Could not load the table. Error %s" % error_code
+
+
+func _open_mode_select_panel() -> void:
+	_set_menu_chrome_visible(false)
+	if options_panel != null:
+		options_panel.visible = false
+	if run_history_panel != null:
+		run_history_panel.close_panel()
+	if cue_locker_panel != null:
+		cue_locker_panel.close_panel()
+	if passage_mode_button != null:
+		passage_mode_button.disabled = false
+	if roguelite_mode_button != null:
+		roguelite_mode_button.disabled = false
+	mode_select_panel.visible = true
+	passage_mode_button.grab_focus()
+
+
+func _on_passage_mode_pressed() -> void:
+	_start_game(GAME_MODE_SCRIPT.MODE_PASSAGE, "Casting off...")
+
+
+func _on_roguelite_mode_pressed() -> void:
+	_start_game(GAME_MODE_SCRIPT.MODE_ROGUELITE, "The table sinks...")
+
+
+func _on_mode_select_back_pressed() -> void:
+	if mode_select_panel != null:
+		mode_select_panel.visible = false
+	_set_menu_chrome_visible(true)
+	status_label.text = "The moon is high. The table waits."
+	start_button.grab_focus()
 
 
 func _on_options_pressed() -> void:
 	_set_menu_chrome_visible(false)
+	if mode_select_panel != null:
+		mode_select_panel.visible = false
 	if run_history_panel != null:
 		run_history_panel.close_panel()
 	if cue_locker_panel != null:
@@ -454,6 +590,8 @@ func _on_options_back_requested() -> void:
 
 func _on_cue_locker_pressed() -> void:
 	_set_menu_chrome_visible(false)
+	if mode_select_panel != null:
+		mode_select_panel.visible = false
 	if options_panel != null:
 		options_panel.visible = false
 	if run_history_panel != null:
@@ -480,6 +618,8 @@ func _on_cue_progression_status_changed(text: String) -> void:
 
 func _on_run_history_pressed() -> void:
 	_set_menu_chrome_visible(false)
+	if mode_select_panel != null:
+		mode_select_panel.visible = false
 	if options_panel != null:
 		options_panel.visible = false
 	if cue_locker_panel != null:

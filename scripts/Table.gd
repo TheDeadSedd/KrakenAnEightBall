@@ -9,6 +9,9 @@ signal shot_taken(count: int)
 signal shot_finished(count: int)
 signal gameplay_mouse_lock_changed(locked: bool)
 signal cue_start_selection_changed(snapshot: Dictionary)
+signal roguelite_round_cleared(snapshot: Dictionary)
+signal roguelite_run_failed(snapshot: Dictionary)
+signal roguelite_run_completed(snapshot: Dictionary)
 
 #region Data Containers
 class ResultCallout:
@@ -44,6 +47,9 @@ const SHIP_FLOOR_TEXTURE := preload("res://assets/table_art/ship_floor_full.png"
 const TABLE_FRAME_TEXTURE := preload("res://assets/table_art/pool_table_frame.png")
 const KRAKEN_SILHOUETTE_TEXTURE := preload("res://assets/table_art/kraken_silhouette.png")
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
+const GAME_MODE_SCRIPT := preload("res://scripts/GameModeSystem.gd")
+const ROGUELITE_RUN_SCRIPT := preload("res://scripts/RogueliteRunSystem.gd")
+const ROGUELITE_REWARD_SCRIPT := preload("res://scripts/RogueliteRewardSystem.gd")
 
 # Presentation layout. The underlying table dimensions stay the same; the whole play space is centered in a larger 1920x1080 canvas.
 const PRESENTATION_OFFSET_X := 360.0
@@ -69,6 +75,7 @@ const SHIP_FLOOR_FULL_ART_RECT := Rect2(0, 0, 1920, 1080)
 const TABLE_FRAME_VISIBLE_BOUNDS := Rect2(311, 130, 1294, 794)
 const KRAKEN_ART_ALPHA := 0.18
 const READY_STATUS_TEXT := "The Kraken waits with payment."
+const ROGUELITE_READY_STATUS_TEXT := "The Long Sink begins."
 const LOADING_STATUS_TEXT := "Loading table..."
 
 # Legacy pre-BallDrop reward triggers. Keep disabled for normal gameplay.
@@ -211,6 +218,9 @@ var perf_rail_collision_ms := 0.0
 var perf_pocket_check_ms := 0.0
 var cue_modifier_snapshot: Dictionary = {}
 var kraken_boon_effect_snapshot: Dictionary = {}
+var game_mode_id: String = GAME_MODE_SCRIPT.MODE_PASSAGE
+var roguelite_run_system: RogueliteRunSystem
+var roguelite_reward_system: RogueliteRewardSystem
 #endregion
 
 
@@ -232,7 +242,10 @@ func _ready() -> void:
 	table_event_system.setup(self)
 	if table_event_system.should_disable_automatic_ball_drops():
 		ball_drop_system.enabled = false
-	passage_system.setup(self)
+	if is_roguelite_mode():
+		table_event_system.enabled = false
+	if is_passage_mode():
+		passage_system.setup(self)
 	oath_system.setup(self)
 	table_obstacle_system.setup(self)
 	ball_audio_system.setup(self)
@@ -252,6 +265,7 @@ func _ready() -> void:
 	back_room_deal_system.setup(self)
 	sunken_spoils_system.setup(self)
 	run_stats_system.setup(self)
+	_setup_roguelite_mode_if_needed()
 	_cache_table_geometry()
 	cue_controller.setup()
 	if Engine.is_editor_hint():
@@ -259,14 +273,258 @@ func _ready() -> void:
 		queue_redraw()
 		return
 
-	var starting_balls = spawn_system.spawn_starting_balls()
+	var starting_balls = _spawn_initial_balls_for_mode()
 	cue_ball = starting_balls.cue_ball
 	eight_ball = starting_balls.eight_ball
 	eight_start = starting_balls.eight_start
 	_activate_initial_cue_start_selection()
 	_queue_run_ball_count_update()
-	status_text_changed.emit(READY_STATUS_TEXT)
+	status_text_changed.emit(_get_ready_status_text())
 	queue_redraw()
+
+
+func set_game_mode_id(mode_id: String) -> void:
+	game_mode_id = GAME_MODE_SCRIPT.normalize_mode_id(mode_id)
+
+
+func get_game_mode_id() -> String:
+	return game_mode_id
+
+
+func is_passage_mode() -> bool:
+	return GAME_MODE_SCRIPT.is_passage(game_mode_id)
+
+
+func is_roguelite_mode() -> bool:
+	return GAME_MODE_SCRIPT.is_roguelite(game_mode_id)
+
+
+func get_game_mode_snapshot() -> Dictionary:
+	return {
+		"mode_id": game_mode_id,
+		"label": GAME_MODE_SCRIPT.get_mode_label(game_mode_id),
+		"is_passage": is_passage_mode(),
+		"is_roguelite": is_roguelite_mode(),
+	}
+
+
+func get_roguelite_run_snapshot() -> Dictionary:
+	if roguelite_run_system == null:
+		return {}
+	return roguelite_run_system.get_snapshot()
+
+
+func get_roguelite_reward_snapshot() -> Dictionary:
+	if roguelite_reward_system == null:
+		return {}
+	return roguelite_reward_system.get_reward_snapshot()
+
+
+func should_offer_roguelite_reward(round_snapshot: Dictionary) -> bool:
+	return (
+		is_roguelite_mode()
+		and roguelite_reward_system != null
+		and bool(round_snapshot.get("has_next_round", false))
+		and not bool(round_snapshot.get("run_failed", false))
+		and not bool(round_snapshot.get("run_completed", false))
+	)
+
+
+func generate_roguelite_reward_offers(round_snapshot: Dictionary) -> Dictionary:
+	if not should_offer_roguelite_reward(round_snapshot):
+		return {}
+	var round_number: int = maxi(int(round_snapshot.get("round_number", 0)), 0)
+	return roguelite_reward_system.generate_reward_offers(round_number)
+
+
+func choose_roguelite_reward(reward_id: String) -> bool:
+	if not is_roguelite_mode() or roguelite_reward_system == null or roguelite_run_system == null:
+		return false
+
+	var result: Dictionary = roguelite_reward_system.choose_reward(reward_id)
+	if result.is_empty():
+		return false
+
+	var reward_snapshot_value: Variant = result.get("reward", {})
+	var effect_snapshot_value: Variant = result.get("effects", {})
+	var reward_snapshot: Dictionary = reward_snapshot_value as Dictionary
+	var effect_snapshot: Dictionary = effect_snapshot_value as Dictionary
+	roguelite_run_system.apply_reward_effect_snapshot(effect_snapshot)
+	var reward_name: String = str(reward_snapshot.get("display_name", "Course marked"))
+	status_text_changed.emit("Course marked: %s." % reward_name)
+	return true
+
+
+func _spawn_initial_balls_for_mode():
+	# Passage keeps the original starting rack path. Roguelite round spawning
+	# should replace only its own branch in a later focused pass.
+	if is_roguelite_mode():
+		var object_ball_count: int = 0
+		if roguelite_run_system != null:
+			object_ball_count = maxi(int(roguelite_run_system.get_current_round_setup().get("object_balls", 0)), 0)
+		return spawn_system.spawn_roguelite_round_balls(object_ball_count)
+
+	return spawn_system.spawn_starting_balls()
+
+
+func _setup_roguelite_mode_if_needed() -> void:
+	if not is_roguelite_mode():
+		return
+
+	roguelite_reward_system = ROGUELITE_REWARD_SCRIPT.new()
+	roguelite_reward_system.setup()
+	roguelite_run_system = ROGUELITE_RUN_SCRIPT.new()
+	roguelite_run_system.set_reward_system(roguelite_reward_system)
+	if not score_system.doubloons_awarded.is_connected(_on_roguelite_doubloons_awarded):
+		score_system.doubloons_awarded.connect(_on_roguelite_doubloons_awarded)
+	if not shot_finished.is_connected(_on_roguelite_shot_finished):
+		shot_finished.connect(_on_roguelite_shot_finished)
+	if not roguelite_run_system.round_won.is_connected(_on_roguelite_round_won):
+		roguelite_run_system.round_won.connect(_on_roguelite_round_won)
+	if not roguelite_run_system.run_failed.is_connected(_on_roguelite_run_failed):
+		roguelite_run_system.run_failed.connect(_on_roguelite_run_failed)
+	if not roguelite_run_system.run_completed.is_connected(_on_roguelite_run_completed):
+		roguelite_run_system.run_completed.connect(_on_roguelite_run_completed)
+
+	roguelite_run_system.start_run()
+
+
+func _on_roguelite_doubloons_awarded(amount: int, _total: int) -> void:
+	if roguelite_run_system == null:
+		return
+
+	var quota_progress: int = maxi(amount, 0)
+	if quota_progress <= 0:
+		return
+
+	if roguelite_reward_system != null:
+		var volley_result: Dictionary = roguelite_reward_system.consume_opening_volley_bonus(
+			int(roguelite_run_system.get_snapshot().get("round_number", 0)),
+			quota_progress
+		)
+		var volley_bonus: int = maxi(int(volley_result.get("amount", 0)), 0)
+		if volley_bonus > 0:
+			quota_progress += volley_bonus
+			status_text_changed.emit("%s: +%s quota." % [str(volley_result.get("label", "Reward")), volley_bonus])
+
+	roguelite_run_system.add_round_score(quota_progress)
+
+
+func _on_roguelite_shot_finished(_count: int) -> void:
+	if roguelite_run_system == null:
+		return
+
+	roguelite_run_system.consume_shot()
+	_resolve_roguelite_round_after_motion()
+
+
+func _on_roguelite_round_won(_snapshot: Dictionary) -> void:
+	status_text_changed.emit("Round Cleared")
+
+
+func _on_roguelite_run_failed(_snapshot: Dictionary) -> void:
+	status_text_changed.emit("Run Failed")
+
+
+func _on_roguelite_run_completed(_snapshot: Dictionary) -> void:
+	status_text_changed.emit("Run Complete")
+
+
+func _resolve_roguelite_round_after_motion() -> void:
+	if game_over or roguelite_run_system == null:
+		return
+
+	var snapshot: Dictionary = roguelite_run_system.get_snapshot()
+	if bool(snapshot.get("run_failed", false)):
+		_finish_roguelite_run_failed(snapshot)
+		return
+
+	if not bool(snapshot.get("round_won", false)):
+		return
+
+	_enter_roguelite_round_hold()
+	if roguelite_run_system.has_next_round():
+		roguelite_round_cleared.emit(snapshot)
+		return
+
+	roguelite_run_system.advance_to_next_round()
+	roguelite_run_completed.emit(roguelite_run_system.get_snapshot())
+
+
+func continue_roguelite_round() -> bool:
+	if not is_roguelite_mode() or roguelite_run_system == null:
+		return false
+	if game_over and bool(roguelite_run_system.get_snapshot().get("run_completed", false)):
+		return false
+	if not roguelite_run_system.advance_to_next_round():
+		return false
+
+	_reset_roguelite_table_for_current_round()
+	return true
+
+
+func _enter_roguelite_round_hold() -> void:
+	game_over = true
+	_end_cue_drag()
+	cue_controller.stop_recoil()
+	_clear_aim_preview_now()
+	queue_redraw()
+
+
+func _finish_roguelite_run_failed(snapshot: Dictionary) -> void:
+	game_over = true
+	_end_cue_drag()
+	cue_controller.stop_recoil()
+	_clear_aim_preview_now()
+	roguelite_run_failed.emit(snapshot.duplicate(true))
+	queue_redraw()
+
+
+func _reset_roguelite_table_for_current_round() -> void:
+	game_over = false
+	shot_active = false
+	cue_control_reclaimed = false
+	cue_reclaim_eligible = false
+	cue_reclaim_blocker_reason = "No active shot"
+	cue_reclaim_cached_signature = ""
+	cue_reclaim_cached_eligible = false
+	cue_reclaim_cached_blocker_reason = "No active shot"
+	shot_pocketed_object_balls = 0
+	shot_cue_touched_rail = false
+	shot_had_bank_pocket = false
+	shot_multi_pocket_bonus_awarded = false
+	shot_bank_bonus_awarded = false
+	shot_bank_eligible_ball_ids.clear()
+	cue_start_selection_active = false
+	cue_start_selection_locked = true
+	_end_cue_drag()
+	cue_controller.stop_recoil()
+	shot_event_system.clear_shot_events()
+	pocket_streak_system.reset_shot()
+	aim_preview.stop_actual_path_recording()
+	_clear_roguelite_table_balls()
+
+	var starting_balls = _spawn_initial_balls_for_mode()
+	cue_ball = starting_balls.cue_ball
+	eight_ball = starting_balls.eight_ball
+	eight_start = starting_balls.eight_start
+	_queue_run_ball_count_update()
+	_emit_cue_start_selection_update()
+	status_text_changed.emit(_get_ready_status_text())
+	_clear_aim_preview_now()
+	queue_redraw()
+
+
+func _clear_roguelite_table_balls() -> void:
+	for child in balls.get_children():
+		var ball: Ball = child as Ball
+		if ball == null:
+			continue
+		balls.remove_child(ball)
+		ball.queue_free()
+	cue_ball = null
+	eight_ball = null
+	eight_start = Vector2.ZERO
 
 
 func _exit_tree() -> void:
@@ -346,7 +604,7 @@ func emit_ready_status_if_needed(current_status_text: String) -> void:
 	if not _is_loading_status_text(current_status_text):
 		return
 	if _can_start_aiming():
-		status_text_changed.emit(READY_STATUS_TEXT)
+		status_text_changed.emit(_get_ready_status_text())
 
 
 func can_start_manual_ball_placement() -> bool:
@@ -355,6 +613,10 @@ func can_start_manual_ball_placement() -> bool:
 	if shot_active:
 		return false
 	return _all_balls_stopped() and _get_cue_control_base_blocker().is_empty()
+
+
+func _get_ready_status_text() -> String:
+	return ROGUELITE_READY_STATUS_TEXT if is_roguelite_mode() else READY_STATUS_TEXT
 
 
 func is_ball_placement_active() -> bool:
@@ -1358,7 +1620,10 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 	_note_actual_cue_pocketed(ball)
 
 	if ball == cue_ball:
-		_handle_special_ball_pocketed(ball, spawn_system.get_cue_start(), "Cue ball")
+		if is_roguelite_mode():
+			_handle_roguelite_cue_ball_pocketed(ball)
+		else:
+			_handle_special_ball_pocketed(ball, spawn_system.get_cue_start(), "Cue ball")
 		return
 
 	if ball == eight_ball:
@@ -1368,7 +1633,8 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 
 	var score_context: Dictionary = _make_sink_score_context(ball)
 	_note_run_ball_sunk(ball)
-	sunken_spoils_system.record_qualifying_object_ball_sunk(ball)
+	if is_passage_mode():
+		sunken_spoils_system.record_qualifying_object_ball_sunk(ball)
 	anchor_ball_system.handle_ball_pocketed(ball)
 	if embezzler_system.handle_ball_captured(ball, score_context):
 		status_text_changed.emit("Embezzler caught.")
@@ -1381,12 +1647,36 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 	var scored_amount: int = score_system.score_sunk_ball_snapshot(score_snapshot, score_context)
 	if scored_amount > 0:
 		wayfinder_system.note_wayfinder_current_sink_scored(ball)
+	_apply_roguelite_sink_reward_quota_bonus(score_snapshot, scored_amount)
 	treasure_ball_system.handle_treasure_claimed(ball, score_context)
 	var pocket_streak_result: Dictionary = {}
 	if shot_sink_recorded:
 		pocket_streak_result = pocket_streak_system.record_object_ball_sink(score_context, scored_amount)
 	_handle_pocket_streak_result(pocket_streak_result)
 	status_text_changed.emit("Ball %s sunk." % ball.ball_number)
+
+
+func _apply_roguelite_sink_reward_quota_bonus(score_snapshot: Dictionary, scored_amount: int) -> void:
+	if not is_roguelite_mode() or roguelite_reward_system == null or roguelite_run_system == null:
+		return
+
+	var bonus_result: Dictionary = roguelite_reward_system.get_sink_quota_bonus(score_snapshot, scored_amount)
+	var bonus_amount: int = maxi(int(bonus_result.get("amount", 0)), 0)
+	if bonus_amount <= 0:
+		return
+
+	roguelite_run_system.add_round_score(bonus_amount)
+	var labels_value: Variant = bonus_result.get("labels", [])
+	var labels: Array = []
+	if labels_value is Array:
+		labels = labels_value
+	var label_text: String = "Reward"
+	if not labels.is_empty():
+		var label_parts: PackedStringArray = PackedStringArray()
+		for label_value in labels:
+			label_parts.append(str(label_value))
+		label_text = " / ".join(label_parts)
+	status_text_changed.emit("%s: +%s quota." % [label_text, bonus_amount])
 
 
 func _handle_special_ball_pocketed(ball: Ball, reset_origin: Vector2, ball_label: String) -> void:
@@ -1409,6 +1699,20 @@ func _handle_special_ball_pocketed(ball: Ball, reset_origin: Vector2, ball_label
 		reset_origin,
 		_get_special_ball_penalty_status(ball_label, penalty_amount, removed_penalty_ball, curse_seed_created)
 	)
+
+
+func _handle_roguelite_cue_ball_pocketed(ball: Ball) -> void:
+	var hull: int = 0
+	var run_failed: bool = false
+	if roguelite_run_system != null:
+		var hull_snapshot: Dictionary = roguelite_run_system.damage_hull(1)
+		hull = maxi(int(hull_snapshot.get("hull", 0)), 0)
+		run_failed = bool(hull_snapshot.get("run_failed", false))
+
+	var message: String = "Cue ball recovered. Hull: %s" % hull
+	if run_failed:
+		message = "Hull breached. Run Failed."
+	_reset_ball(ball, spawn_system.get_cue_start(), message)
 
 
 func _get_special_ball_penalty_status(
@@ -1736,7 +2040,8 @@ func _try_finish_shot() -> void:
 	shot_finished.emit(shots_taken_count)
 	if should_advance_anchor_chains:
 		_handle_cue_control_regained_after_shot()
-	sunken_spoils_system.handle_shot_resolved()
+	if is_passage_mode():
+		sunken_spoils_system.handle_shot_resolved()
 
 
 func _handle_cue_control_regained_after_shot() -> void:
@@ -2605,7 +2910,7 @@ func _update_cue_reclaim_state(delta: float) -> void:
 		cue_control_reclaimed = true
 		cue_reclaim_blocker_reason = "Granted"
 		_handle_cue_control_regained_after_shot()
-		status_text_changed.emit(READY_STATUS_TEXT)
+		status_text_changed.emit(_get_ready_status_text())
 
 
 func _get_cue_reclaim_motion_signature() -> String:

@@ -3,7 +3,9 @@ extends Node2D
 const FULLSCREEN_TOGGLE_KEY := KEY_F11
 const PAUSE_TOGGLE_KEY := KEY_ESCAPE
 const MAIN_MENU_SCENE_PATH := "res://scenes/MainMenu.tscn"
+const GAMEPLAY_SCENE_PATH := "res://scenes/Main.tscn"
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
+const GAME_MODE_SCRIPT := preload("res://scripts/GameModeSystem.gd")
 const COMPLETION_PANEL_SIZE := Vector2(620.0, 710.0)
 const BACK_ROOM_PANEL_VIEWPORT_MARGIN := 24.0
 
@@ -43,6 +45,22 @@ var latest_sunken_spoils_snapshot: Dictionary = {}
 var back_room_panel: BackRoomDealPanel
 var sunken_spoils_panel: SunkenSpoilsPanel
 var sunken_spoils_hud: SunkenSpoilsHUD
+var roguelite_hud: RogueliteHUD
+var roguelite_round_panel: RogueliteRoundPanel
+var roguelite_reward_panel: RogueliteRewardPanel
+var game_mode_id: String = GAME_MODE_SCRIPT.MODE_PASSAGE
+
+
+func _enter_tree() -> void:
+	game_mode_id = GAME_MODE_SCRIPT.consume_pending_mode(get_tree())
+
+	var table_node: BilliardsTable = get_node_or_null("Table") as BilliardsTable
+	if table_node != null:
+		table_node.set_game_mode_id(game_mode_id)
+
+
+func get_game_mode_id() -> String:
+	return game_mode_id
 
 
 func _ready() -> void:
@@ -63,6 +81,12 @@ func _connect_table_signals() -> void:
 		table.gameplay_mouse_lock_changed.connect(_on_gameplay_mouse_lock_changed)
 	if not table.cue_start_selection_changed.is_connected(_on_cue_start_selection_changed):
 		table.cue_start_selection_changed.connect(_on_cue_start_selection_changed)
+	if not table.roguelite_round_cleared.is_connected(_on_roguelite_round_cleared):
+		table.roguelite_round_cleared.connect(_on_roguelite_round_cleared)
+	if not table.roguelite_run_failed.is_connected(_on_roguelite_run_failed):
+		table.roguelite_run_failed.connect(_on_roguelite_run_failed)
+	if not table.roguelite_run_completed.is_connected(_on_roguelite_run_completed):
+		table.roguelite_run_completed.connect(_on_roguelite_run_completed)
 	table.score_system.doubloons_changed.connect(_on_doubloons_changed)
 	table.score_system.score_feed_message.connect(_on_score_feed_message)
 	table.table_event_system.status_changed.connect(_on_table_event_status_changed)
@@ -177,6 +201,9 @@ func _setup_hud_presenters() -> void:
 	oath_hud.setup(table.oath_system)
 	kraken_boon_hud.setup(table.kraken_boon_system)
 	_build_sunken_spoils_ui()
+	_build_roguelite_hud()
+	_build_roguelite_round_panel()
+	_build_roguelite_reward_panel()
 	_on_run_stats_changed(table.run_stats_system.get_run_stats_snapshot())
 	reserve_slots_ui.setup(table.reserve_system, table)
 	quartermaster_hud.setup(table.quartermaster_system, table)
@@ -184,6 +211,7 @@ func _setup_hud_presenters() -> void:
 	reserve_deployment_presenter.setup(table.reserve_system, reserve_slots_ui)
 	table.emit_ready_status_if_needed("")
 	debug_overlay.setup(table)
+	_apply_mode_visibility()
 
 
 func _build_back_room_deal_panel() -> void:
@@ -270,8 +298,53 @@ func _build_sunken_spoils_ui() -> void:
 		_set_sunken_spoils_snapshot(table.sunken_spoils_system.get_spoils_snapshot())
 
 
+func _build_roguelite_hud() -> void:
+	if roguelite_hud == null:
+		roguelite_hud = RogueliteHUD.new()
+		roguelite_hud.name = "RogueliteHUD"
+		roguelite_hud.process_mode = Node.PROCESS_MODE_ALWAYS
+		debug_overlay.add_child(roguelite_hud)
+
+	if table.roguelite_run_system != null:
+		if not table.roguelite_run_system.state_changed.is_connected(_on_roguelite_state_changed):
+			table.roguelite_run_system.state_changed.connect(_on_roguelite_state_changed)
+		roguelite_hud.set_snapshot(table.roguelite_run_system.get_snapshot())
+
+	roguelite_hud.set_visible_for_roguelite(table.is_roguelite_mode())
+
+
+func _build_roguelite_round_panel() -> void:
+	if roguelite_round_panel != null:
+		return
+
+	roguelite_round_panel = RogueliteRoundPanel.new()
+	roguelite_round_panel.name = "RogueliteRoundPanel"
+	roguelite_round_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	debug_overlay.add_child(roguelite_round_panel)
+	roguelite_round_panel.continue_requested.connect(_on_roguelite_continue_requested)
+	roguelite_round_panel.restart_requested.connect(_on_roguelite_restart_requested)
+	roguelite_round_panel.abandon_requested.connect(_on_roguelite_abandon_requested)
+
+
+func _build_roguelite_reward_panel() -> void:
+	if roguelite_reward_panel != null:
+		return
+
+	roguelite_reward_panel = RogueliteRewardPanel.new()
+	roguelite_reward_panel.name = "RogueliteRewardPanel"
+	roguelite_reward_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	debug_overlay.add_child(roguelite_reward_panel)
+	roguelite_reward_panel.reward_selected.connect(_on_roguelite_reward_selected)
+
+
 func _set_sunken_spoils_snapshot(snapshot: Dictionary) -> void:
 	latest_sunken_spoils_snapshot = snapshot.duplicate(true)
+	if _is_roguelite_mode():
+		if sunken_spoils_hud != null:
+			sunken_spoils_hud.visible = false
+		if sunken_spoils_panel != null:
+			sunken_spoils_panel.close_panel()
+		return
 	if sunken_spoils_hud != null:
 		sunken_spoils_hud.set_spoils_snapshot(latest_sunken_spoils_snapshot)
 	if sunken_spoils_panel != null:
@@ -297,6 +370,7 @@ func _sync_initial_hud_state() -> void:
 	_set_sunken_spoils_snapshot(table.sunken_spoils_system.get_spoils_snapshot())
 	cue_start_selector_hud.set_cue_start_snapshot(table.get_cue_start_selection_snapshot())
 	_on_gameplay_mouse_lock_changed(table.should_suppress_hover_ui())
+	_apply_mode_visibility()
 
 
 func _configure_pause_process_modes() -> void:
@@ -318,6 +392,42 @@ func _configure_pause_process_modes() -> void:
 	kraken_boon_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	table_event_meter.process_mode = Node.PROCESS_MODE_ALWAYS
 	table_event_menu.process_mode = Node.PROCESS_MODE_ALWAYS
+
+
+func _is_roguelite_mode() -> bool:
+	return table != null and table.is_roguelite_mode()
+
+
+func _apply_mode_visibility() -> void:
+	var roguelite_active := _is_roguelite_mode()
+	if passage_hud != null:
+		passage_hud.visible = not roguelite_active
+	if oath_hud != null:
+		oath_hud.visible = not roguelite_active
+	if kraken_boon_hud != null:
+		kraken_boon_hud.visible = not roguelite_active
+	if table_event_meter != null:
+		table_event_meter.visible = not roguelite_active
+	if table_event_menu != null and roguelite_active:
+		table_event_menu.close_menu()
+	if reserve_slots_ui != null:
+		reserve_slots_ui.visible = not roguelite_active
+	if reserve_deployment_presenter != null:
+		reserve_deployment_presenter.visible = not roguelite_active
+	if quartermaster_hud != null:
+		quartermaster_hud.visible = not roguelite_active
+	if back_room_panel != null and roguelite_active:
+		back_room_panel.close_panel()
+	if sunken_spoils_hud != null:
+		sunken_spoils_hud.visible = not roguelite_active
+	if sunken_spoils_panel != null and roguelite_active:
+		sunken_spoils_panel.close_panel()
+	if roguelite_hud != null:
+		roguelite_hud.set_visible_for_roguelite(roguelite_active)
+	if roguelite_round_panel != null and not roguelite_active:
+		roguelite_round_panel.close_panel()
+	if roguelite_reward_panel != null and not roguelite_active:
+		roguelite_reward_panel.close_panel()
 
 
 func _setup_cue_progression_runtime_bridge() -> void:
@@ -435,6 +545,11 @@ func _on_status_text_changed(text: String) -> void:
 
 
 func _on_game_finished(text: String) -> void:
+	if _is_roguelite_mode():
+		result_label.text = ""
+		hud_feed.add_message(text, "status")
+		return
+
 	result_label.text = text
 	hud_feed.add_message(text, "status")
 
@@ -460,9 +575,116 @@ func _on_sunken_spoils_changed(snapshot: Dictionary) -> void:
 
 
 func _on_sunken_spoils_status_changed(text: String) -> void:
+	if _is_roguelite_mode():
+		return
 	if text.is_empty():
 		return
 	hud_feed.add_message(text, "event")
+
+
+func _on_roguelite_state_changed(snapshot: Dictionary) -> void:
+	if roguelite_hud != null:
+		roguelite_hud.set_snapshot(snapshot)
+	_apply_mode_visibility()
+
+
+func _on_roguelite_round_cleared(snapshot: Dictionary) -> void:
+	hud_feed.add_message("Round Cleared", "status")
+	if table != null and table.should_offer_roguelite_reward(snapshot):
+		var reward_snapshot: Dictionary = table.generate_roguelite_reward_offers(snapshot)
+		var offers_value: Variant = reward_snapshot.get("offers", [])
+		var offers: Array = []
+		if offers_value is Array:
+			offers = offers_value
+		if roguelite_reward_panel != null and not offers.is_empty():
+			roguelite_reward_panel.open_panel(reward_snapshot)
+			return
+
+	if roguelite_round_panel != null:
+		roguelite_round_panel.open_round_cleared(snapshot)
+
+
+func _on_roguelite_run_failed(snapshot: Dictionary) -> void:
+	result_label.text = ""
+	if roguelite_reward_panel != null:
+		roguelite_reward_panel.close_panel()
+	if roguelite_round_panel != null:
+		roguelite_round_panel.open_run_failed(snapshot)
+	hud_feed.add_message("Run Failed", "status")
+
+
+func _on_roguelite_run_completed(snapshot: Dictionary) -> void:
+	if roguelite_reward_panel != null:
+		roguelite_reward_panel.close_panel()
+	if roguelite_round_panel != null:
+		roguelite_round_panel.open_run_completed(snapshot)
+	hud_feed.add_message("Run Complete", "status")
+
+
+func _on_roguelite_continue_requested() -> void:
+	if table == null or not table.is_roguelite_mode():
+		return
+	if not table.continue_roguelite_round():
+		return
+
+	if roguelite_round_panel != null:
+		roguelite_round_panel.close_panel()
+	if roguelite_reward_panel != null:
+		roguelite_reward_panel.close_panel()
+	if roguelite_hud != null:
+		roguelite_hud.set_snapshot(table.get_roguelite_run_snapshot())
+	result_label.text = ""
+	_apply_mode_visibility()
+
+
+func _on_roguelite_restart_requested() -> void:
+	if end_run_in_progress:
+		return
+
+	end_run_in_progress = true
+	if roguelite_round_panel != null:
+		roguelite_round_panel.close_panel()
+	if roguelite_reward_panel != null:
+		roguelite_reward_panel.close_panel()
+	result_label.text = ""
+	get_tree().paused = false
+	GAME_MODE_SCRIPT.set_pending_mode(get_tree(), GAME_MODE_SCRIPT.MODE_ROGUELITE)
+	var error_code: int = get_tree().change_scene_to_file(GAMEPLAY_SCENE_PATH)
+	if error_code != OK:
+		end_run_in_progress = false
+		if roguelite_round_panel != null:
+			var snapshot: Dictionary = table.get_roguelite_run_snapshot() if table != null else {}
+			roguelite_round_panel.open_run_failed(snapshot)
+
+
+func _on_roguelite_reward_selected(reward_id: String) -> void:
+	if table == null or not table.is_roguelite_mode():
+		return
+	if not table.choose_roguelite_reward(reward_id):
+		return
+
+	if roguelite_reward_panel != null:
+		roguelite_reward_panel.close_panel()
+	if roguelite_hud != null:
+		roguelite_hud.set_snapshot(table.get_roguelite_run_snapshot())
+	_on_roguelite_continue_requested()
+
+
+func _on_roguelite_abandon_requested() -> void:
+	if end_run_in_progress:
+		return
+
+	end_run_in_progress = true
+	if roguelite_round_panel != null:
+		roguelite_round_panel.close_panel()
+	if roguelite_reward_panel != null:
+		roguelite_reward_panel.close_panel()
+	get_tree().paused = false
+	var error_code: int = get_tree().change_scene_to_file(MAIN_MENU_SCENE_PATH)
+	if error_code != OK:
+		end_run_in_progress = false
+		if roguelite_round_panel != null:
+			roguelite_round_panel.visible = true
 
 
 func _on_gameplay_mouse_lock_changed(locked: bool) -> void:
@@ -749,6 +971,9 @@ func _on_pause_debug_sunken_spoils_advance_requested() -> void:
 	if table == null or table.sunken_spoils_system == null:
 		hud_feed.add_message("Sunken Spoils debug blocked: system unavailable.", "event")
 		return
+	if table.is_roguelite_mode():
+		hud_feed.add_message("Sunken Spoils debug blocked in roguelite mode.", "event")
+		return
 
 	table.sunken_spoils_system.debug_advance_progress(1)
 	_unpause_if_sunken_spoils_ready()
@@ -758,6 +983,9 @@ func _on_pause_debug_sunken_spoils_trigger_requested() -> void:
 	if table == null or table.sunken_spoils_system == null:
 		hud_feed.add_message("Sunken Spoils debug blocked: system unavailable.", "event")
 		return
+	if table.is_roguelite_mode():
+		hud_feed.add_message("Sunken Spoils debug blocked in roguelite mode.", "event")
+		return
 
 	table.sunken_spoils_system.debug_trigger_reward()
 	_unpause_if_sunken_spoils_ready()
@@ -766,6 +994,9 @@ func _on_pause_debug_sunken_spoils_trigger_requested() -> void:
 func _on_pause_debug_sunken_spoils_reset_requested() -> void:
 	if table == null or table.sunken_spoils_system == null:
 		hud_feed.add_message("Sunken Spoils debug blocked: system unavailable.", "event")
+		return
+	if table.is_roguelite_mode():
+		hud_feed.add_message("Sunken Spoils debug blocked in roguelite mode.", "event")
 		return
 
 	table.sunken_spoils_system.debug_reset_spoils()

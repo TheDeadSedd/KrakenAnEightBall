@@ -122,6 +122,22 @@ func spawn_starting_balls() -> StartingBallData:
 	return data
 
 
+func spawn_roguelite_round_balls(object_ball_count: int) -> StartingBallData:
+	var data: StartingBallData = StartingBallData.new()
+	data.cue_ball = CUE_BALL_SCENE.instantiate() as Ball
+	table.balls.add_child(data.cue_ball)
+	data.cue_ball.global_position = get_selected_cue_start()
+
+	var spawn_count: int = maxi(object_ball_count, 0)
+	for index in range(spawn_count):
+		var number: int = _get_next_spawn_ball_number()
+		var preferred_position: Vector2 = _get_roguelite_round_ball_position(index, data.cue_ball.radius)
+		var position: Vector2 = _find_safe_spawn_position_near(preferred_position, data.cue_ball.radius)
+		_create_ball(Ball.BallType.OBJECT, number, _ball_color(number), position)
+
+	return data
+
+
 func try_handle_debug_spawn_input(event: InputEvent) -> bool:
 	if not (event is InputEventKey):
 		return false
@@ -644,6 +660,13 @@ func _get_rack_position(row: int, slot: int, spacing: float) -> Vector2:
 	var x_offset: float = float(row) * spacing
 	var y_offset: float = (float(slot) - float(row) * 0.5) * spacing
 	return RACK_ORIGIN + Vector2(x_offset, y_offset)
+
+
+func _get_roguelite_round_ball_position(index: int, cue_radius: float) -> Vector2:
+	var spacing: float = cue_radius * RACK_SPACING_MULTIPLIER * 1.35
+	var side: float = -0.5 if index % 2 == 0 else 0.5
+	var column: float = floorf(float(index) / 2.0)
+	return RACK_ORIGIN + Vector2(column * spacing, side * spacing)
 
 
 func _create_ball(ball_type: int, number: int, color: Color, position: Vector2) -> Ball:
