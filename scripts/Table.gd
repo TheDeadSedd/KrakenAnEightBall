@@ -439,6 +439,13 @@ func _resolve_roguelite_round_after_motion() -> void:
 		_finish_roguelite_run_failed(snapshot)
 		return
 
+	var scoreable_ball_count: int = _get_roguelite_scoreable_ball_count()
+	if scoreable_ball_count <= 0:
+		snapshot = roguelite_run_system.fail_empty_table_if_needed(scoreable_ball_count)
+		if bool(snapshot.get("run_failed", false)):
+			_finish_roguelite_run_failed(snapshot)
+			return
+
 	if not bool(snapshot.get("round_won", false)):
 		return
 
@@ -448,7 +455,7 @@ func _resolve_roguelite_round_after_motion() -> void:
 		return
 
 	roguelite_run_system.advance_to_next_round()
-	roguelite_run_completed.emit(roguelite_run_system.get_snapshot())
+	roguelite_run_completed.emit(roguelite_run_system.get_terminal_summary_snapshot())
 
 
 func continue_roguelite_round() -> bool:
@@ -471,13 +478,41 @@ func _enter_roguelite_round_hold() -> void:
 	queue_redraw()
 
 
-func _finish_roguelite_run_failed(snapshot: Dictionary) -> void:
+func _finish_roguelite_run_failed(_snapshot: Dictionary) -> void:
 	game_over = true
 	_end_cue_drag()
 	cue_controller.stop_recoil()
 	_clear_aim_preview_now()
-	roguelite_run_failed.emit(snapshot.duplicate(true))
+	roguelite_run_failed.emit(roguelite_run_system.get_terminal_summary_snapshot())
 	queue_redraw()
+
+
+func _get_roguelite_scoreable_ball_count() -> int:
+	var scoreable_count: int = 0
+	for child in balls.get_children():
+		var ball: Ball = child as Ball
+		if not _is_roguelite_scoreable_ball(ball):
+			continue
+		scoreable_count += 1
+	return scoreable_count
+
+
+func has_roguelite_scoreable_balls_remaining() -> bool:
+	return _get_roguelite_scoreable_ball_count() > 0
+
+
+func _is_roguelite_scoreable_ball(ball: Ball) -> bool:
+	if ball == null:
+		return false
+	if not is_instance_valid(ball):
+		return false
+	if ball == cue_ball:
+		return false
+	if ball.is_queued_for_deletion():
+		return false
+	if not ball.is_gameplay_active():
+		return false
+	return true
 
 
 func _reset_roguelite_table_for_current_round() -> void:
@@ -966,7 +1001,16 @@ func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
 		_note_cue_object_contact(ball_a, ball_b, normal, collision_impact_speed, pre_collision_velocity_a, pre_collision_velocity_b)
 		_note_chain_contact(ball_a, ball_b, pre_collision_velocity_a, pre_collision_velocity_b)
 		shot_event_system.record_collision_motion(ball_a, ball_b, pre_collision_velocity_a, pre_collision_velocity_b)
-	_note_actual_cue_ball_hit(ball_a, ball_b)
+	if collision_impact_speed > 0.0 and aim_preview.is_debug_aim_line_enabled():
+		aim_preview.report_debug_collision_event(ball_a, ball_b, normal, collision_impact_speed)
+	_note_actual_cue_ball_hit(
+		ball_a,
+		ball_b,
+		normal,
+		collision_impact_speed,
+		pre_collision_velocity_a,
+		pre_collision_velocity_b
+	)
 	wayfinder_system.handle_collision(ball_a, ball_b)
 	powder_keg_system.handle_collision(ball_a, ball_b)
 	anchor_ball_system.handle_collision(ball_a, ball_b)
@@ -1089,9 +1133,34 @@ func _get_cue_ball_cannon_wake_retention() -> float:
 	)
 
 
-func _note_actual_cue_ball_hit(ball_a: Ball, ball_b: Ball) -> void:
+func _note_actual_cue_ball_hit(
+	ball_a: Ball,
+	ball_b: Ball,
+	normal: Vector2,
+	collision_impact_speed: float,
+	pre_collision_velocity_a: Vector2,
+	pre_collision_velocity_b: Vector2
+) -> void:
 	if ball_a != cue_ball and ball_b != cue_ball:
 		return
+
+	if collision_impact_speed > 0.0 and aim_preview.is_debug_aim_line_enabled():
+		var contacted_ball: Ball = ball_b if ball_a == cue_ball else ball_a
+		var cue_velocity_before_contact: Vector2 = pre_collision_velocity_a if ball_a == cue_ball else pre_collision_velocity_b
+		var cue_to_contacted: Vector2 = contacted_ball.global_position - cue_ball.global_position
+		var contact_normal: Vector2 = cue_to_contacted.normalized()
+		if cue_to_contacted.length_squared() <= 0.001:
+			contact_normal = normal if ball_a == cue_ball else -normal
+		var contact_position: Vector2 = cue_ball.global_position + contact_normal * cue_ball.radius
+		aim_preview.report_debug_actual_first_contact(
+			contact_position,
+			cue_ball.global_position,
+			contacted_ball.global_position,
+			contacted_ball,
+			cue_velocity_before_contact,
+			contacted_ball.velocity,
+			cue_ball.global_position.distance_to(contacted_ball.global_position)
+		)
 
 	aim_preview.note_actual_cue_ball_hit()
 #endregion
@@ -1108,6 +1177,8 @@ func _resolve_rail_collisions() -> void:
 		for hit_event in hit_events:
 			_note_cue_rail_touch(ball)
 			shot_event_system.record_rail_contact(ball, hit_event.position)
+			if aim_preview.is_debug_aim_line_enabled():
+				aim_preview.report_debug_rail_event(ball, hit_event.normal, ball.velocity.length())
 			aim_preview.record_actual_bank_debug(
 				ball,
 				hit_event.position,
@@ -1319,6 +1390,7 @@ func _release_shot(_mouse_position: Vector2) -> void:
 	if release_direction != Vector2.ZERO:
 		aim_preview.start_path_comparison(cue_ball.global_position, drag_vector * effective_shot_power)
 	cue_ball.velocity = drag_vector * effective_shot_power
+	aim_preview.report_debug_actual_launch(cue_ball.global_position, cue_ball.velocity)
 	var release_rotation: float = release_direction.angle() if release_direction != Vector2.ZERO else cue_controller.get_rotation_angle()
 	cue_controller.begin_recoil(cue_ball.global_position, release_rotation, release_pullback)
 	_print_shot_power_debug(drag_vector, release_position)
@@ -2034,6 +2106,7 @@ func _try_finish_shot() -> void:
 	cue_reclaim_eligible = false
 	cue_reclaim_blocker_reason = "No active shot"
 	aim_preview.stop_actual_path_recording()
+	aim_preview.stop_debug_aim_actual_trace()
 	shot_event_system.finish_shot()
 	pocket_streak_system.finish_shot()
 	table_event_system.finish_shot()
@@ -2606,6 +2679,7 @@ func _get_aim_performance_snapshot(aim_snapshot: Dictionary) -> Dictionary:
 		"aim_hit_ball_target_path_point_count": aim_snapshot["hit_ball_target_path_point_count"],
 		"aim_hit_ball_rail_hits_before_impact": aim_snapshot["hit_ball_rail_hits_before_impact"],
 		"aim_hit_ball_cue_impact_segment_index": aim_snapshot["hit_ball_cue_impact_segment_index"],
+		"aim_compare": aim_snapshot.get("aim_compare", {}),
 	}
 
 
@@ -2675,6 +2749,14 @@ func set_shot_path_debug_enabled(enabled: bool) -> void:
 
 func is_shot_path_debug_enabled() -> bool:
 	return aim_preview.is_shot_path_debug_enabled()
+
+
+func set_debug_aim_line_enabled(enabled: bool) -> void:
+	aim_preview.set_debug_aim_line_enabled(enabled)
+
+
+func is_debug_aim_line_enabled() -> bool:
+	return aim_preview.is_debug_aim_line_enabled()
 
 
 func get_debug_spawn_hotkey_data() -> Dictionary:

@@ -164,6 +164,10 @@ func _connect_pause_menu_signals() -> void:
 		pause_menu.debug_sunken_spoils_trigger_requested.connect(_on_pause_debug_sunken_spoils_trigger_requested)
 	if not pause_menu.debug_sunken_spoils_reset_requested.is_connected(_on_pause_debug_sunken_spoils_reset_requested):
 		pause_menu.debug_sunken_spoils_reset_requested.connect(_on_pause_debug_sunken_spoils_reset_requested)
+	if not pause_menu.debug_aim_line_toggled.is_connected(_on_pause_debug_aim_line_toggled):
+		pause_menu.debug_aim_line_toggled.connect(_on_pause_debug_aim_line_toggled)
+	if not pause_menu.debug_aim_compare_panels_toggled.is_connected(_on_pause_debug_aim_compare_panels_toggled):
+		pause_menu.debug_aim_compare_panels_toggled.connect(_on_pause_debug_aim_compare_panels_toggled)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 
@@ -1000,6 +1004,18 @@ func _on_pause_debug_sunken_spoils_reset_requested() -> void:
 		return
 
 	table.sunken_spoils_system.debug_reset_spoils()
+
+
+func _on_pause_debug_aim_line_toggled(enabled: bool) -> void:
+	if table == null:
+		return
+	table.set_debug_aim_line_enabled(enabled)
+	var status_text: String = "Debug aim line enabled." if enabled else "Debug aim line disabled."
+	hud_feed.add_message(status_text, "event")
+
+
+func _on_pause_debug_aim_compare_panels_toggled(enabled: bool) -> void:
+	debug_overlay.set_aim_compare_panels_visible(enabled)
 
 
 func _unpause_if_sunken_spoils_ready() -> void:

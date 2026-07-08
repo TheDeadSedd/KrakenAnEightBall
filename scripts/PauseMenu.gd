@@ -28,6 +28,8 @@ signal debug_reserve_stack_payload_requested(payload: Dictionary)
 signal debug_sunken_spoils_advance_requested
 signal debug_sunken_spoils_trigger_requested
 signal debug_sunken_spoils_reset_requested
+signal debug_aim_line_toggled(enabled: bool)
+signal debug_aim_compare_panels_toggled(enabled: bool)
 signal quartermaster_cancel_placement_requested
 
 const PANEL_CORE_PERFORMANCE := "core_performance"
@@ -53,6 +55,9 @@ const EVENT_TEST_SPAWN_WOOD_DEBRIS_TEXT := "Spawn Wood Debris"
 const EVENT_TEST_CLEAR_DEBRIS_TEXT := "Clear Debris"
 const EVENT_TEST_OBSTACLE_COLLISION_TEXT := "Enable Debris Collision"
 const EVENT_TEST_OBSTACLE_COLLISION_DRAW_TEXT := "Show Debris Collision Shape"
+const AIM_PREVIEW_TEST_SECTION_TITLE := "Aim Preview Testing"
+const AIM_PREVIEW_TEST_DEBUG_LINE_TEXT := "Debug Aim Line"
+const AIM_PREVIEW_TEST_COMPARE_PANELS_TEXT := "Aim Compare Panels"
 const BACK_ROOM_TEST_SECTION_TITLE := "Back Room Testing"
 const BACK_ROOM_TEST_FORCE_AVAILABLE_TEXT := "Force Back Room Available"
 const BACK_ROOM_TEST_OPEN_TEXT := "Open Back Room Deal"
@@ -169,6 +174,9 @@ var spawn_wood_debris_button: Button
 var clear_debris_button: Button
 var obstacle_collision_check_box: CheckBox
 var obstacle_collision_debug_check_box: CheckBox
+var aim_preview_testing_section_label: Label
+var debug_aim_line_check_box: CheckBox
+var aim_compare_panels_check_box: CheckBox
 var back_room_testing_section_label: Label
 var force_back_room_available_check_box: CheckBox
 var open_back_room_deal_button: Button
@@ -229,6 +237,7 @@ func _ready() -> void:
 	_ensure_dev_options_controls()
 	_ensure_end_run_controls()
 	_ensure_event_test_controls()
+	_ensure_aim_preview_testing_controls()
 	_ensure_back_room_testing_controls()
 	_ensure_boon_testing_controls()
 	_ensure_reserve_stack_testing_controls()
@@ -272,6 +281,10 @@ func _connect_debug_panel_toggles() -> void:
 		obstacle_collision_check_box.toggled.connect(_on_obstacle_collision_toggled)
 	if not obstacle_collision_debug_check_box.toggled.is_connected(_on_obstacle_collision_draw_toggled):
 		obstacle_collision_debug_check_box.toggled.connect(_on_obstacle_collision_draw_toggled)
+	if not debug_aim_line_check_box.toggled.is_connected(_on_debug_aim_line_toggled):
+		debug_aim_line_check_box.toggled.connect(_on_debug_aim_line_toggled)
+	if not aim_compare_panels_check_box.toggled.is_connected(_on_aim_compare_panels_toggled):
+		aim_compare_panels_check_box.toggled.connect(_on_aim_compare_panels_toggled)
 	if not force_back_room_available_check_box.toggled.is_connected(_on_back_room_force_available_toggled):
 		force_back_room_available_check_box.toggled.connect(_on_back_room_force_available_toggled)
 	if not open_back_room_deal_button.pressed.is_connected(_on_open_back_room_deal_pressed):
@@ -368,6 +381,8 @@ func set_debug_panel_states(panel_states: Dictionary) -> void:
 	powder_keg_wayfinder_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_POWDER_KEG_WAYFINDER, false)))
 	visual_effects_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_VISUAL_EFFECTS, false)))
 	physics_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_PHYSICS, false)))
+	if aim_compare_panels_check_box != null:
+		aim_compare_panels_check_box.set_pressed_no_signal(bool(panel_states.get("aim_compare_panels", false)))
 
 
 func set_run_stats_snapshot(snapshot: Dictionary) -> void:
@@ -707,6 +722,26 @@ func _ensure_event_test_controls() -> void:
 		obstacle_collision_debug_check_box.set_pressed_no_signal(false)
 		debug_section.add_child(obstacle_collision_debug_check_box)
 		debug_section.move_child(obstacle_collision_debug_check_box, 10)
+	_move_dev_options_controls_into_scroll()
+
+
+func _ensure_aim_preview_testing_controls() -> void:
+	if aim_preview_testing_section_label == null:
+		aim_preview_testing_section_label = Label.new()
+		aim_preview_testing_section_label.text = AIM_PREVIEW_TEST_SECTION_TITLE
+		_apply_debug_section_label_style(aim_preview_testing_section_label)
+		debug_section.add_child(aim_preview_testing_section_label)
+
+	if debug_aim_line_check_box == null:
+		debug_aim_line_check_box = _make_event_test_check_box(AIM_PREVIEW_TEST_DEBUG_LINE_TEXT)
+		debug_aim_line_check_box.tooltip_text = "Debug-only: replaces the polished aim preview with a thin raw cue-ball path."
+		debug_section.add_child(debug_aim_line_check_box)
+
+	if aim_compare_panels_check_box == null:
+		aim_compare_panels_check_box = _make_event_test_check_box(AIM_PREVIEW_TEST_COMPARE_PANELS_TEXT)
+		aim_compare_panels_check_box.tooltip_text = "Debug-only: shows launch/contact/response/trace comparison panels."
+		debug_section.add_child(aim_compare_panels_check_box)
+
 	_move_dev_options_controls_into_scroll()
 
 
@@ -1282,6 +1317,14 @@ func _on_obstacle_collision_toggled(enabled: bool) -> void:
 
 func _on_obstacle_collision_draw_toggled(enabled: bool) -> void:
 	debug_obstacle_collision_draw_toggled.emit(enabled)
+
+
+func _on_debug_aim_line_toggled(enabled: bool) -> void:
+	debug_aim_line_toggled.emit(enabled)
+
+
+func _on_aim_compare_panels_toggled(enabled: bool) -> void:
+	debug_aim_compare_panels_toggled.emit(enabled)
 
 
 func _on_back_room_force_available_toggled(enabled: bool) -> void:

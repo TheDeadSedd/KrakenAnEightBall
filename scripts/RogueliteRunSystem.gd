@@ -77,10 +77,17 @@ const ROUND_SETUPS := [
 ]
 
 const STARTING_HULL := 3
+const TERMINAL_RESULT_FAILED := "failed"
+const TERMINAL_RESULT_COMPLETED := "completed"
+const TERMINAL_RESULT_UNKNOWN := "unknown"
+const FAILURE_REASON_SHOTS := "shots"
+const FAILURE_REASON_HULL := "hull"
+const FAILURE_REASON_EMPTY_TABLE := "empty_table"
+const FAILURE_REASON_UNKNOWN := "unknown"
 
 var current_round_index := 0
 var round_number := 1
-var round_target := 20
+var round_target := 30
 var round_score := 0
 var shots_left := 3
 var hull := STARTING_HULL
@@ -89,6 +96,9 @@ var round_active := false
 var round_won_state := false
 var run_failed_state := false
 var run_completed_state := false
+var failure_reason: String = FAILURE_REASON_UNKNOWN
+var total_quota_score_earned: int = 0
+var highest_single_round_score: int = 0
 var reward_system: RogueliteRewardSystem
 
 
@@ -101,6 +111,9 @@ func start_run() -> void:
 	if reward_system != null:
 		reward_system.reset_run_state()
 	hull = _get_current_max_hull()
+	failure_reason = FAILURE_REASON_UNKNOWN
+	total_quota_score_earned = 0
+	highest_single_round_score = 0
 	run_completed_state = false
 	run_failed_state = false
 	start_current_round()
@@ -119,6 +132,7 @@ func start_current_round() -> void:
 	round_won_state = false
 	run_failed_state = false
 	run_completed_state = false
+	failure_reason = FAILURE_REASON_UNKNOWN
 	_emit_state()
 	round_started.emit(get_snapshot())
 
@@ -166,6 +180,8 @@ func add_round_score(amount: int) -> void:
 		return
 
 	round_score += amount
+	total_quota_score_earned += amount
+	highest_single_round_score = maxi(highest_single_round_score, round_score)
 	if round_score >= round_target:
 		round_won_state = true
 		round_active = false
@@ -182,6 +198,7 @@ func consume_shot() -> void:
 
 	shots_left = maxi(0, shots_left - 1)
 	if not round_won_state and shots_left <= 0 and round_score < round_target:
+		failure_reason = FAILURE_REASON_SHOTS
 		run_failed_state = true
 		round_active = false
 		_emit_state()
@@ -208,6 +225,7 @@ func damage_hull(amount: int = 1) -> Dictionary:
 
 	hull = maxi(hull - damage_amount, 0)
 	if hull <= 0:
+		failure_reason = FAILURE_REASON_HULL
 		run_failed_state = true
 		round_active = false
 		_emit_state()
@@ -215,6 +233,24 @@ func damage_hull(amount: int = 1) -> Dictionary:
 		return get_snapshot()
 
 	_emit_state()
+	return get_snapshot()
+
+
+func fail_empty_table_if_needed(scoreable_ball_count: int) -> Dictionary:
+	if run_failed_state or run_completed_state or round_won_state:
+		return get_snapshot()
+	if not round_active:
+		return get_snapshot()
+	if round_score >= round_target:
+		return get_snapshot()
+	if scoreable_ball_count > 0:
+		return get_snapshot()
+
+	failure_reason = FAILURE_REASON_EMPTY_TABLE
+	run_failed_state = true
+	round_active = false
+	_emit_state()
+	run_failed.emit(get_snapshot())
 	return get_snapshot()
 
 
@@ -234,7 +270,36 @@ func get_snapshot() -> Dictionary:
 		"round_won": round_won_state,
 		"run_failed": run_failed_state,
 		"run_completed": run_completed_state,
+		"failure_reason": failure_reason,
+		"total_quota_score_earned": total_quota_score_earned,
+		"highest_single_round_score": highest_single_round_score,
 		"has_next_round": has_next_round(),
+	}
+
+
+func get_terminal_summary_snapshot(result_override: String = "") -> Dictionary:
+	var result: String = result_override
+	if result.is_empty():
+		result = _get_terminal_result()
+
+	var reward_snapshot: Dictionary = _get_reward_terminal_snapshot()
+	return {
+		"result": result,
+		"reached_round": round_number,
+		"cleared_round": round_number,
+		"round_count": get_round_count(),
+		"failure_reason": failure_reason if result == TERMINAL_RESULT_FAILED else "",
+		"round_score": round_score,
+		"round_target": round_target,
+		"shots_left": shots_left,
+		"hull": hull,
+		"max_hull": _get_current_max_hull(),
+		"rewards_chosen_count": int(reward_snapshot.get("chosen_reward_count", 0)),
+		"rewards_chosen_display_names": reward_snapshot.get("chosen_reward_display_names", []),
+		"rewards_chosen_ids": reward_snapshot.get("chosen_reward_ids", []),
+		"total_quota_score_earned": total_quota_score_earned,
+		"highest_single_round_score": highest_single_round_score,
+		"final_object_ball_count": object_ball_count,
 	}
 
 
@@ -247,3 +312,21 @@ func _get_current_max_hull() -> int:
 	if reward_system != null:
 		max_hull += reward_system.get_max_hull_bonus()
 	return maxi(max_hull, 1)
+
+
+func _get_terminal_result() -> String:
+	if run_completed_state:
+		return TERMINAL_RESULT_COMPLETED
+	if run_failed_state:
+		return TERMINAL_RESULT_FAILED
+	return TERMINAL_RESULT_UNKNOWN
+
+
+func _get_reward_terminal_snapshot() -> Dictionary:
+	if reward_system == null:
+		return {
+			"chosen_reward_count": 0,
+			"chosen_reward_display_names": [],
+			"chosen_reward_ids": [],
+		}
+	return reward_system.get_reward_snapshot()

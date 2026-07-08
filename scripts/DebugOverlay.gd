@@ -15,6 +15,12 @@ const PANEL_POWDER_KEG_WAYFINDER := "powder_keg_wayfinder"
 const PANEL_VISUAL_EFFECTS := "visual_effects"
 const PANEL_PHYSICS := "physics"
 const PANEL_EMBEZZLER := "embezzler"
+const PANEL_AIM_LAUNCH := "aim_launch"
+const PANEL_AIM_CONTACT := "aim_contact"
+const PANEL_AIM_RESPONSE := "aim_response"
+const PANEL_AIM_TRACE := "aim_trace"
+const PANEL_AIM_COMPARE_GROUP := "aim_compare_panels"
+const DEBUG_AIM_PANEL_LOG_MAX_ENTRIES := 12
 const TABLE_EVENT_TEST_BUTTON_SIZE := Vector2(112.0, 36.0)
 const TABLE_EVENT_TEST_BUTTON_RIGHT_OFFSET := 284.0
 const TABLE_EVENT_TEST_BUTTON_TOP := 532.0
@@ -61,6 +67,14 @@ var table: BilliardsTable
 var last_debug_overlay_refresh_ms := 0.0
 var wayfinder_current_test_button: Button
 var broadside_attack_test_button: Button
+var aim_launch_panel: DebugPanel
+var aim_launch_label: Label
+var aim_contact_panel: DebugPanel
+var aim_contact_label: Label
+var aim_response_panel: DebugPanel
+var aim_response_label: Label
+var aim_trace_panel: DebugPanel
+var aim_trace_label: Label
 
 
 func setup(table_ref: BilliardsTable) -> void:
@@ -69,6 +83,7 @@ func setup(table_ref: BilliardsTable) -> void:
 	debug_menu_panel.visible = false
 	physics_debug_panel.visible = false
 	performance_overlay_panel.visible = false
+	_ensure_aim_compare_panels()
 	_set_all_modular_debug_panels_visible(false)
 	shot_path_check_box.set_pressed_no_signal(table.is_shot_path_debug_enabled())
 	physics_debug_check_box.set_pressed_no_signal(false)
@@ -110,6 +125,71 @@ func _connect_debug_controls() -> void:
 		wayfinder_current_test_button.pressed.connect(_on_wayfinder_current_test_button_pressed)
 	if broadside_attack_test_button != null and not broadside_attack_test_button.pressed.is_connected(_on_broadside_attack_test_button_pressed):
 		broadside_attack_test_button.pressed.connect(_on_broadside_attack_test_button_pressed)
+
+
+func _ensure_aim_compare_panels() -> void:
+	if aim_launch_panel != null:
+		return
+
+	aim_launch_panel = _make_runtime_debug_panel("AimLaunchPanel", Vector2(478.0, 430.0), Vector2(420.0, 180.0))
+	aim_launch_label = _make_runtime_debug_label("AimLaunchPanelLabel", "AIM LAUNCH")
+	_add_label_to_runtime_panel(aim_launch_panel, aim_launch_label)
+
+	aim_contact_panel = _make_runtime_debug_panel("AimContactPanel", Vector2(916.0, 430.0), Vector2(430.0, 242.0))
+	aim_contact_label = _make_runtime_debug_label("AimContactPanelLabel", "AIM CONTACT")
+	_add_label_to_runtime_panel(aim_contact_panel, aim_contact_label)
+
+	aim_response_panel = _make_runtime_debug_panel("AimResponsePanel", Vector2(478.0, 626.0), Vector2(420.0, 230.0))
+	aim_response_label = _make_runtime_debug_label("AimResponsePanelLabel", "AIM RESPONSE")
+	_add_label_to_runtime_panel(aim_response_panel, aim_response_label)
+
+	aim_trace_panel = _make_runtime_debug_panel("AimTracePanel", Vector2(916.0, 690.0), Vector2(500.0, 276.0))
+	aim_trace_label = _make_runtime_debug_label("AimTracePanelLabel", "AIM TRACE / LOG")
+	_add_label_to_runtime_panel(aim_trace_panel, aim_trace_label)
+
+
+func _make_runtime_debug_panel(panel_name: String, panel_position: Vector2, panel_size: Vector2) -> DebugPanel:
+	var panel := DebugPanel.new()
+	panel.name = panel_name
+	panel.visible = false
+	panel.z_index = 120
+	panel.position = panel_position
+	panel.size = panel_size
+	panel.custom_minimum_size = panel_size
+	panel.mouse_filter = Control.MOUSE_FILTER_PASS
+	var style_box: StyleBox = aim_preview_panel.get_theme_stylebox("panel")
+	if style_box != null:
+		panel.add_theme_stylebox_override("panel", style_box)
+	add_child(panel)
+	return panel
+
+
+func _make_runtime_debug_label(label_name: String, default_text: String) -> Label:
+	var label := Label.new()
+	label.name = label_name
+	label.text = default_text
+	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	label.add_theme_color_override("font_color", aim_preview_label.get_theme_color("font_color"))
+	label.add_theme_color_override("font_shadow_color", aim_preview_label.get_theme_color("font_shadow_color"))
+	label.add_theme_color_override("font_outline_color", aim_preview_label.get_theme_color("font_outline_color"))
+	label.add_theme_constant_override("shadow_offset_x", aim_preview_label.get_theme_constant("shadow_offset_x"))
+	label.add_theme_constant_override("shadow_offset_y", aim_preview_label.get_theme_constant("shadow_offset_y"))
+	label.add_theme_constant_override("outline_size", aim_preview_label.get_theme_constant("outline_size"))
+	label.add_theme_font_override("font", aim_preview_label.get_theme_font("font"))
+	label.add_theme_font_size_override("font_size", aim_preview_label.get_theme_font_size("font_size"))
+	return label
+
+
+func _add_label_to_runtime_panel(panel: DebugPanel, label: Label) -> void:
+	var margin := MarginContainer.new()
+	margin.name = "Margin"
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	panel.add_child(margin)
+	margin.add_child(label)
 
 
 func _unhandled_input(event: InputEvent) -> void:
@@ -167,6 +247,37 @@ func set_modular_debug_panel_visible(panel_id: String, enabled: bool) -> void:
 		_refresh_modular_debug_panel(panel_id, _get_performance_snapshot_with_debug_overlay_metrics(requested_sections))
 
 
+func set_aim_compare_panels_visible(enabled: bool) -> void:
+	_set_aim_compare_panels_visible(enabled)
+	if enabled and table != null:
+		var requested_sections: Dictionary = _get_modular_panel_performance_sections(PANEL_AIM_LAUNCH)
+		var snapshot: Dictionary = _get_performance_snapshot_with_debug_overlay_metrics(requested_sections)
+		_refresh_modular_debug_panel(PANEL_AIM_LAUNCH, snapshot)
+		_refresh_modular_debug_panel(PANEL_AIM_CONTACT, snapshot)
+		_refresh_modular_debug_panel(PANEL_AIM_RESPONSE, snapshot)
+		_refresh_modular_debug_panel(PANEL_AIM_TRACE, snapshot)
+
+
+func _set_aim_compare_panels_visible(enabled: bool) -> void:
+	if aim_launch_panel != null:
+		aim_launch_panel.visible = enabled
+	if aim_contact_panel != null:
+		aim_contact_panel.visible = enabled
+	if aim_response_panel != null:
+		aim_response_panel.visible = enabled
+	if aim_trace_panel != null:
+		aim_trace_panel.visible = enabled
+
+
+func _are_aim_compare_panels_visible() -> bool:
+	return (
+		(aim_launch_panel != null and aim_launch_panel.visible)
+		or (aim_contact_panel != null and aim_contact_panel.visible)
+		or (aim_response_panel != null and aim_response_panel.visible)
+		or (aim_trace_panel != null and aim_trace_panel.visible)
+	)
+
+
 func get_modular_debug_panel_states() -> Dictionary:
 	return {
 		PANEL_CORE_PERFORMANCE: core_performance_panel.visible,
@@ -179,6 +290,7 @@ func get_modular_debug_panel_states() -> Dictionary:
 		PANEL_POWDER_KEG_WAYFINDER: powder_keg_wayfinder_panel.visible,
 		PANEL_VISUAL_EFFECTS: visual_effects_panel.visible,
 		PANEL_PHYSICS: physics_performance_panel.visible,
+		PANEL_AIM_COMPARE_GROUP: _are_aim_compare_panels_visible(),
 	}
 
 
@@ -193,6 +305,7 @@ func _set_all_modular_debug_panels_visible(visible_value: bool) -> void:
 	powder_keg_wayfinder_panel.visible = visible_value
 	visual_effects_panel.visible = visible_value
 	physics_performance_panel.visible = visible_value
+	_set_aim_compare_panels_visible(visible_value)
 
 
 func _has_visible_modular_debug_panels() -> bool:
@@ -207,6 +320,7 @@ func _has_visible_modular_debug_panels() -> bool:
 		or powder_keg_wayfinder_panel.visible
 		or visual_effects_panel.visible
 		or physics_performance_panel.visible
+		or _are_aim_compare_panels_visible()
 	)
 
 
@@ -230,6 +344,10 @@ func _get_visible_modular_debug_panel_count() -> int:
 	count += 1 if powder_keg_wayfinder_panel.visible else 0
 	count += 1 if visual_effects_panel.visible else 0
 	count += 1 if physics_performance_panel.visible else 0
+	count += 1 if aim_launch_panel != null and aim_launch_panel.visible else 0
+	count += 1 if aim_contact_panel != null and aim_contact_panel.visible else 0
+	count += 1 if aim_response_panel != null and aim_response_panel.visible else 0
+	count += 1 if aim_trace_panel != null and aim_trace_panel.visible else 0
 	return count
 
 
@@ -255,6 +373,14 @@ func _get_visible_modular_performance_sections() -> Dictionary:
 		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_VISUAL_EFFECTS))
 	if physics_performance_panel.visible:
 		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_PHYSICS))
+	if aim_launch_panel != null and aim_launch_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_AIM_LAUNCH))
+	if aim_contact_panel != null and aim_contact_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_AIM_CONTACT))
+	if aim_response_panel != null and aim_response_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_AIM_RESPONSE))
+	if aim_trace_panel != null and aim_trace_panel.visible:
+		requested_sections.merge(_get_modular_panel_performance_sections(PANEL_AIM_TRACE))
 	return requested_sections
 
 
@@ -265,6 +391,14 @@ func _get_modular_panel_performance_sections(panel_id: String) -> Dictionary:
 			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_CORE)
 			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_TIMING)
 		PANEL_AIM_PREVIEW:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_AIM_PREVIEW)
+		PANEL_AIM_LAUNCH:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_AIM_PREVIEW)
+		PANEL_AIM_CONTACT:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_AIM_PREVIEW)
+		PANEL_AIM_RESPONSE:
+			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_AIM_PREVIEW)
+		PANEL_AIM_TRACE:
 			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_AIM_PREVIEW)
 		PANEL_TREASURE:
 			_request_performance_section(requested_sections, BilliardsTable.PERFORMANCE_SECTION_TREASURE)
@@ -310,6 +444,14 @@ func _refresh_visible_modular_debug_panels(snapshot: Dictionary) -> void:
 		_refresh_modular_debug_panel(PANEL_VISUAL_EFFECTS, snapshot)
 	if physics_performance_panel.visible:
 		_refresh_modular_debug_panel(PANEL_PHYSICS, snapshot)
+	if aim_launch_panel != null and aim_launch_panel.visible:
+		_refresh_modular_debug_panel(PANEL_AIM_LAUNCH, snapshot)
+	if aim_contact_panel != null and aim_contact_panel.visible:
+		_refresh_modular_debug_panel(PANEL_AIM_CONTACT, snapshot)
+	if aim_response_panel != null and aim_response_panel.visible:
+		_refresh_modular_debug_panel(PANEL_AIM_RESPONSE, snapshot)
+	if aim_trace_panel != null and aim_trace_panel.visible:
+		_refresh_modular_debug_panel(PANEL_AIM_TRACE, snapshot)
 
 
 func _refresh_modular_debug_panel(panel_id: String, snapshot: Dictionary) -> void:
@@ -338,6 +480,14 @@ func _refresh_modular_debug_panel(panel_id: String, snapshot: Dictionary) -> voi
 			label.text = "\n".join(_make_visual_cost_performance_lines(snapshot))
 		PANEL_PHYSICS:
 			label.text = "\n".join(_make_physics_performance_lines(snapshot))
+		PANEL_AIM_LAUNCH:
+			label.text = _make_titled_panel_text("AIM LAUNCH", _make_aim_launch_lines(snapshot))
+		PANEL_AIM_CONTACT:
+			label.text = _make_titled_panel_text("AIM CONTACT", _make_aim_contact_lines(snapshot))
+		PANEL_AIM_RESPONSE:
+			label.text = _make_titled_panel_text("AIM RESPONSE", _make_aim_response_lines(snapshot))
+		PANEL_AIM_TRACE:
+			label.text = _make_titled_panel_text("AIM TRACE / LOG", _make_aim_trace_lines(snapshot))
 
 
 func _get_modular_debug_panel(panel_id: String) -> Control:
@@ -362,6 +512,14 @@ func _get_modular_debug_panel(panel_id: String) -> Control:
 			return visual_effects_panel
 		PANEL_PHYSICS:
 			return physics_performance_panel
+		PANEL_AIM_LAUNCH:
+			return aim_launch_panel
+		PANEL_AIM_CONTACT:
+			return aim_contact_panel
+		PANEL_AIM_RESPONSE:
+			return aim_response_panel
+		PANEL_AIM_TRACE:
+			return aim_trace_panel
 	return null
 
 
@@ -387,6 +545,14 @@ func _get_modular_debug_label(panel_id: String) -> Label:
 			return visual_effects_label
 		PANEL_PHYSICS:
 			return physics_performance_label
+		PANEL_AIM_LAUNCH:
+			return aim_launch_label
+		PANEL_AIM_CONTACT:
+			return aim_contact_label
+		PANEL_AIM_RESPONSE:
+			return aim_response_label
+		PANEL_AIM_TRACE:
+			return aim_trace_label
 	return null
 
 
@@ -1312,6 +1478,163 @@ func _make_hit_ball_prediction_lines(snapshot: Dictionary) -> Array:
 	return lines
 
 
+func _make_aim_launch_lines(snapshot: Dictionary) -> Array:
+	var compare: Dictionary = _get_aim_compare_snapshot(snapshot)
+	var launch: Dictionary = compare.get("launch", {})
+	return [
+		"Debug Aim Line: %s" % _debug_bool_text(bool(compare.get("debug_aim_line_enabled", false))),
+		"Source: %s / persisted %s / recording %s" % [
+			compare.get("source", "none"),
+			_debug_true_false_text(bool(compare.get("persisted_overlay", false))),
+			_debug_true_false_text(bool(compare.get("recording_actual_trace", false))),
+		],
+		"Preview angle: %s" % _debug_angle_text(float(launch.get("predicted_angle", 0.0))),
+		"Actual angle: %s" % _debug_angle_text(float(launch.get("actual_angle", 0.0))),
+		"Angle delta: %s" % _debug_angle_text(float(launch.get("angle_delta", 0.0))),
+		"Preview dir: %s" % _debug_vector_text(launch.get("predicted_direction", Vector2.ZERO)),
+		"Actual dir: %s" % _debug_vector_text(launch.get("actual_direction", Vector2.ZERO)),
+		"Direction dot: %.4f" % float(launch.get("direction_dot", 0.0)),
+		"Preview speed: %.1f" % float(launch.get("predicted_speed", 0.0)),
+		"Actual speed: %.1f" % float(launch.get("actual_speed", 0.0)),
+		"Speed delta: %.1f" % float(launch.get("speed_delta", 0.0)),
+	]
+
+
+func _make_aim_contact_lines(snapshot: Dictionary) -> Array:
+	var compare: Dictionary = _get_aim_compare_snapshot(snapshot)
+	var contact: Dictionary = compare.get("contact", {})
+	return [
+		"Predicted ball: %s (#%s)" % [
+			_debug_id_text(int(contact.get("predicted_hit_ball_id", -1))),
+			contact.get("predicted_hit_ball_number", -1),
+		],
+		"Actual ball: %s (#%s)" % [
+			_debug_id_text(int(contact.get("actual_hit_ball_id", -1))),
+			contact.get("actual_hit_ball_number", -1),
+		],
+		"Pred cue center: %s" % _debug_vector_text(contact.get("predicted_cue_center", Vector2.ZERO)),
+		"Actual cue center: %s" % _debug_vector_text(contact.get("actual_cue_center", Vector2.ZERO)),
+		"Center delta: %s px" % _debug_distance_text(float(contact.get("cue_center_delta", -1.0))),
+		"Pred contact: %s" % _debug_vector_text(contact.get("predicted_contact_point", Vector2.ZERO)),
+		"Actual contact: %s" % _debug_vector_text(contact.get("actual_contact_point", Vector2.ZERO)),
+		"Contact delta: %s px" % _debug_distance_text(float(contact.get("contact_point_delta", -1.0))),
+		"Normal angle: %s -> %s / delta %s" % [
+			_debug_angle_text(float(contact.get("predicted_normal_angle", 0.0))),
+			_debug_angle_text(float(contact.get("actual_normal_angle", 0.0))),
+			_debug_angle_text(float(contact.get("normal_angle_delta", 0.0))),
+		],
+		"Cut angle: %s -> %s / delta %s" % [
+			_debug_angle_text(float(contact.get("predicted_cut_angle", 0.0))),
+			_debug_angle_text(float(contact.get("actual_cut_angle", 0.0))),
+			_debug_angle_text(float(contact.get("cut_angle_delta", 0.0))),
+		],
+		"Verdict: %s" % compare.get("verdict", "none"),
+	]
+
+
+func _make_aim_response_lines(snapshot: Dictionary) -> Array:
+	var compare: Dictionary = _get_aim_compare_snapshot(snapshot)
+	var response: Dictionary = compare.get("response", {})
+	return [
+		"Outgoing angle: %s -> %s" % [
+			_debug_angle_text(float(response.get("predicted_outgoing_angle", 0.0))),
+			_debug_angle_text(float(response.get("actual_outgoing_angle", 0.0))),
+		],
+		"Outgoing delta: %s" % _debug_angle_text(float(response.get("outgoing_angle_delta", 0.0))),
+		"Struck speed: %.1f -> %.1f" % [
+			float(response.get("predicted_speed", 0.0)),
+			float(response.get("actual_speed", 0.0)),
+		],
+		"Speed delta: %.1f" % float(response.get("speed_delta", 0.0)),
+		"Distance to hit: %s -> %s px" % [
+			_debug_distance_text(float(response.get("predicted_distance_to_first_hit", -1.0))),
+			_debug_distance_text(float(response.get("actual_distance_to_first_hit", -1.0))),
+		],
+		"Distance delta: %.1f px" % float(response.get("distance_delta", 0.0)),
+		"Center dist expected/actual: %s / %s" % [
+			_debug_distance_text(float(response.get("expected_center_distance", -1.0))),
+			_debug_distance_text(float(response.get("actual_center_distance", -1.0))),
+		],
+		"Overlap/gap: %.2f px" % float(response.get("overlap_gap", 0.0)),
+		"Radii cue/target: %.1f / %.1f" % [
+			float(response.get("cue_radius", 0.0)),
+			float(response.get("target_radius", 0.0)),
+		],
+	]
+
+
+func _make_aim_trace_lines(snapshot: Dictionary) -> Array:
+	var compare: Dictionary = _get_aim_compare_snapshot(snapshot)
+	var trace: Dictionary = compare.get("trace", {})
+	var lines: Array = [
+		"Actual balls tracked: %s" % trace.get("actual_balls_tracked", 0),
+		"Trace points: %s total / %s cue" % [
+			trace.get("total_trace_points", 0),
+			trace.get("cue_trace_points", 0),
+		],
+		"First contact frame/time: %s / %s ms" % [
+			trace.get("first_contact_physics_frame", -1),
+			trace.get("first_contact_time_msec", -1),
+		],
+		"Verdict: %s" % compare.get("verdict", "none"),
+	]
+	var selected_ball_number: int = int(trace.get("first_hit_selected_ball_number", -1))
+	if selected_ball_number >= 0:
+		lines.append("Predicted first-hit sweep: #%s" % selected_ball_number)
+	else:
+		lines.append("Predicted first-hit sweep: none")
+	var first_hit_candidates: Array = []
+	var candidates_value: Variant = trace.get("first_hit_candidates", [])
+	if candidates_value is Array:
+		first_hit_candidates = candidates_value
+	lines.append("Candidate log:")
+	if first_hit_candidates.is_empty():
+		lines.append("  none")
+	else:
+		for candidate_index in range(mini(first_hit_candidates.size(), DEBUG_AIM_PANEL_LOG_MAX_ENTRIES)):
+			var candidate_value: Variant = first_hit_candidates[candidate_index]
+			if not candidate_value is Dictionary:
+				continue
+			var candidate_entry: Dictionary = candidate_value
+			lines.append(_make_aim_first_hit_candidate_line(candidate_index, candidate_entry))
+	lines.append("Collision log:")
+	var collision_log: Array = trace.get("collision_log", [])
+	if collision_log.is_empty():
+		lines.append("  none")
+		return lines
+	for log_index in range(mini(collision_log.size(), DEBUG_AIM_PANEL_LOG_MAX_ENTRIES)):
+		lines.append("%s. %s" % [log_index + 1, collision_log[log_index]])
+	return lines
+
+
+func _make_aim_first_hit_candidate_line(candidate_index: int, entry: Dictionary) -> String:
+	var ball_number: int = int(entry.get("ball_number", -1))
+	var selected_prefix: String = "*" if bool(entry.get("selected", false)) else " "
+	var accepted_text: String = "yes" if bool(entry.get("accepted", false)) else "no"
+	var real_text: String = "yes" if bool(entry.get("would_hit_real_radius", false)) else "no"
+	var legacy_text: String = "yes" if bool(entry.get("would_hit_legacy_graze_radius", false)) else "no"
+	return "%s%s. #%s proj %s lat %s prev %s real %s old %s acc %s %s [%s]" % [
+		selected_prefix,
+		candidate_index + 1,
+		ball_number,
+		_debug_distance_text(float(entry.get("projected_distance", -1.0))),
+		_debug_distance_text(float(entry.get("lateral_distance", -1.0))),
+		_debug_distance_text(float(entry.get("preview_hit_distance", -1.0))),
+		_debug_distance_text(float(entry.get("real_hit_distance", -1.0))),
+		_debug_distance_text(float(entry.get("legacy_graze_hit_distance", -1.0))),
+		accepted_text,
+		entry.get("reason", "unknown"),
+		"real:%s old:%s" % [real_text, legacy_text],
+	]
+
+
+func _get_aim_compare_snapshot(snapshot: Dictionary) -> Dictionary:
+	var compare_value: Variant = snapshot.get("aim_compare", {})
+	if compare_value is Dictionary:
+		return compare_value
+	return {}
+
+
 func _make_physics_performance_lines(snapshot: Dictionary) -> Array:
 	var lines := [
 		"PHYSICS",
@@ -1432,6 +1755,10 @@ func _debug_distance_text(distance: float) -> String:
 	if distance < 0.0:
 		return "none"
 	return "%.1f" % distance
+
+
+func _debug_angle_text(angle: float) -> String:
+	return "%.2f deg" % angle
 
 
 func _debug_vector_text(value: Variant) -> String:

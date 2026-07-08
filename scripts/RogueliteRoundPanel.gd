@@ -13,7 +13,8 @@ signal abandon_requested
 
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 
-const PANEL_SIZE := Vector2(520.0, 300.0)
+const ROUND_PANEL_SIZE := Vector2(520.0, 300.0)
+const TERMINAL_PANEL_SIZE := Vector2(700.0, 520.0)
 const VIEWPORT_MARGIN := 24.0
 const SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.48)
 const PANEL_Z_INDEX := 76
@@ -26,6 +27,7 @@ var body_label: Label
 var continue_button: Button
 var abandon_button: Button
 var primary_action: String = "continue"
+var current_panel_size: Vector2 = ROUND_PANEL_SIZE
 
 
 func _ready() -> void:
@@ -44,8 +46,10 @@ func _notification(what: int) -> void:
 
 func open_round_cleared(snapshot: Dictionary) -> void:
 	var round_number: int = maxi(int(snapshot.get("round_number", 1)), 1)
+	current_panel_size = ROUND_PANEL_SIZE
 	primary_action = "continue"
 	title_label.text = "Round Cleared"
+	_set_body_font_size(21)
 	body_label.text = "Round %s is cleared.\nThe table sinks deeper." % round_number
 	continue_button.text = "Continue"
 	continue_button.visible = true
@@ -57,10 +61,11 @@ func open_round_cleared(snapshot: Dictionary) -> void:
 
 
 func open_run_completed(snapshot: Dictionary) -> void:
-	var round_count: int = maxi(int(snapshot.get("round_count", 1)), 1)
+	current_panel_size = TERMINAL_PANEL_SIZE
 	primary_action = "none"
 	title_label.text = "Run Complete"
-	body_label.text = "You cleared %s rounds.\nThe table sinks no farther." % round_count
+	_set_body_font_size(18)
+	body_label.text = _make_completed_summary_text(snapshot)
 	continue_button.visible = false
 	continue_button.disabled = true
 	abandon_button.text = "Return to Main Menu"
@@ -69,10 +74,12 @@ func open_run_completed(snapshot: Dictionary) -> void:
 	abandon_button.grab_focus()
 
 
-func open_run_failed(_snapshot: Dictionary = {}) -> void:
+func open_run_failed(snapshot: Dictionary = {}) -> void:
+	current_panel_size = TERMINAL_PANEL_SIZE
 	primary_action = "restart"
 	title_label.text = "Run Failed"
-	body_label.text = "The voyage is lost."
+	_set_body_font_size(18)
+	body_label.text = _make_failed_summary_text(snapshot)
 	continue_button.text = "Restart"
 	continue_button.visible = true
 	continue_button.disabled = false
@@ -96,8 +103,8 @@ func _build_panel() -> void:
 
 	panel = Panel.new()
 	panel.name = "Panel"
-	panel.custom_minimum_size = PANEL_SIZE
-	panel.size = PANEL_SIZE
+	panel.custom_minimum_size = current_panel_size
+	panel.size = current_panel_size
 	panel.mouse_filter = Control.MOUSE_FILTER_STOP
 	panel.add_theme_stylebox_override("panel", _make_panel_style())
 	add_child(panel)
@@ -167,8 +174,8 @@ func _center_panel() -> void:
 		maxf(viewport_size.y - VIEWPORT_MARGIN * 2.0, 1.0)
 	)
 	var panel_size: Vector2 = Vector2(
-		minf(PANEL_SIZE.x, available_size.x),
-		minf(PANEL_SIZE.y, available_size.y)
+		minf(current_panel_size.x, available_size.x),
+		minf(current_panel_size.y, available_size.y)
 	)
 	var panel_position: Vector2 = (viewport_size - panel_size) * 0.5
 	var max_position: Vector2 = Vector2(
@@ -202,6 +209,88 @@ func _make_panel_style() -> StyleBoxFlat:
 	style.shadow_size = 22
 	style.shadow_offset = Vector2(0.0, 8.0)
 	return style
+
+
+func _make_failed_summary_text(snapshot: Dictionary) -> String:
+	return "\n".join(PackedStringArray([
+		"Reached Round: %s / %s" % [
+			maxi(int(snapshot.get("reached_round", snapshot.get("round_number", 1))), 1),
+			maxi(int(snapshot.get("round_count", 1)), 1),
+		],
+		"Failed By: %s" % _format_failure_reason(str(snapshot.get("failure_reason", "unknown"))),
+		"Quota: %s / %s" % [
+			maxi(int(snapshot.get("round_score", 0)), 0),
+			maxi(int(snapshot.get("round_target", 0)), 0),
+		],
+		"Shots Left: %s" % maxi(int(snapshot.get("shots_left", 0)), 0),
+		"Hull: %s / %s" % [
+			maxi(int(snapshot.get("hull", 0)), 0),
+			maxi(int(snapshot.get("max_hull", 1)), 1),
+		],
+		"Rewards Chosen: %s" % maxi(int(snapshot.get("rewards_chosen_count", 0)), 0),
+		"",
+		"Rewards:",
+		_format_reward_names(snapshot),
+	]))
+
+
+func _make_completed_summary_text(snapshot: Dictionary) -> String:
+	return "\n".join(PackedStringArray([
+		"Cleared Round: %s / %s" % [
+			maxi(int(snapshot.get("cleared_round", snapshot.get("round_number", 1))), 1),
+			maxi(int(snapshot.get("round_count", 1)), 1),
+		],
+		"Final Quota: %s / %s" % [
+			maxi(int(snapshot.get("round_score", 0)), 0),
+			maxi(int(snapshot.get("round_target", 0)), 0),
+		],
+		"Shots Left: %s" % maxi(int(snapshot.get("shots_left", 0)), 0),
+		"Hull: %s / %s" % [
+			maxi(int(snapshot.get("hull", 0)), 0),
+			maxi(int(snapshot.get("max_hull", 1)), 1),
+		],
+		"Rewards Chosen: %s" % maxi(int(snapshot.get("rewards_chosen_count", 0)), 0),
+		"",
+		"Rewards:",
+		_format_reward_names(snapshot),
+	]))
+
+
+func _format_reward_names(snapshot: Dictionary) -> String:
+	var names_value: Variant = snapshot.get("rewards_chosen_display_names", [])
+	var names: Array = []
+	if names_value is Array:
+		names = names_value
+	if names.is_empty():
+		return "None"
+
+	var parts: PackedStringArray = PackedStringArray()
+	for name_value in names:
+		var reward_name: String = str(name_value)
+		if reward_name.is_empty():
+			continue
+		parts.append(reward_name)
+	if parts.is_empty():
+		return "None"
+	return ", ".join(parts)
+
+
+func _format_failure_reason(reason: String) -> String:
+	match reason:
+		"shots":
+			return "Shots"
+		"hull":
+			return "Hull"
+		"empty_table":
+			return "Empty Table"
+		_:
+			return "Unknown"
+
+
+func _set_body_font_size(font_size: int) -> void:
+	if body_label == null:
+		return
+	body_label.add_theme_font_size_override("font_size", font_size)
 
 
 func _make_button(text: String) -> Button:
