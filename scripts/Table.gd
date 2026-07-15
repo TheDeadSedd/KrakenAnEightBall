@@ -780,7 +780,7 @@ func _physics_process(delta: float) -> void:
 	var physics_start_usec: int = Time.get_ticks_usec()
 	_reset_performance_frame_stats()
 	wayfinder_system.update_redirect_cooldowns(delta)
-	aim_preview.update_debug(delta, is_dragging)
+	aim_preview.update_debug(delta, is_dragging, aim_preview_dirty)
 
 	_begin_cue_reclaim_motion_snapshot()
 	var step_delta: float = delta / float(PHYSICS_SUBSTEPS)
@@ -3480,6 +3480,7 @@ func _get_aim_performance_snapshot(aim_snapshot: Dictionary) -> Dictionary:
 		"aim_cloned_invalidation": aim_snapshot.get("cloned_invalidation", {}),
 		"aim_cloned_event_comparison": aim_snapshot.get("cloned_event_comparison", {}),
 		"aim_cloned_profiler": aim_snapshot.get("cloned_profiler", {}),
+		"aim_staged_prediction": aim_snapshot.get("staged_prediction", {}),
 		"debug_aim_mode": get_debug_aim_mode_snapshot(),
 		"cue_toi_correction_enabled": cue_first_contact_toi_enabled,
 		"cue_toi_first_contact_active": _should_run_cue_first_contact_toi(),
@@ -3613,6 +3614,14 @@ func set_debug_cloned_aim_configuration(configuration: Dictionary) -> void:
 
 func get_debug_cloned_aim_configuration() -> Dictionary:
 	return aim_preview.get_cloned_trajectory_configuration()
+
+
+func force_debug_deep_aim_prediction_now() -> bool:
+	return aim_preview.force_deep_prediction_now()
+
+
+func cancel_debug_pending_deep_aim_prediction() -> void:
+	aim_preview.cancel_pending_deep_prediction()
 
 
 func reset_debug_aim_profiler_stats() -> void:

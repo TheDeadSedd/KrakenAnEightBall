@@ -70,6 +70,35 @@ const PHASE_LABELS := {
 	"total_simulation": "Simulation total",
 	"total_full_rebuild": "Full rebuild total",
 }
+const STAGED_TIMING_KEYS: Array[String] = [
+	"immediate_update_cpu",
+	"deep_compute_start_latency",
+	"deep_compute_duration",
+	"deep_first_visible_latency_us",
+	"deep_fully_visible_latency_us",
+	"cache_hit_first_visible_latency_us",
+	"reveal_duration_actual",
+	"reveal_preparation_cpu",
+	"reveal_cpu_presentation",
+]
+const STAGED_CPU_TIMING_KEYS: Array[String] = [
+	"immediate_update_cpu",
+	"deep_compute_duration",
+	"reveal_preparation_cpu",
+	"reveal_cpu_presentation",
+]
+const STAGED_TIMING_LABELS := {
+	"immediate_update_cpu": "Immediate preview CPU",
+	"deep_compute_start_latency": "Aim stop to deep request",
+	"deep_compute_duration": "Deep computation",
+	"deep_first_visible_latency_us": "First visible",
+	"deep_fully_visible_latency_us": "Fully visible",
+	"cache_hit_first_visible_latency_us": "Cache-hit first visible",
+	"reveal_duration_actual": "Actual reveal duration",
+	"reveal_preparation_cpu": "Reveal preparation CPU",
+	"reveal_cpu_presentation": "Reveal CPU presentation (not GPU time)",
+}
+const LIFECYCLE_REASON_LIMIT := 32
 const WORKLOAD_KEYS: Array[String] = [
 	"simulated_physics_frames",
 	"simulated_substeps",
@@ -150,8 +179,6 @@ var _active_drag_rebuilds := 0
 var _settled_rebuilds := 0
 var _forced_rebuilds := 0
 var _cache_hits := 0
-var _stale_results := 0
-var _discarded_results := 0
 var _redraw_requests := 0
 var _total_rebuild_cpu_us := 0
 var _history: Array[Dictionary] = []
@@ -173,6 +200,46 @@ var _draw_total_cpu_us := 0
 var _draw_maximum_cpu_us := 0
 var _draw_sample_count := 0
 var _last_copied_status := "not copied"
+var _staged_timing_history: Dictionary = {}
+var _staged_timing_totals_us: Dictionary = {}
+var _staged_timing_maximums_us: Dictionary = {}
+var _staged_timing_last_us: Dictionary = {}
+var _staged_cpu_lifetime_totals_us: Dictionary = {}
+var _reveal_history: Array[Dictionary] = []
+var _staging_configuration: Dictionary = {}
+var _immediate_update_count := 0
+var _immediate_update_reason_counts: Dictionary = {}
+# Mirrors AimTrajectoryProfiler's request/result/display vocabulary so copied
+# reports and the live AIM PROFILER cannot assign different meanings to counts.
+var _deep_requests_created := 0
+var _deep_requests_forced := 0
+var _deep_requests_canceled_before_run := 0
+var _deep_requests_invalidated_before_run := 0
+var _deep_requests_blocked_before_run := 0
+var _deep_results_completed := 0
+var _deep_results_accepted := 0
+var _deep_results_discarded_on_arrival := 0
+var _deep_results_rejected_revision_mismatch := 0
+var _deep_results_rejected_request_id_mismatch := 0
+var _accepted_results_shown := 0
+var _shown_results_later_invalidated := 0
+var _shown_results_hidden_by_new_aim := 0
+var _shown_results_reused_from_cache := 0
+var _deep_cache_hits := 0
+var _deep_cache_misses := 0
+var _cached_results_accepted := 0
+var _cached_results_rejected := 0
+var _reveal_completed_count := 0
+var _reveal_interrupted_count := 0
+var _reveal_completed_before_next_aim_count := 0
+var _request_cancel_reason_counts: Dictionary = {}
+var _request_invalidation_reason_counts: Dictionary = {}
+var _request_block_reason_counts: Dictionary = {}
+var _result_discard_reason_counts: Dictionary = {}
+var _display_invalidation_reason_counts: Dictionary = {}
+var _reveal_interruption_reason_counts: Dictionary = {}
+var _reveal_sample_count := 0
+var _ready_hidden_total := 0
 
 
 func reset() -> void:
@@ -188,8 +255,6 @@ func reset() -> void:
 	_settled_rebuilds = 0
 	_forced_rebuilds = 0
 	_cache_hits = 0
-	_stale_results = 0
-	_discarded_results = 0
 	_redraw_requests = 0
 	_total_rebuild_cpu_us = 0
 	_history.clear()
@@ -211,6 +276,44 @@ func reset() -> void:
 	_draw_maximum_cpu_us = 0
 	_draw_sample_count = 0
 	_last_copied_status = "not copied"
+	_staged_timing_history.clear()
+	_staged_timing_totals_us.clear()
+	_staged_timing_maximums_us.clear()
+	_staged_timing_last_us.clear()
+	_staged_cpu_lifetime_totals_us.clear()
+	_reveal_history.clear()
+	_staging_configuration.clear()
+	_immediate_update_count = 0
+	_immediate_update_reason_counts.clear()
+	_deep_requests_created = 0
+	_deep_requests_forced = 0
+	_deep_requests_canceled_before_run = 0
+	_deep_requests_invalidated_before_run = 0
+	_deep_requests_blocked_before_run = 0
+	_deep_results_completed = 0
+	_deep_results_accepted = 0
+	_deep_results_discarded_on_arrival = 0
+	_deep_results_rejected_revision_mismatch = 0
+	_deep_results_rejected_request_id_mismatch = 0
+	_accepted_results_shown = 0
+	_shown_results_later_invalidated = 0
+	_shown_results_hidden_by_new_aim = 0
+	_shown_results_reused_from_cache = 0
+	_deep_cache_hits = 0
+	_deep_cache_misses = 0
+	_cached_results_accepted = 0
+	_cached_results_rejected = 0
+	_reveal_completed_count = 0
+	_reveal_interrupted_count = 0
+	_reveal_completed_before_next_aim_count = 0
+	_request_cancel_reason_counts.clear()
+	_request_invalidation_reason_counts.clear()
+	_request_block_reason_counts.clear()
+	_result_discard_reason_counts.clear()
+	_display_invalidation_reason_counts.clear()
+	_reveal_interruption_reason_counts.clear()
+	_reveal_sample_count = 0
+	_ready_hidden_total = 0
 
 
 func start_capture(
@@ -227,6 +330,14 @@ func start_capture(
 	_result_mode = result_mode
 	_contamination_snapshot = contamination_snapshot.duplicate(true)
 	_start_usec = Time.get_ticks_usec()
+
+
+func set_staging_configuration(configuration: Dictionary) -> void:
+	_staging_configuration = {
+		"settle_delay_ms": int(configuration.get("deep_aim_settle_delay_ms", 75)),
+		"reveal_duration_ms": int(configuration.get("deep_aim_reveal_duration_ms", 125)),
+		"progressive_reveal": bool(configuration.get("progressive_deep_aim_reveal", true)),
+	}
 
 
 func stop_capture() -> void:
@@ -318,14 +429,154 @@ func note_cache_hit() -> void:
 		_cache_hits += 1
 
 
-func note_stale_result() -> void:
-	if _recording:
-		_stale_results += 1
+func record_immediate_update(
+	cpu_usec: int,
+	reason: String = "immediate_preview_drag"
+) -> void:
+	if not _recording:
+		return
+	_immediate_update_count += 1
+	_immediate_update_reason_counts[reason] = int(
+		_immediate_update_reason_counts.get(reason, 0)
+	) + 1
+	_record_staged_timing("immediate_update_cpu", cpu_usec)
 
 
-func note_discarded_result() -> void:
+func note_deep_request_created(forced: bool) -> void:
+	if not _recording:
+		return
+	_deep_requests_created += 1
+	if forced:
+		_deep_requests_forced += 1
+
+
+func note_deep_request_forced() -> void:
 	if _recording:
-		_discarded_results += 1
+		_deep_requests_forced += 1
+
+
+func note_deep_compute_started(compute_start_latency_usec: int) -> void:
+	if not _recording:
+		return
+	_record_staged_timing("deep_compute_start_latency", compute_start_latency_usec)
+
+
+func note_deep_completion(
+	compute_usec: int,
+	accepted: bool,
+	cache_hit: bool,
+	rejection_reason: String = "",
+	cache_attempted: bool = true
+) -> void:
+	if not _recording:
+		return
+	_deep_results_completed += 1
+	if cache_attempted:
+		if cache_hit:
+			_deep_cache_hits += 1
+		else:
+			_deep_cache_misses += 1
+	if accepted:
+		_deep_results_accepted += 1
+		if cache_hit:
+			_cached_results_accepted += 1
+	elif rejection_reason in ["discarded_request_id_mismatch", "discarded_revision_mismatch"]:
+		_deep_results_discarded_on_arrival += 1
+		_increment_bounded_reason(_result_discard_reason_counts, rejection_reason)
+		if rejection_reason == "discarded_request_id_mismatch":
+			_deep_results_rejected_request_id_mismatch += 1
+		else:
+			_deep_results_rejected_revision_mismatch += 1
+		if cache_hit:
+			_cached_results_rejected += 1
+	_record_staged_timing("deep_compute_duration", compute_usec)
+
+
+func note_deep_request_canceled_before_run(reason: String) -> void:
+	if not _recording:
+		return
+	_deep_requests_canceled_before_run += 1
+	_increment_bounded_reason(_request_cancel_reason_counts, reason)
+
+
+func note_deep_request_invalidated_before_run(reason: String) -> void:
+	if not _recording:
+		return
+	_deep_requests_invalidated_before_run += 1
+	_increment_bounded_reason(_request_invalidation_reason_counts, reason)
+
+
+func note_deep_request_blocked_before_run(reason: String) -> void:
+	if not _recording:
+		return
+	_deep_requests_blocked_before_run += 1
+	_increment_bounded_reason(_request_block_reason_counts, reason)
+
+
+func note_deep_visible(first_visible_latency_usec: int, cache_hit: bool = false) -> void:
+	if not _recording:
+		return
+	_accepted_results_shown += 1
+	_record_staged_timing("deep_first_visible_latency_us", first_visible_latency_usec)
+	if cache_hit:
+		_shown_results_reused_from_cache += 1
+		_record_staged_timing("cache_hit_first_visible_latency_us", first_visible_latency_usec)
+
+
+func note_shown_result_later_invalidated(reason: String, hidden_by_new_aim: bool) -> void:
+	if not _recording:
+		return
+	_shown_results_later_invalidated += 1
+	if hidden_by_new_aim:
+		_shown_results_hidden_by_new_aim += 1
+	_increment_bounded_reason(_display_invalidation_reason_counts, reason)
+
+
+func note_reveal_completed(
+	fully_visible_latency_usec: int,
+	actual_reveal_duration_usec: int
+) -> void:
+	if not _recording:
+		return
+	_reveal_completed_count += 1
+	# Mirrors the live profiler: interrupted reveals never reach this path.
+	_reveal_completed_before_next_aim_count += 1
+	_record_staged_timing("deep_fully_visible_latency_us", fully_visible_latency_usec)
+	_record_staged_timing("reveal_duration_actual", actual_reveal_duration_usec)
+
+
+func note_reveal_interrupted(reason: String) -> void:
+	if not _recording:
+		return
+	_reveal_interrupted_count += 1
+	_increment_bounded_reason(_reveal_interruption_reason_counts, reason)
+
+
+func record_reveal_sample(
+	preparation_usec: int,
+	draw_usec: int,
+	visible_depth: int,
+	visible_branches: int,
+	ready_hidden_count: int
+) -> void:
+	if not _recording:
+		return
+	var sample: Dictionary = {
+		"preparation_us": maxi(preparation_usec, 0),
+		"draw_us": maxi(draw_usec, 0),
+		"visible_depth": maxi(visible_depth, 0),
+		"visible_branches": maxi(visible_branches, 0),
+		"ready_hidden_count": maxi(ready_hidden_count, 0),
+	}
+	_reveal_sample_count += 1
+	_ready_hidden_total += int(sample.get("ready_hidden_count", 0))
+	_reveal_history.append(sample)
+	if _reveal_history.size() > HISTORY_LIMIT:
+		_reveal_history.pop_front()
+	if preparation_usec > 0:
+		_record_staged_timing("reveal_preparation_cpu", preparation_usec)
+	if draw_usec > 0:
+		_record_staged_timing("reveal_cpu_presentation", draw_usec)
 
 
 func note_redraw_request() -> void:
@@ -400,8 +651,6 @@ func get_snapshot() -> Dictionary:
 		"phase_stats": phase_stats,
 		"cache_hits": _cache_hits,
 		"cache_misses": _captured_rebuilds,
-		"stale_results": _stale_results,
-		"discarded_results": _discarded_results,
 		"rebuild_reason_counts": _rebuild_reason_counts.duplicate(true),
 		"stop_reason_counts": _stop_reason_counts.duplicate(true),
 		"iteration_totals": _iteration_totals.duplicate(true),
@@ -424,6 +673,7 @@ func get_snapshot() -> Dictionary:
 		"draw_cpu_maximum_us": _draw_maximum_cpu_us,
 		"last_draw_sample": _draw_history.back().duplicate(true) if not _draw_history.is_empty() else {},
 		"last_copied_status": _last_copied_status,
+		"staged_prediction": _make_staged_prediction_snapshot(duration_seconds),
 	}
 
 
@@ -438,7 +688,13 @@ func copy_report_to_clipboard() -> bool:
 
 
 func make_plain_text_report() -> String:
-	if _status == STATUS_IDLE and _captured_rebuilds <= 0:
+	if (
+		_status == STATUS_IDLE
+		and _captured_rebuilds <= 0
+		and _immediate_update_count <= 0
+		and _deep_requests_created <= 0
+		and _reveal_sample_count <= 0
+	):
 		return ""
 	var snapshot: Dictionary = get_snapshot()
 	var setup: Dictionary = snapshot.get("setup", {})
@@ -478,6 +734,184 @@ func make_plain_text_report() -> String:
 	lines.append("Rebuilds/sec: %.2f" % float(snapshot.get("rebuilds_per_second", 0.0)))
 	lines.append("Total rebuild CPU: %.2f ms" % float(snapshot.get("total_rebuild_cpu_ms", 0.0)))
 	lines.append("Prediction CPU share: %.1f%%" % float(snapshot.get("prediction_cpu_share_percent", 0.0)))
+	lines.append("")
+	lines.append("STAGED AIM")
+	var staged: Dictionary = snapshot.get("staged_prediction", {})
+	var staged_counters: Dictionary = staged.get("counters", {})
+	var staged_configuration: Dictionary = staged.get("configuration", {})
+	lines.append("Immediate updates: %s (%.2f/sec)" % [
+		staged_counters.get("immediate_updates", 0),
+		float(staged.get("immediate_updates_per_second", 0.0)),
+	])
+	lines.append("Immediate reasons: %s" % _format_counts(
+		staged_counters.get("immediate_update_reason_counts", {})
+	))
+	lines.append("")
+	lines.append("STAGED REQUESTS")
+	lines.append("Created: %s" % staged_counters.get("deep_requests_created", 0))
+	lines.append("Forced: %s" % staged_counters.get("deep_requests_forced", 0))
+	lines.append("Canceled before run: %s" % staged_counters.get(
+		"deep_requests_canceled_before_run",
+		0
+	))
+	lines.append("Invalidated before run: %s" % staged_counters.get(
+		"deep_requests_invalidated_before_run",
+		0
+	))
+	lines.append("Blocked before run: %s" % staged_counters.get(
+		"deep_requests_blocked_before_run",
+		0
+	))
+	lines.append("Cancel reasons: %s" % _format_counts(
+		staged_counters.get("request_cancel_reason_counts", {})
+	))
+	lines.append("Invalidation reasons: %s" % _format_counts(
+		staged_counters.get("request_invalidation_reason_counts", {})
+	))
+	lines.append("Block reasons: %s" % _format_counts(
+		staged_counters.get("request_block_reason_counts", {})
+	))
+	lines.append("")
+	lines.append("STAGED RESULTS")
+	lines.append("Completed: %s (%.2f/sec)" % [
+		staged_counters.get("deep_results_completed", 0),
+		float(staged.get("deep_predictions_per_second", 0.0)),
+	])
+	lines.append("Accepted: %s" % staged_counters.get("deep_results_accepted", 0))
+	lines.append("Discarded on arrival: %s" % staged_counters.get(
+		"deep_results_discarded_on_arrival",
+		0
+	))
+	lines.append("- request ID mismatch: %s" % staged_counters.get(
+		"deep_results_rejected_request_id_mismatch",
+		0
+	))
+	lines.append("- revision mismatch: %s" % staged_counters.get(
+		"deep_results_rejected_revision_mismatch",
+		0
+	))
+	lines.append("Discard reasons: %s" % _format_counts(
+		staged_counters.get("result_discard_reason_counts", {})
+	))
+	lines.append("")
+	lines.append("DISPLAYED RESULTS")
+	lines.append("Shown: %s" % staged_counters.get("accepted_results_shown", 0))
+	lines.append("Later invalidated: %s" % staged_counters.get(
+		"shown_results_later_invalidated",
+		0
+	))
+	lines.append("Hidden by new aim: %s" % staged_counters.get(
+		"shown_results_hidden_by_new_aim",
+		0
+	))
+	lines.append("Cache reused: %s" % staged_counters.get(
+		"shown_results_reused_from_cache",
+		0
+	))
+	lines.append("Display invalidation reasons: %s" % _format_counts(
+		staged_counters.get("display_invalidation_reason_counts", {})
+	))
+	lines.append("")
+	lines.append("CACHE")
+	lines.append("Deep hits / misses: %s / %s" % [
+		staged_counters.get("deep_cache_hits", 0),
+		staged_counters.get("deep_cache_misses", 0),
+	])
+	lines.append("Cached results accepted / rejected: %s / %s" % [
+		staged_counters.get("cached_results_accepted", 0),
+		staged_counters.get("cached_results_rejected", 0),
+	])
+	lines.append("")
+	lines.append("REVEAL")
+	lines.append("Completed: %s" % staged_counters.get("reveal_completed_count", 0))
+	lines.append("Interrupted: %s" % staged_counters.get("reveal_interrupted_count", 0))
+	lines.append("Completed before next aim: %s" % staged_counters.get(
+		"reveal_completed_before_next_aim_count",
+		0
+	))
+	lines.append("Configured duration: %s ms" % staged_configuration.get(
+		"reveal_duration_ms",
+		125
+	))
+	lines.append("Settle delay: %s ms" % staged_configuration.get("settle_delay_ms", 75))
+	lines.append("Interruption reasons: %s" % _format_counts(
+		staged_counters.get("reveal_interruption_reason_counts", {})
+	))
+	lines.append("Reveal samples / ready-hidden count: %s / %s" % [
+		staged_counters.get("reveal_samples", 0),
+		staged_counters.get("ready_hidden_count", 0),
+	])
+	lines.append("")
+	lines.append("LATENCY - LAST / AVG / P95 / MAX (microseconds)")
+	var staged_timing_stats: Dictionary = staged.get("timing_stats", {})
+	for latency_timing_key in [
+		"deep_compute_start_latency",
+		"deep_compute_duration",
+		"deep_first_visible_latency_us",
+		"deep_fully_visible_latency_us",
+		"cache_hit_first_visible_latency_us",
+		"reveal_duration_actual",
+	]:
+		var latency_timing: Dictionary = staged_timing_stats.get(latency_timing_key, {})
+		lines.append("%s: %s / %.1f / %.1f / %s" % [
+			STAGED_TIMING_LABELS.get(latency_timing_key, latency_timing_key),
+			latency_timing.get("last_us", 0),
+			float(latency_timing.get("average_us", 0.0)),
+			float(latency_timing.get("p95_us", 0.0)),
+			latency_timing.get("maximum_us", 0),
+		])
+	lines.append("")
+	lines.append("STAGED CPU - LAST / AVG / P95 / MAX (microseconds)")
+	for cpu_timing_key in [
+		"immediate_update_cpu",
+		"reveal_preparation_cpu",
+		"reveal_cpu_presentation",
+	]:
+		var cpu_timing: Dictionary = staged_timing_stats.get(cpu_timing_key, {})
+		lines.append("%s: %s / %.1f / %.1f / %s" % [
+			STAGED_TIMING_LABELS.get(cpu_timing_key, cpu_timing_key),
+			cpu_timing.get("last_us", 0),
+			float(cpu_timing.get("average_us", 0.0)),
+			float(cpu_timing.get("p95_us", 0.0)),
+			cpu_timing.get("maximum_us", 0),
+		])
+	var staged_cpu_totals: Dictionary = staged.get("cpu_totals_us", {})
+	var staged_capture_shares: Dictionary = staged.get("capture_cpu_shares_percent", {})
+	lines.append("Staged CPU totals (ms): immediate %.2f, deep %.2f, reveal prep %.2f, reveal draw %.2f" % [
+		float(staged_cpu_totals.get("immediate_update", 0)) / 1000.0,
+		float(staged_cpu_totals.get("deep_compute", 0)) / 1000.0,
+		float(staged_cpu_totals.get("reveal_preparation", 0)) / 1000.0,
+		float(staged_cpu_totals.get("reveal_cpu_presentation", 0)) / 1000.0,
+	])
+	lines.append("CPU presentation/reveal draw is CPU time, not GPU time.")
+	lines.append("Capture CPU shares: immediate %.2f%%, deep %.2f%%, reveal prep %.2f%%, reveal draw %.2f%%" % [
+		float(staged_capture_shares.get("immediate_update", 0.0)),
+		float(staged_capture_shares.get("deep_compute", 0.0)),
+		float(staged_capture_shares.get("reveal_preparation", 0.0)),
+		float(staged_capture_shares.get("reveal_cpu_presentation", 0.0)),
+	])
+	var reveal_workload: Dictionary = staged.get("reveal_workload", {})
+	var visible_depth_stats: Dictionary = reveal_workload.get("visible_depth", {})
+	var visible_branch_stats: Dictionary = reveal_workload.get("visible_branches", {})
+	var ready_hidden_stats: Dictionary = reveal_workload.get("ready_hidden_count", {})
+	lines.append("Visible reveal depth last / avg / P95 / max: %s / %.1f / %.1f / %s" % [
+		visible_depth_stats.get("last", 0),
+		float(visible_depth_stats.get("average", 0.0)),
+		float(visible_depth_stats.get("p95", 0.0)),
+		visible_depth_stats.get("maximum", 0),
+	])
+	lines.append("Visible branches last / avg / P95 / max: %s / %.1f / %.1f / %s" % [
+		visible_branch_stats.get("last", 0),
+		float(visible_branch_stats.get("average", 0.0)),
+		float(visible_branch_stats.get("p95", 0.0)),
+		visible_branch_stats.get("maximum", 0),
+	])
+	lines.append("Ready-hidden last / avg / P95 / max: %s / %.1f / %.1f / %s" % [
+		ready_hidden_stats.get("last", 0),
+		float(ready_hidden_stats.get("average", 0.0)),
+		float(ready_hidden_stats.get("p95", 0.0)),
+		ready_hidden_stats.get("maximum", 0),
+	])
 	lines.append("")
 	lines.append("TIMING - LAST / AVG / P95 / MAX (microseconds)")
 	var phase_stats: Dictionary = snapshot.get("phase_stats", {})
@@ -550,13 +984,9 @@ func make_plain_text_report() -> String:
 		last_draw.get("event_markers_drawn", 0),
 	])
 	lines.append("")
-	lines.append("CACHE")
+	lines.append("PREDICTOR CACHE")
 	lines.append("Hits: %s" % snapshot.get("cache_hits", 0))
 	lines.append("Misses/completed rebuilds: %s" % snapshot.get("cache_misses", 0))
-	lines.append("Stale/discarded: %s / %s" % [
-		snapshot.get("stale_results", 0),
-		snapshot.get("discarded_results", 0),
-	])
 	lines.append("Rebuild reasons: %s" % _format_counts(snapshot.get("rebuild_reason_counts", {})))
 	lines.append("")
 	lines.append("PREDICTION AVAILABILITY")
@@ -775,6 +1205,182 @@ func _get_percentile(values: Array[int], percentile: float) -> float:
 	sorted_values.sort()
 	var index: int = clampi(ceili(float(sorted_values.size()) * percentile) - 1, 0, sorted_values.size() - 1)
 	return float(sorted_values[index])
+
+
+func _record_staged_timing(metric_key: String, value_usec: int) -> void:
+	var normalized_usec: int = maxi(value_usec, 0)
+	var history: Array = _staged_timing_history.get(metric_key, [])
+	history.append(normalized_usec)
+	_staged_timing_totals_us[metric_key] = int(
+		_staged_timing_totals_us.get(metric_key, 0)
+	) + normalized_usec
+	_staged_timing_maximums_us[metric_key] = maxi(
+		int(_staged_timing_maximums_us.get(metric_key, 0)),
+		normalized_usec
+	)
+	_staged_timing_last_us[metric_key] = normalized_usec
+	if metric_key in STAGED_CPU_TIMING_KEYS:
+		_staged_cpu_lifetime_totals_us[metric_key] = int(
+			_staged_cpu_lifetime_totals_us.get(metric_key, 0)
+		) + normalized_usec
+	if history.size() > HISTORY_LIMIT:
+		var removed_usec: int = int(history.pop_front())
+		_staged_timing_totals_us[metric_key] = maxi(
+			int(_staged_timing_totals_us.get(metric_key, 0)) - removed_usec,
+			0
+		)
+		if removed_usec >= int(_staged_timing_maximums_us.get(metric_key, 0)):
+			var maximum_usec := 0
+			for history_value in history:
+				maximum_usec = maxi(maximum_usec, int(history_value))
+			_staged_timing_maximums_us[metric_key] = maximum_usec
+	_staged_timing_history[metric_key] = history
+
+
+func _make_staged_prediction_snapshot(duration_seconds: float) -> Dictionary:
+	var timing_stats: Dictionary = {}
+	for metric_key in STAGED_TIMING_KEYS:
+		timing_stats[metric_key] = _make_staged_timing_stats(metric_key)
+	var counters: Dictionary = {
+		"immediate_updates": _immediate_update_count,
+		"deep_requests_created": _deep_requests_created,
+		"deep_requests_forced": _deep_requests_forced,
+		"deep_requests_canceled_before_run": _deep_requests_canceled_before_run,
+		"deep_requests_invalidated_before_run": _deep_requests_invalidated_before_run,
+		"deep_requests_blocked_before_run": _deep_requests_blocked_before_run,
+		"deep_results_completed": _deep_results_completed,
+		"deep_results_accepted": _deep_results_accepted,
+		"deep_results_discarded_on_arrival": _deep_results_discarded_on_arrival,
+		"deep_results_rejected_revision_mismatch": _deep_results_rejected_revision_mismatch,
+		"deep_results_rejected_request_id_mismatch": _deep_results_rejected_request_id_mismatch,
+		"accepted_results_shown": _accepted_results_shown,
+		"shown_results_later_invalidated": _shown_results_later_invalidated,
+		"shown_results_hidden_by_new_aim": _shown_results_hidden_by_new_aim,
+		"shown_results_reused_from_cache": _shown_results_reused_from_cache,
+		"deep_cache_hits": _deep_cache_hits,
+		"deep_cache_misses": _deep_cache_misses,
+		"cached_results_accepted": _cached_results_accepted,
+		"cached_results_rejected": _cached_results_rejected,
+		"reveal_completed_count": _reveal_completed_count,
+		"reveal_interrupted_count": _reveal_interrupted_count,
+		"reveal_completed_before_next_aim_count": _reveal_completed_before_next_aim_count,
+		"reveal_samples": _reveal_sample_count,
+		"ready_hidden_count": _ready_hidden_total,
+		"ready_hidden_total": _ready_hidden_total,
+		"immediate_update_reason_counts": _immediate_update_reason_counts.duplicate(true),
+		"request_cancel_reason_counts": _request_cancel_reason_counts.duplicate(true),
+		"request_invalidation_reason_counts": _request_invalidation_reason_counts.duplicate(true),
+		"request_block_reason_counts": _request_block_reason_counts.duplicate(true),
+		"result_discard_reason_counts": _result_discard_reason_counts.duplicate(true),
+		"display_invalidation_reason_counts": _display_invalidation_reason_counts.duplicate(true),
+		"reveal_interruption_reason_counts": _reveal_interruption_reason_counts.duplicate(true),
+	}
+	var cpu_totals_us: Dictionary = {
+		"immediate_update": int(
+			_staged_cpu_lifetime_totals_us.get("immediate_update_cpu", 0)
+		),
+		"deep_compute": int(_staged_cpu_lifetime_totals_us.get("deep_compute_duration", 0)),
+		"reveal_preparation": int(
+			_staged_cpu_lifetime_totals_us.get("reveal_preparation_cpu", 0)
+		),
+		"reveal_cpu_presentation": int(
+			_staged_cpu_lifetime_totals_us.get("reveal_cpu_presentation", 0)
+		),
+	}
+	var combined_cpu_us := 0
+	for cpu_value in cpu_totals_us.values():
+		combined_cpu_us += int(cpu_value)
+	cpu_totals_us["combined"] = combined_cpu_us
+	var cpu_shares: Dictionary = {}
+	var capture_cpu_shares: Dictionary = {}
+	var duration_usec: float = duration_seconds * 1000000.0
+	for cpu_key_value in cpu_totals_us.keys():
+		var cpu_key: String = str(cpu_key_value)
+		var cpu_value_us: int = int(cpu_totals_us.get(cpu_key, 0))
+		cpu_shares[cpu_key] = (
+			100.0 * float(cpu_value_us) / float(combined_cpu_us)
+			if combined_cpu_us > 0
+			else 0.0
+		)
+		capture_cpu_shares[cpu_key] = (
+			100.0 * float(cpu_value_us) / duration_usec
+			if duration_usec > 0.0
+			else 0.0
+		)
+	var update_rate: float = (
+		float(_immediate_update_count) / duration_seconds
+		if duration_seconds > 0.0
+		else 0.0
+	)
+	var prediction_rate: float = (
+		float(_deep_results_completed) / duration_seconds
+		if duration_seconds > 0.0
+		else 0.0
+	)
+	return {
+		"history_limit": HISTORY_LIMIT,
+		"timing_stats": timing_stats,
+		"counters": counters,
+		"configuration": _staging_configuration.duplicate(true),
+		"updates_per_second": update_rate,
+		"predictions_per_second": prediction_rate,
+		"immediate_updates_per_second": update_rate,
+		"deep_predictions_per_second": prediction_rate,
+		"cpu_totals_us": cpu_totals_us,
+		"cpu_shares_percent": cpu_shares,
+		"capture_cpu_shares_percent": capture_cpu_shares,
+		"wall_time_cpu_share_percent": float(capture_cpu_shares.get("combined", 0.0)),
+		"reveal_workload": {
+			"visible_depth": _make_reveal_metric_stats("visible_depth"),
+			"visible_branches": _make_reveal_metric_stats("visible_branches"),
+			"ready_hidden_count": _make_reveal_metric_stats("ready_hidden_count"),
+		},
+	}
+
+
+func _increment_bounded_reason(reason_counts: Dictionary, reason: String) -> void:
+	var normalized_reason: String = reason.strip_edges()
+	if normalized_reason.is_empty():
+		normalized_reason = "unknown"
+	if not reason_counts.has(normalized_reason) and reason_counts.size() >= LIFECYCLE_REASON_LIMIT:
+		normalized_reason = "other"
+	reason_counts[normalized_reason] = int(reason_counts.get(normalized_reason, 0)) + 1
+
+
+func _make_staged_timing_stats(metric_key: String) -> Dictionary:
+	var history: Array = _staged_timing_history.get(metric_key, [])
+	var values: Array[int] = []
+	for history_value in history:
+		values.append(maxi(int(history_value), 0))
+	var sample_count: int = values.size()
+	return {
+		"sample_count": sample_count,
+		"last_us": int(_staged_timing_last_us.get(metric_key, 0)),
+		"average_us": (
+			float(_staged_timing_totals_us.get(metric_key, 0)) / float(sample_count)
+			if sample_count > 0
+			else 0.0
+		),
+		"p95_us": _get_percentile(values, 0.95),
+		"maximum_us": int(_staged_timing_maximums_us.get(metric_key, 0)),
+		"total_us": int(_staged_timing_totals_us.get(metric_key, 0)),
+	}
+
+
+func _make_reveal_metric_stats(metric_key: String) -> Dictionary:
+	var values: Array[int] = []
+	var total := 0
+	for sample in _reveal_history:
+		var metric_value: int = maxi(int(sample.get(metric_key, 0)), 0)
+		values.append(metric_value)
+		total += metric_value
+	return {
+		"sample_count": values.size(),
+		"last": values.back() if not values.is_empty() else 0,
+		"average": float(total) / float(values.size()) if not values.is_empty() else 0.0,
+		"p95": _get_percentile(values, 0.95),
+		"maximum": values.max() if not values.is_empty() else 0,
+	}
 
 
 func _format_counts(value: Variant) -> String:

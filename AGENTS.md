@@ -88,7 +88,7 @@ Owns polished cue-ball aim line presentation, shot-power color, swept cue-ball p
 
 Does not mutate real gameplay state. Prediction must stay side-effect-free and should use shared boundary/pocket helpers so preview stays aligned with real movement.
 
-Aim preview rebuilds should be coalesced by `Table.gd`: input events mark the preview dirty, and a single centralized update performs at most one rebuild per frame while dragging. Do not reintroduce coarse angle/power tolerance reuse; graze shots need reliable rebuilds when the visible aim changes.
+Immediate aim-preview rebuilds are coalesced by `Table.gd`: input events mark the preview dirty, and a single centralized update performs at most one immediate rebuild per frame while dragging. `AimPreview.gd` owns staged cloned prediction: meaningful input resets a short elapsed-time settle window, request generations guard accepted results, and the retained result reveals by causal depth without rerunning simulation. The tiny staging tolerances reject numeric jitter only; do not turn them into coarse angle/power geometry reuse because graze shots need reliable immediate rebuilds whenever the visible aim changes.
 
 Long Sight is a Kraken Boon effect read from the generic boon effect snapshot. It adds faint secondary chain lines after the normal cue-ball preview, follows one likely next ball per chain step, and stops on no next hit, pocket, rail/end condition, stop/max distance, or the depth limit. Current base Long Sight chain depth is 5. It must remain side-effect-free prediction/presentation only.
 

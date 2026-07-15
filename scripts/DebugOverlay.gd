@@ -2104,11 +2104,13 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 	var simulation: Dictionary = snapshot.get("aim_cloned_simulation", {})
 	var availability: Dictionary = snapshot.get("aim_cloned_prediction_availability", {})
 	var invalidation: Dictionary = snapshot.get("aim_cloned_invalidation", {})
+	var staged_prediction: Dictionary = snapshot.get("aim_staged_prediction", {})
 	if simulation.is_empty():
 		var unavailable_lines: Array = [
 			"No cloned trajectory has been built.",
 			"Enable Debug Aim Line, then drag the cue.",
 		]
+		_append_staged_aim_lines(unavailable_lines, staged_prediction)
 		_append_aim_availability_lines(unavailable_lines, availability, invalidation)
 		return unavailable_lines
 	var warnings: Array = simulation.get("unsupported_warnings", [])
@@ -2173,6 +2175,7 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 		"Stop: %s" % simulation.get("stop_reason", "none"),
 		"Cap: %s" % str(simulation.get("cap_reached", "none")),
 	]
+	_append_staged_aim_lines(lines, staged_prediction)
 	_append_aim_availability_lines(lines, availability, invalidation)
 	var debug_mode: Dictionary = snapshot.get("debug_aim_mode", {})
 	if bool(debug_mode.get("enabled", false)):
@@ -2215,6 +2218,37 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 		for warning_text in warning_texts:
 			lines.append("- %s" % warning_text)
 	return lines
+
+
+func _append_staged_aim_lines(lines: Array, staged: Dictionary) -> void:
+	if staged.is_empty() or not bool(staged.get("show_status", true)):
+		return
+	lines.append("")
+	lines.append("STAGED PREDICTION")
+	lines.append("Enabled / state: %s / %s" % [
+		_debug_true_false_text(bool(staged.get("enabled", true))),
+		staged.get("state", "idle"),
+	])
+	lines.append("Reason: %s" % staged.get("reason", "none"))
+	lines.append("Settle remaining / configured: %.1f / %s ms" % [
+		float(staged.get("settle_remaining_ms", 0.0)),
+		staged.get("settle_delay_ms", 75),
+	])
+	lines.append("Request current / accepted / pending: %s / %s / %s" % [
+		staged.get("current_request_id", 0),
+		staged.get("last_accepted_request_id", 0),
+		staged.get("pending_request_count", 0),
+	])
+	lines.append("Reveal: %.0f%% / depth %s of %s / branches %s" % [
+		float(staged.get("reveal_progress", 0.0)) * 100.0,
+		staged.get("visible_depth", 0),
+		staged.get("maximum_depth", 0),
+		staged.get("visible_branches", 0),
+	])
+	lines.append("Reveal duration: %s ms" % staged.get("reveal_duration_ms", 125))
+	lines.append("Stale result retained: %s" % _debug_true_false_text(
+		bool(staged.get("stale_result_available", false))
+	))
 
 
 func _append_aim_availability_lines(
@@ -2304,15 +2338,12 @@ func _make_aim_profiler_lines(snapshot: Dictionary) -> Array:
 		],
 		"Rebuilds/sec at last completion: %.1f" % float(profiler.get("rebuilds_per_second", 0.0)),
 		"Cache: %s hits / %s misses / %.1f%% hit" % [cache_hits, cache_misses, hit_rate],
-		"Stale/discarded: %s / %s" % [
-			profiler.get("stale_results", 0),
-			profiler.get("discarded_results", 0),
-		],
 		"Last rebuild reason: %s" % profiler.get("last_rebuild_reason", "none"),
 		"Reason counts: %s" % _format_aim_profiler_reason_counts(
 			profiler.get("rebuild_reason_counts", {})
 		),
 	]
+	_append_staged_profiler_lines(lines, profiler)
 	if not enabled:
 		lines.append("Enable Profile Cloned Aim Simulation to collect new samples.")
 	if sample_count <= 0:
@@ -2439,6 +2470,146 @@ func _make_aim_profiler_lines(snapshot: Dictionary) -> Array:
 	return lines
 
 
+func _append_staged_profiler_lines(lines: Array, profiler: Dictionary) -> void:
+	var staged: Dictionary = profiler.get("staged_prediction", {})
+	var state: Dictionary = profiler.get("staging_state", {})
+	if staged.is_empty() and state.is_empty():
+		return
+	var counters: Dictionary = staged.get("counters", {})
+	var timing: Dictionary = staged.get("timing_stats", {})
+	lines.append("")
+	lines.append("STAGED AIM")
+	lines.append("State / reason: %s / %s" % [
+		state.get("state", "idle"),
+		state.get("reason", "none"),
+	])
+	lines.append("Settle / reveal: %s / %s ms" % [
+		state.get("settle_delay_ms", 75),
+		state.get("reveal_duration_ms", 125),
+	])
+	lines.append("Requests created / forced: %s / %s" % [
+		counters.get("deep_requests_created", 0),
+		counters.get("deep_requests_forced", 0),
+	])
+	lines.append("Canceled / invalidated / blocked: %s / %s / %s" % [
+		counters.get("deep_requests_canceled_before_run", 0),
+		counters.get("deep_requests_invalidated_before_run", 0),
+		counters.get("deep_requests_blocked_before_run", 0),
+	])
+	lines.append("Results completed / accepted: %s / %s" % [
+		counters.get("deep_results_completed", 0),
+		counters.get("deep_results_accepted", 0),
+	])
+	lines.append("Discarded on arrival (ID / revision): %s (%s / %s)" % [
+		counters.get("deep_results_discarded_on_arrival", 0),
+		counters.get("deep_results_rejected_request_id_mismatch", 0),
+		counters.get("deep_results_rejected_revision_mismatch", 0),
+	])
+	lines.append("Shown / later invalidated / hidden: %s / %s / %s" % [
+		counters.get("accepted_results_shown", 0),
+		counters.get("shown_results_later_invalidated", 0),
+		counters.get("shown_results_hidden_by_new_aim", 0),
+	])
+	lines.append("Reveals completed / interrupted: %s / %s" % [
+		counters.get("reveal_completed_count", 0),
+		counters.get("reveal_interrupted_count", 0),
+	])
+	lines.append("Completed before next aim: %s" % counters.get(
+		"reveal_completed_before_next_aim_count",
+		0
+	))
+	lines.append("Active-drag / settled deep rebuilds: %s / %s" % [
+		state.get("active_drag_deep_rebuilds", 0),
+		state.get("settled_deep_rebuilds", 0),
+	])
+	lines.append("Cache hit / miss / shown reuse: %s / %s / %s" % [
+		counters.get("deep_cache_hits", 0),
+		counters.get("deep_cache_misses", 0),
+		counters.get("shown_results_reused_from_cache", 0),
+	])
+	lines.append("Cached results accepted / rejected: %s / %s" % [
+		counters.get("cached_results_accepted", 0),
+		counters.get("cached_results_rejected", 0),
+	])
+	lines.append("")
+	lines.append("IMMEDIATE PREVIEW - CPU us last | avg | P95 | max")
+	lines.append(_format_staged_timing_line(
+		"Update",
+		timing.get("immediate_update_cpu", {})
+	))
+	lines.append("Updates/sec / CPU share: %.1f / %.1f%%" % [
+		float(staged.get("immediate_updates_per_second", 0.0)),
+		float(staged.get("cpu_shares_percent", {}).get("immediate_update", 0.0)),
+	])
+	lines.append("Update reasons: %s" % _format_aim_profiler_reason_counts(
+		counters.get("immediate_update_reason_counts", {})
+	))
+	lines.append("")
+	lines.append("DEEP / LATENCY - us last | avg | P95 | max")
+	lines.append(_format_staged_timing_line(
+		"Aim stop to request",
+		timing.get("deep_compute_start_latency", {})
+	))
+	lines.append(_format_staged_timing_line(
+		"Simulation",
+		timing.get("deep_compute_duration", {})
+	))
+	lines.append(_format_staged_timing_line(
+		"First visible",
+		timing.get("deep_first_visible_latency_us", {})
+	))
+	lines.append(_format_staged_timing_line(
+		"Fully visible",
+		timing.get("deep_fully_visible_latency_us", {})
+	))
+	lines.append(_format_staged_timing_line(
+		"Cache-hit first visible",
+		timing.get("cache_hit_first_visible_latency_us", {})
+	))
+	lines.append("Predictions/sec / CPU share: %.1f / %.1f%%" % [
+		float(staged.get("deep_predictions_per_second", 0.0)),
+		float(staged.get("cpu_shares_percent", {}).get("deep_compute", 0.0)),
+	])
+	lines.append("")
+	lines.append("PRESENTATION - CPU us last | avg | P95 | max")
+	lines.append(_format_staged_timing_line(
+		"Actual reveal elapsed",
+		timing.get("reveal_duration_actual", {})
+	))
+	lines.append(_format_staged_timing_line(
+		"Reveal prep",
+		timing.get("reveal_preparation_cpu", {})
+	))
+	lines.append(_format_staged_timing_line(
+		"Reveal draw (CPU, not GPU)",
+		timing.get("reveal_cpu_presentation", {})
+	))
+	lines.append("Reveal duration / progress: %s ms / %.0f%%" % [
+		state.get("reveal_duration_ms", 125),
+		float(state.get("reveal_progress", 0.0)) * 100.0,
+	])
+	lines.append("Visible depth / branches / ready-hidden: %s / %s / %s" % [
+		state.get("visible_depth", 0),
+		state.get("visible_branches", 0),
+		state.get("ready_but_hidden_count", 0),
+	])
+	var interruption_reasons: Variant = counters.get("reveal_interruption_reason_counts", {})
+	if interruption_reasons is Dictionary and not (interruption_reasons as Dictionary).is_empty():
+		lines.append("Reveal interruption reasons: %s" % _format_aim_profiler_reason_counts(
+			interruption_reasons
+		))
+
+
+func _format_staged_timing_line(label: String, stats: Dictionary) -> String:
+	return "%s: %s | %.1f | %.1f | %s" % [
+		label,
+		stats.get("last_us", 0),
+		float(stats.get("average_us", 0.0)),
+		float(stats.get("p95_us", 0.0)),
+		stats.get("maximum_us", 0),
+	]
+
+
 func _append_aim_benchmark_lines(lines: Array, benchmark_value: Variant) -> void:
 	if not benchmark_value is Dictionary:
 		return
@@ -2472,6 +2643,29 @@ func _append_aim_benchmark_lines(lines: Array, benchmark_value: Variant) -> void
 	lines.append("Prediction CPU share: %.1f%%" % float(
 		benchmark.get("prediction_cpu_share_percent", 0.0)
 	))
+	var staged: Dictionary = benchmark.get("staged_prediction", {})
+	var staged_counters: Dictionary = staged.get("counters", {})
+	if not staged.is_empty():
+		lines.append("Immediate updates / sec: %s / %.1f" % [
+			staged_counters.get("immediate_updates", 0),
+			float(staged.get("immediate_updates_per_second", 0.0)),
+		])
+		lines.append("Requests made / canceled / invalid / blocked: %s / %s / %s / %s" % [
+			staged_counters.get("deep_requests_created", 0),
+			staged_counters.get("deep_requests_canceled_before_run", 0),
+			staged_counters.get("deep_requests_invalidated_before_run", 0),
+			staged_counters.get("deep_requests_blocked_before_run", 0),
+		])
+		lines.append("Results complete / accepted / discarded: %s / %s / %s" % [
+			staged_counters.get("deep_results_completed", 0),
+			staged_counters.get("deep_results_accepted", 0),
+			staged_counters.get("deep_results_discarded_on_arrival", 0),
+		])
+		lines.append("Shown / reveal complete / interrupted: %s / %s / %s" % [
+			staged_counters.get("accepted_results_shown", 0),
+			staged_counters.get("reveal_completed_count", 0),
+			staged_counters.get("reveal_interrupted_count", 0),
+		])
 	lines.append("Last copied: %s" % benchmark.get("last_copied_status", "not copied"))
 
 
@@ -2498,6 +2692,7 @@ func _make_aim_event_chain_lines(snapshot: Dictionary) -> Array:
 	if not bool(comparison.get("enabled", true)):
 		return [
 			"Predicted event-chain comparison is disabled.",
+			"Reason: %s" % comparison.get("divergence_reason", "comparison_disabled"),
 			"Prediction and actual evidence remain preserved.",
 		]
 	var lines: Array = [
@@ -2626,6 +2821,10 @@ func _make_aim_launch_lines(snapshot: Dictionary) -> Array:
 	var launch: Dictionary = compare.get("launch", {})
 	return [
 		"Debug Aim Line: %s" % _debug_bool_text(bool(compare.get("debug_aim_line_enabled", false))),
+		"Deep commit: %s" % compare.get(
+			"deep_prediction_commit_status",
+			"deep_prediction_not_ready"
+		),
 		"Source: %s / persisted %s / recording %s" % [
 			compare.get("source", "none"),
 			_debug_true_false_text(bool(compare.get("persisted_overlay", false))),

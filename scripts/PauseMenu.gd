@@ -33,6 +33,8 @@ signal debug_aim_compare_panels_toggled(enabled: bool)
 signal debug_verbose_aim_candidates_toggled(enabled: bool)
 signal debug_cue_first_contact_toi_toggled(enabled: bool)
 signal debug_cloned_aim_configuration_changed(configuration: Dictionary)
+signal debug_force_deep_prediction_requested
+signal debug_cancel_pending_deep_prediction_requested
 signal debug_reset_aim_profiler_requested
 signal debug_reset_aim_benchmark_requested
 signal debug_start_aim_benchmark_requested(label: String, preset_label: String)
@@ -152,6 +154,7 @@ const DEBUG_CONTRABAND_SELECTOR_ITEMS := [
 ]
 const OPTIONS_MENU_SCRIPT := preload("res://scripts/OptionsMenu.gd")
 const AIM_TRAJECTORY_PREDICTOR_SCRIPT := preload("res://scripts/AimTrajectoryPredictor.gd")
+const AIM_STAGING_CONFIGURATION_SCRIPT := preload("res://scripts/AimStagingConfiguration.gd")
 const DEV_OPTION_REGISTRY_SCRIPT := preload("res://scripts/DevOptionRegistry.gd")
 const DEV_OPTIONS_PANEL_SCRIPT := preload("res://scripts/DevOptionsPanel.gd")
 const CONFIRM_PANEL_SIZE := Vector2(430.0, 220.0)
@@ -902,7 +905,7 @@ func _ensure_cloned_aim_simulation_controls() -> void:
 		cloned_aim_testing_section_label.text = "Cloned Aim Simulation"
 		_apply_debug_section_label_style(cloned_aim_testing_section_label)
 		debug_section.add_child(cloned_aim_testing_section_label)
-	for definition in AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_configuration_schema(4):
+	for definition in _get_cloned_aim_configuration_schema():
 		var key: String = str(definition.get("key", ""))
 		if key.is_empty() or cloned_aim_controls.has(key):
 			continue
@@ -972,7 +975,7 @@ func _ensure_cloned_aim_simulation_controls() -> void:
 
 func get_cloned_aim_configuration() -> Dictionary:
 	var configuration: Dictionary = {}
-	for definition in AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_configuration_schema(4):
+	for definition in _get_cloned_aim_configuration_schema():
 		var key: String = str(definition.get("key", ""))
 		var control: Control = cloned_aim_controls.get(key) as Control
 		if control is CheckBox:
@@ -982,15 +985,14 @@ func get_cloned_aim_configuration() -> Dictionary:
 			configuration[key] = int(value) if str(definition.get("type", "")) == "int" else value
 		elif control is OptionButton:
 			configuration[key] = _get_option_button_value(control as OptionButton)
-	return AIM_TRAJECTORY_PREDICTOR_SCRIPT.normalize_configuration(configuration, 4)
+	return _normalize_cloned_aim_configuration(configuration)
 
 
 func _apply_cloned_aim_configuration(configuration_value: Variant) -> void:
 	if not configuration_value is Dictionary:
 		return
-	var configuration: Dictionary = AIM_TRAJECTORY_PREDICTOR_SCRIPT.normalize_configuration(
-		configuration_value,
-		4
+	var configuration: Dictionary = _normalize_cloned_aim_configuration(
+		configuration_value as Dictionary
 	)
 	for key_value in configuration.keys():
 		var key: String = str(key_value)
@@ -1002,6 +1004,27 @@ func _apply_cloned_aim_configuration(configuration_value: Variant) -> void:
 		elif control is OptionButton:
 			_select_option_button_value(control as OptionButton, configuration[key_value], false)
 	debug_cloned_aim_configuration_changed.emit(configuration)
+
+
+func _get_cloned_aim_configuration_schema() -> Array[Dictionary]:
+	var combined_schema: Array[Dictionary] = []
+	for definition_value in AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_configuration_schema(4):
+		combined_schema.append((definition_value as Dictionary).duplicate(true))
+	for definition_value in AIM_STAGING_CONFIGURATION_SCRIPT.get_configuration_schema():
+		combined_schema.append((definition_value as Dictionary).duplicate(true))
+	return combined_schema
+
+
+func _normalize_cloned_aim_configuration(configuration: Dictionary) -> Dictionary:
+	var normalized: Dictionary = AIM_TRAJECTORY_PREDICTOR_SCRIPT.normalize_configuration(
+		configuration,
+		4
+	)
+	var staging_configuration: Dictionary = AIM_STAGING_CONFIGURATION_SCRIPT.normalize_configuration(
+		configuration
+	)
+	normalized.merge(staging_configuration, true)
+	return normalized
 
 
 func _on_cloned_aim_bool_changed(_enabled: bool, _key: String) -> void:
@@ -1210,6 +1233,7 @@ func _register_local_dev_options() -> void:
 		["toi", "time of impact", "first collision", "travel order"]
 	)
 	_register_cloned_aim_options()
+	_register_staged_deep_aim_actions()
 	_register_aim_benchmark_options()
 	_register_action_option(
 		"aim.reset_profiler",
@@ -1460,7 +1484,7 @@ func _sync_legacy_panel_check_box(option_id: String) -> void:
 
 
 func _register_cloned_aim_options() -> void:
-	for definition_value in AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_configuration_schema(4):
+	for definition_value in _get_cloned_aim_configuration_schema():
 		var schema: Dictionary = definition_value
 		var key: String = str(schema.get("key", ""))
 		var source: Control = cloned_aim_controls.get(key) as Control
@@ -1479,6 +1503,28 @@ func _register_cloned_aim_options() -> void:
 		registry_definition["getter"] = _get_control_value.bind(source, str(schema.get("type", "")))
 		registry_definition["setter"] = _set_control_value.bind(source, str(schema.get("type", "")))
 		dev_option_registry.register_option(registry_definition)
+
+
+func _register_staged_deep_aim_actions() -> void:
+	var locations: Array = [
+		_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Staged Deep Prediction")
+	]
+	_register_direct_action_option(
+		"aim.staging.force_deep_prediction",
+		"Force Deep Prediction Now",
+		locations,
+		"Requests the current deep aim prediction immediately without changing staging configuration.",
+		_force_deep_prediction_now,
+		["run deep aim", "bypass settle delay", "staged prediction"]
+	)
+	_register_direct_action_option(
+		"aim.staging.cancel_pending_prediction",
+		"Cancel Pending Deep Prediction",
+		locations,
+		"Cancels the current pending deep prediction request without changing staging configuration.",
+		_cancel_pending_deep_prediction,
+		["stop deep aim", "clear pending", "staged prediction"]
+	)
 
 
 func _register_aim_benchmark_options() -> void:
@@ -1594,10 +1640,19 @@ func _set_aim_benchmark_label(value: Variant) -> void:
 
 
 func _apply_selected_aim_benchmark_preset() -> void:
-	var configuration: Dictionary = AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_benchmark_preset_configuration(
+	var configuration: Dictionary = get_cloned_aim_configuration()
+	var preset_configuration: Dictionary = AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_benchmark_preset_configuration(
 		selected_aim_benchmark_preset_id,
 		4
 	)
+	# Player-facing presets measure the authored staged presentation. Deep Debug
+	# deliberately preserves the developer's currently selected staging values.
+	if selected_aim_benchmark_preset_id != AimTrajectoryPredictor.BENCHMARK_PRESET_DEEP_DEBUG:
+		configuration.merge(
+			AIM_STAGING_CONFIGURATION_SCRIPT.get_default_configuration(),
+			true
+		)
+	configuration.merge(preset_configuration, true)
 	_apply_cloned_aim_configuration(configuration)
 	if debug_aim_line_check_box != null and not debug_aim_line_check_box.button_pressed:
 		debug_aim_line_check_box.button_pressed = true
@@ -1637,7 +1692,24 @@ func _copy_aim_benchmark_report() -> void:
 	debug_copy_aim_benchmark_report_requested.emit()
 
 
+func _force_deep_prediction_now() -> void:
+	debug_force_deep_prediction_requested.emit()
+
+
+func _cancel_pending_deep_prediction() -> void:
+	debug_cancel_pending_deep_prediction_requested.emit()
+
+
 func _get_cloned_aim_section(key: String) -> String:
+	if key in [
+		"use_staged_deep_prediction",
+		"deep_aim_settle_delay_ms",
+		"progressive_deep_aim_reveal",
+		"deep_aim_reveal_duration_ms",
+		"keep_stale_deep_aim_faintly_visible",
+		"show_staging_status",
+	]:
+		return "Staged Deep Prediction"
 	if key == "profile_enabled":
 		return "Aim Profiler"
 	if key in ["enabled", "use_for_long_sight", "result_detail_mode"]:

@@ -180,6 +180,10 @@ func _connect_pause_menu_signals() -> void:
 		pause_menu.debug_cue_first_contact_toi_toggled.connect(_on_pause_debug_cue_first_contact_toi_toggled)
 	if not pause_menu.debug_cloned_aim_configuration_changed.is_connected(_on_pause_debug_cloned_aim_configuration_changed):
 		pause_menu.debug_cloned_aim_configuration_changed.connect(_on_pause_debug_cloned_aim_configuration_changed)
+	if not pause_menu.debug_force_deep_prediction_requested.is_connected(_on_pause_debug_force_deep_prediction_requested):
+		pause_menu.debug_force_deep_prediction_requested.connect(_on_pause_debug_force_deep_prediction_requested)
+	if not pause_menu.debug_cancel_pending_deep_prediction_requested.is_connected(_on_pause_debug_cancel_pending_deep_prediction_requested):
+		pause_menu.debug_cancel_pending_deep_prediction_requested.connect(_on_pause_debug_cancel_pending_deep_prediction_requested)
 	if not pause_menu.debug_reset_aim_profiler_requested.is_connected(_on_pause_debug_reset_aim_profiler_requested):
 		pause_menu.debug_reset_aim_profiler_requested.connect(_on_pause_debug_reset_aim_profiler_requested)
 	if not pause_menu.debug_reset_aim_benchmark_requested.is_connected(_on_pause_debug_reset_aim_benchmark_requested):
@@ -1077,6 +1081,23 @@ func _on_pause_debug_cloned_aim_configuration_changed(configuration: Dictionary)
 	if table == null:
 		return
 	table.set_debug_cloned_aim_configuration(configuration)
+
+
+func _on_pause_debug_force_deep_prediction_requested() -> void:
+	if table == null:
+		return
+	var requested: bool = table.force_debug_deep_aim_prediction_now()
+	hud_feed.add_message(
+		"Deep aim prediction requested." if requested else "No active aim to predict.",
+		"event"
+	)
+
+
+func _on_pause_debug_cancel_pending_deep_prediction_requested() -> void:
+	if table == null:
+		return
+	table.cancel_debug_pending_deep_aim_prediction()
+	hud_feed.add_message("Pending deep aim prediction canceled.", "event")
 
 
 func _on_pause_debug_reset_aim_profiler_requested() -> void:

@@ -14,6 +14,22 @@ const BALL_MOTION_MATH := preload("res://scripts/BallMotionMath.gd")
 const AIM_TRAJECTORY_PREDICTOR_SCRIPT := preload("res://scripts/AimTrajectoryPredictor.gd")
 const AIM_TRAJECTORY_PROFILER_SCRIPT := preload("res://scripts/AimTrajectoryProfiler.gd")
 const AIM_BENCHMARK_SESSION_SCRIPT := preload("res://scripts/AimBenchmarkSession.gd")
+const AIM_STAGING_CONFIGURATION_SCRIPT := preload("res://scripts/AimStagingConfiguration.gd")
+
+const STAGED_STATE_IDLE := "idle"
+const STAGED_STATE_IMMEDIATE_ONLY := "immediate_only"
+const STAGED_STATE_WAITING_FOR_SETTLE := "waiting_for_settle"
+const STAGED_STATE_DEEP_REQUESTED := "deep_requested"
+const STAGED_STATE_DEEP_RUNNING := "deep_running"
+const STAGED_STATE_DEEP_READY := "deep_ready"
+const STAGED_STATE_DEEP_STALE := "deep_stale"
+const STAGED_STATE_BLOCKED := "blocked"
+# These reject floating-point jitter only; they are deliberately far below a
+# visibly meaningful graze-shot adjustment and do not reuse prediction geometry.
+const STAGED_DIRECTION_TOLERANCE_DEGREES := 0.02
+const STAGED_POWER_RELATIVE_TOLERANCE := 0.0001
+const STAGED_ORIGIN_TOLERANCE_PX := 0.1
+const STAGED_STALE_ALPHA := 0.10
 
 # Cue-ball guide simulation and rendering.
 const AIM_GUIDE_LENGTH := 180.0
@@ -225,6 +241,8 @@ class DebugAimShotOverlay:
 	var first_hit_selected_ball_number := -1
 	var contact_order_snapshot: Dictionary = {}
 	var cloned_prediction_result: Dictionary = {}
+	var deep_prediction_commit_status := "deep_prediction_not_ready"
+	var deep_request_snapshot: Dictionary = {}
 	var actual_events: Array[Dictionary] = []
 	var actual_event_start_usec: int = 0
 
@@ -332,6 +350,69 @@ var _cloned_unsupported_state_invalidations := 0
 var _cloned_successful_rebuilds_after_invalidation := 0
 var _cloned_failed_rebuilds_after_invalidation := 0
 var _last_failed_invalidation_revision := -1
+var staged_prediction_configuration: Dictionary = {}
+var staged_prediction_state := STAGED_STATE_IDLE
+var staged_prediction_reason := "not_requested"
+var _latest_staged_origin := Vector2.ZERO
+var _latest_staged_launch_velocity := Vector2.ZERO
+var _latest_staged_effect_hash := 0
+var _has_staged_input := false
+var _last_meaningful_input_usec: int = 0
+var _pending_deep_reason := "settled_deep_prediction"
+var _deep_request_suppressed_until_input_change := false
+var _profiled_pending_deep_request := false
+var _request_generation := 0
+var _current_deep_request_id := 0
+var _last_accepted_deep_request_id := 0
+var _last_stale_deep_request_id := 0
+var _current_deep_request_snapshot: Dictionary = {}
+var _accepted_deep_request_snapshot: Dictionary = {}
+var _stale_cloned_prediction: Dictionary = {}
+var _configuration_revision := 0
+var _effect_snapshot_revision := 0
+var _deep_reveal_start_usec: int = 0
+var _deep_reveal_progress := 0.0
+var _deep_reveal_active := false
+var _deep_reveal_visible_noted := false
+var _deep_reveal_completed_noted := false
+var _deep_reveal_max_depth := 0
+var _deep_reveal_visible_branches := 0
+var _deep_reveal_preparation_us := 0
+var _deep_reveal_preparation_pending_us := 0
+var _deep_draw_cpu_us_in_progress := 0
+var _deep_requests_created := 0
+var _deep_requests_completed := 0
+var _deep_requests_accepted := 0
+var _deep_requests_canceled_before_run := 0
+var _deep_requests_invalidated_before_run := 0
+var _deep_requests_blocked_before_run := 0
+var _deep_results_discarded_on_arrival := 0
+var _deep_results_rejected_revision_mismatch := 0
+var _deep_results_rejected_request_id_mismatch := 0
+var _accepted_results_shown := 0
+var _shown_results_later_invalidated := 0
+var _shown_results_hidden_by_new_aim := 0
+var _shown_results_reused_from_cache := 0
+var _reveal_completed_count := 0
+var _reveal_interrupted_count := 0
+var _reveal_completed_before_next_aim_count := 0
+var _deep_force_requests := 0
+var _immediate_updates := 0
+var _active_drag_deep_rebuilds := 0
+var _settled_deep_rebuilds := 0
+var _deep_cache_hits := 0
+var _deep_cache_misses := 0
+var _cached_results_accepted := 0
+var _cached_results_rejected := 0
+var _deep_reused_results := 0
+var _accepted_deep_cache_hit := false
+var _deep_ready_but_hidden_count := 0
+var _deep_compute_start_latency_total_usec: int = 0
+var _deep_compute_start_latency_samples := 0
+var _deep_compute_total_usec: int = 0
+var _deep_compute_samples := 0
+var _deep_first_visible_latency_total_usec: int = 0
+var _deep_first_visible_latency_samples := 0
 
 
 #region Setup / Public API
@@ -343,7 +424,10 @@ func setup(table_ref) -> void:
 	cloned_trajectory_configuration = AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_default_configuration(
 		int(table.PHYSICS_SUBSTEPS)
 	)
+	staged_prediction_configuration = AIM_STAGING_CONFIGURATION_SCRIPT.get_default_configuration()
+	cloned_trajectory_configuration.merge(staged_prediction_configuration, true)
 	trajectory_profiler.set_enabled(bool(cloned_trajectory_configuration.get("profile_enabled", false)))
+	benchmark_session.set_staging_configuration(staged_prediction_configuration)
 	_observed_table_prediction_revision = int(table.get_aim_prediction_state_revision())
 	cloned_prediction_availability = _make_default_cloned_prediction_availability()
 
@@ -356,8 +440,9 @@ func notify_table_prediction_revision_changed(
 	if revision == _observed_table_prediction_revision:
 		return
 
-	var had_prediction: bool = not current_cloned_prediction.is_empty()
 	_observed_table_prediction_revision = revision
+	_pending_deep_reason = "table_revision_deep_prediction"
+	_deep_request_suppressed_until_input_change = false
 	_cloned_refresh_pending = true
 	_last_cloned_invalidation_reason = reason
 	_cloned_invalidation_count += 1
@@ -376,12 +461,10 @@ func notify_table_prediction_revision_changed(
 		"unsupported_state":
 			_cloned_unsupported_state_invalidations += 1
 
-	if had_prediction:
-		if trajectory_profiler != null:
-			trajectory_profiler.note_stale_result()
-		if benchmark_session != null:
-			benchmark_session.note_stale_result()
-	current_cloned_prediction.clear()
+	_invalidate_staged_deep_prediction(
+		"invalidated_table_revision",
+		preview_active and _is_deep_prediction_requested()
+	)
 	_has_last_cloned_rebuild_input = false
 	if trajectory_predictor != null:
 		trajectory_predictor.clear_cache()
@@ -394,9 +477,11 @@ func notify_table_prediction_revision_changed(
 
 
 func clear_for_authoritative_table_reset(reason: String) -> void:
+	var preserve_shot_evidence: bool = reason == "shot_rewind"
 	preview_active = false
 	current_prediction = null
-	current_cloned_prediction.clear()
+	current_cloned_prediction = {}
+	_stale_cloned_prediction = {}
 	long_sight_chain_links.clear()
 	bank_debug_markers.clear()
 	last_predicted_aim_path.clear()
@@ -407,12 +492,14 @@ func clear_for_authoritative_table_reset(reason: String) -> void:
 	aim_path_debug_timer = 0.0
 	actual_cue_path_recording = false
 	debug_actual_trace_recording = false
-	debug_persisted_shot = null
+	if not preserve_shot_evidence:
+		debug_persisted_shot = null
 	_aim_ball_spatial_grid.clear()
 	_reset_debug_first_hit_candidate_log()
 	_rebuild_treasure_perception_snapshot(null)
 	_rebuild_embezzler_perception_snapshot(null)
 	_has_last_cloned_rebuild_input = false
+	_reset_staged_prediction_runtime(reason)
 	_cloned_refresh_pending = true
 	_last_cloned_invalidation_reason = reason
 	if trajectory_predictor != null:
@@ -428,13 +515,21 @@ func update_preview(
 	power_ratio: float,
 	effect_snapshot: Dictionary = {}
 ) -> void:
+	var incoming_effect_hash: int = hash(effect_snapshot)
+	var effect_changed: bool = _has_staged_input and incoming_effect_hash != _latest_staged_effect_hash
 	active_effect_snapshot = effect_snapshot.duplicate(true)
+	if effect_changed:
+		_effect_snapshot_revision += 1
+		if trajectory_predictor != null:
+			trajectory_predictor.clear_cache()
 	if not active:
 		_refresh_cloned_availability_for_inactive_preview()
 		prediction_ms = 0.0
 		_aim_ball_spatial_grid.clear()
 		long_sight_chain_links.clear()
-		current_cloned_prediction.clear()
+		current_cloned_prediction = {}
+		_stale_cloned_prediction = {}
+		_reset_staged_prediction_runtime("preview_inactive")
 		aim_spatial_cells = 0
 		aim_spatial_balls = 0
 		aim_spatial_treasure_balls = 0
@@ -455,28 +550,51 @@ func update_preview(
 	preview_drag_vector = drag_vector
 	preview_initial_velocity = drag_vector * shot_power
 	preview_power_ratio = power_ratio
+	var immediate_update_reason: String = _classify_immediate_update_reason(
+		origin,
+		preview_initial_velocity,
+		incoming_effect_hash,
+		effect_changed
+	)
 
 	var aim_start_usec: int = Time.get_ticks_usec()
 	_rebuild_aim_ball_spatial_grid()
 	_reset_debug_first_hit_candidate_log()
 	current_prediction = _get_first_aim_collision(origin, drag_vector * shot_power)
 	_finalize_debug_first_hit_candidate_selection(current_prediction)
-	_rebuild_cloned_trajectory(origin, drag_vector * shot_power)
-	if not _is_cloned_long_sight_active():
+	if not _is_deep_prediction_requested():
 		_rebuild_long_sight_chain(current_prediction)
 	else:
 		long_sight_chain_links.clear()
 	_rebuild_treasure_perception_snapshot(current_prediction)
 	_rebuild_embezzler_perception_snapshot(current_prediction)
 	prediction_ms = _elapsed_ms_since(aim_start_usec)
+	var immediate_cpu_usec: int = maxi(Time.get_ticks_usec() - aim_start_usec, 0)
+	_immediate_updates += 1
+	if trajectory_profiler != null:
+		trajectory_profiler.record_immediate_update(immediate_cpu_usec, immediate_update_reason)
+	if benchmark_session != null:
+		benchmark_session.record_immediate_update(immediate_cpu_usec, immediate_update_reason)
+	_handle_staged_aim_input(
+		origin,
+		preview_initial_velocity,
+		incoming_effect_hash,
+		effect_changed,
+		immediate_update_reason
+	)
 	prediction_frame_ms += prediction_ms
 	prediction_recalculations_this_frame += 1
 	_queue_aim_redraw()
 
 
-func update_debug(delta: float, is_dragging: bool) -> void:
+func update_debug(delta: float, is_dragging: bool, input_refresh_pending: bool = false) -> void:
 	_update_bank_debug_markers(delta)
 	_update_aim_path_comparison_debug(delta)
+	_update_staged_prediction(input_refresh_pending)
+	# A queued input refresh owns this frame. Do not let geometry from the previous
+	# aim finish its reveal before that input can invalidate it.
+	if not input_refresh_pending:
+		_update_deep_reveal()
 	if _should_redraw_debug(is_dragging):
 		_queue_aim_redraw()
 
@@ -494,9 +612,21 @@ func start_path_comparison(origin: Vector2, initial_velocity: Vector2) -> void:
 	_reset_debug_first_hit_candidate_log()
 	var prediction: AimPrediction = _get_first_aim_collision(origin, initial_velocity)
 	_finalize_debug_first_hit_candidate_selection(prediction)
-	_simulate_cloned_trajectory(origin, initial_velocity, true, "shot_commit")
+	var commit_status: String = _get_deep_prediction_commit_status(origin, initial_velocity)
+	var committed_deep_result: Dictionary = {}
+	var committed_request_snapshot: Dictionary = {}
+	if commit_status == "deep_prediction_ready":
+		committed_deep_result = current_cloned_prediction
+		committed_request_snapshot = _accepted_deep_request_snapshot
 	if debug_aim_line_enabled:
-		debug_persisted_shot = _make_debug_shot_overlay(prediction, origin, initial_velocity)
+		debug_persisted_shot = _make_debug_shot_overlay(
+			prediction,
+			origin,
+			initial_velocity,
+			committed_deep_result,
+			commit_status,
+			committed_request_snapshot
+		)
 		debug_persisted_shot.actual_cue_path.clear()
 		debug_persisted_shot.actual_cue_path.append(origin)
 		debug_persisted_shot.actual_event_start_usec = Time.get_ticks_usec()
@@ -828,10 +958,18 @@ func set_debug_aim_line_enabled(enabled: bool) -> void:
 
 func set_cloned_trajectory_configuration(configuration: Dictionary) -> void:
 	var profiling_was_enabled: bool = bool(cloned_trajectory_configuration.get("profile_enabled", false))
-	cloned_trajectory_configuration = AIM_TRAJECTORY_PREDICTOR_SCRIPT.normalize_configuration(
+	var predictor_configuration: Dictionary = AIM_TRAJECTORY_PREDICTOR_SCRIPT.normalize_configuration(
 		configuration,
 		int(table.PHYSICS_SUBSTEPS) if table != null else 4
 	)
+	staged_prediction_configuration = AIM_STAGING_CONFIGURATION_SCRIPT.normalize_configuration(configuration)
+	cloned_trajectory_configuration = predictor_configuration
+	cloned_trajectory_configuration.merge(staged_prediction_configuration, true)
+	if benchmark_session != null:
+		benchmark_session.set_staging_configuration(staged_prediction_configuration)
+	_configuration_revision += 1
+	_pending_deep_reason = "config_deep_prediction"
+	_deep_request_suppressed_until_input_change = false
 	_cloned_configuration_changed_since_rebuild = true
 	if not _full_debug_result_evidence_enabled():
 		debug_persisted_shot = null
@@ -852,7 +990,10 @@ func set_cloned_trajectory_configuration(configuration: Dictionary) -> void:
 	) + 1
 	_cloned_refresh_pending = true
 	_last_failed_invalidation_revision = -1
-	current_cloned_prediction.clear()
+	_invalidate_staged_deep_prediction(
+		"invalidated_config_revision",
+		preview_active and _is_deep_prediction_requested()
+	)
 	_has_last_cloned_rebuild_input = false
 	if trajectory_predictor != null:
 		trajectory_predictor.clear_cache()
@@ -869,6 +1010,8 @@ func reset_cloned_trajectory_profiler_stats() -> void:
 	trajectory_profiler.reset(
 		trajectory_predictor.get_cache_debug_snapshot() if trajectory_predictor != null else {}
 	)
+	if _profiled_pending_deep_request:
+		trajectory_profiler.note_deep_request_created(false)
 
 
 func reset_cloned_trajectory_benchmark_stats() -> void:
@@ -892,6 +1035,9 @@ func start_cloned_trajectory_benchmark(
 		)),
 		contamination_snapshot
 	)
+	benchmark_session.set_staging_configuration(staged_prediction_configuration)
+	if _profiled_pending_deep_request:
+		benchmark_session.note_deep_request_created(false)
 	_cloned_configuration_changed_since_rebuild = false
 	if trajectory_predictor != null:
 		trajectory_predictor.clear_cache()
@@ -910,25 +1056,766 @@ func get_cloned_trajectory_benchmark_snapshot() -> Dictionary:
 	return benchmark_session.get_snapshot() if benchmark_session != null else {}
 
 
-func _rebuild_cloned_trajectory(origin: Vector2, launch_velocity: Vector2) -> void:
-	var cloned_enabled: bool = bool(cloned_trajectory_configuration.get("enabled", true))
-	var debug_requested: bool = debug_aim_line_enabled and cloned_enabled
-	var long_sight_requested: bool = (
-		_get_active_aim_chain_depth() > 0
-		and bool(cloned_trajectory_configuration.get("use_for_long_sight", true))
-		and cloned_enabled
-	)
-	if not debug_requested and not long_sight_requested:
-		current_cloned_prediction.clear()
-		cloned_prediction_availability = _make_default_cloned_prediction_availability()
-		cloned_prediction_availability["live_preview_requested"] = false
-		cloned_prediction_availability["cloned_simulation_enabled"] = cloned_enabled
-		cloned_prediction_availability["blocker_reason"] = (
-			"cue_not_ready" if cloned_enabled else "disabled"
-		)
+func force_deep_prediction_now() -> bool:
+	if not preview_active or not _is_deep_prediction_requested() or not _has_staged_input:
+		return false
+	_deep_request_suppressed_until_input_change = false
+	_deep_force_requests += 1
+	return _request_deep_prediction("forced_deep_prediction", true)
+
+
+func cancel_pending_deep_prediction() -> void:
+	if staged_prediction_state not in [
+		STAGED_STATE_WAITING_FOR_SETTLE,
+		STAGED_STATE_DEEP_REQUESTED,
+		STAGED_STATE_DEEP_RUNNING,
+		STAGED_STATE_DEEP_STALE,
+	]:
 		return
-	var rebuild_reason: String = "debug_preview_drag" if debug_requested else "long_sight_preview_drag"
-	_simulate_cloned_trajectory(origin, launch_velocity, debug_requested, rebuild_reason)
+	var canceled_before_run: bool = _profiled_pending_deep_request
+	_request_generation += 1
+	_current_deep_request_id = 0
+	_current_deep_request_snapshot = {}
+	current_cloned_prediction = {}
+	_accepted_deep_request_snapshot = {}
+	_accepted_deep_cache_hit = false
+	_deep_reveal_progress = 0.0
+	_deep_reveal_active = false
+	_deep_reveal_completed_noted = false
+	_deep_reveal_preparation_pending_us = 0
+	_deep_request_suppressed_until_input_change = true
+	staged_prediction_state = STAGED_STATE_IMMEDIATE_ONLY
+	staged_prediction_reason = "canceled_deep_request"
+	if canceled_before_run:
+		_profiled_pending_deep_request = false
+		_deep_requests_canceled_before_run += 1
+		if trajectory_profiler != null:
+			trajectory_profiler.note_deep_request_canceled_before_run("debug_cancel")
+		if benchmark_session != null:
+			benchmark_session.note_deep_request_canceled_before_run("debug_cancel")
+	_queue_aim_redraw()
+
+
+func _handle_staged_aim_input(
+	origin: Vector2,
+	launch_velocity: Vector2,
+	effect_hash: int,
+	effect_changed: bool,
+	immediate_update_reason: String
+) -> void:
+	var meaningful_change: bool = _is_meaningful_staged_input_change(
+		origin,
+		launch_velocity,
+		effect_hash
+	)
+	_latest_staged_origin = origin
+	_latest_staged_launch_velocity = launch_velocity
+	_latest_staged_effect_hash = effect_hash
+	_has_staged_input = true
+
+	if not _is_deep_prediction_requested():
+		if (
+			bool(current_cloned_prediction.get("valid", false))
+			or staged_prediction_state in [
+				STAGED_STATE_WAITING_FOR_SETTLE,
+				STAGED_STATE_DEEP_REQUESTED,
+				STAGED_STATE_DEEP_RUNNING,
+			]
+		):
+			_invalidate_staged_deep_prediction("invalidated_effect_revision", false)
+		_deep_request_suppressed_until_input_change = false
+		current_cloned_prediction = {}
+		_stale_cloned_prediction = {}
+		_accepted_deep_request_snapshot = {}
+		_accepted_deep_cache_hit = false
+		staged_prediction_state = STAGED_STATE_IMMEDIATE_ONLY
+		staged_prediction_reason = "immediate_preview_active"
+		return
+
+	if not _is_staged_deep_prediction_enabled():
+		_request_deep_prediction("immediate_preview_drag", false)
+		return
+
+	if meaningful_change:
+		_deep_request_suppressed_until_input_change = false
+		_last_meaningful_input_usec = Time.get_ticks_usec()
+		if effect_changed:
+			_pending_deep_reason = "config_deep_prediction"
+		elif not (
+			staged_prediction_state == STAGED_STATE_WAITING_FOR_SETTLE
+			and _pending_deep_reason in [
+				"table_revision_deep_prediction",
+				"config_deep_prediction",
+			]
+		):
+			_pending_deep_reason = "settled_deep_prediction"
+		_invalidate_staged_deep_prediction(
+			_get_staged_input_invalidation_reason(immediate_update_reason, effect_changed),
+			true
+		)
+	elif (
+		staged_prediction_state in [STAGED_STATE_IDLE, STAGED_STATE_IMMEDIATE_ONLY]
+		and not _deep_request_suppressed_until_input_change
+	):
+		_last_meaningful_input_usec = Time.get_ticks_usec()
+		_pending_deep_reason = "settled_deep_prediction"
+		staged_prediction_state = STAGED_STATE_WAITING_FOR_SETTLE
+		staged_prediction_reason = "waiting_for_aim_to_settle"
+		_begin_profiled_pending_deep_request()
+
+
+func _get_staged_input_invalidation_reason(
+	immediate_update_reason: String,
+	effect_changed: bool
+) -> String:
+	if effect_changed or immediate_update_reason == "immediate_preview_config":
+		return "invalidated_effect_revision"
+	if immediate_update_reason == "immediate_preview_power":
+		return "invalidated_power_changed"
+	return "invalidated_aim_changed"
+
+
+func _is_meaningful_staged_input_change(
+	origin: Vector2,
+	launch_velocity: Vector2,
+	effect_hash: int
+) -> bool:
+	if not _has_staged_input:
+		return true
+	if origin.distance_to(_latest_staged_origin) > STAGED_ORIGIN_TOLERANCE_PX:
+		return true
+	if effect_hash != _latest_staged_effect_hash:
+		return true
+	var previous_speed: float = _latest_staged_launch_velocity.length()
+	var current_speed: float = launch_velocity.length()
+	var speed_scale: float = maxf(maxf(previous_speed, current_speed), 1.0)
+	if absf(current_speed - previous_speed) / speed_scale > STAGED_POWER_RELATIVE_TOLERANCE:
+		return true
+	if previous_speed <= 0.001 or current_speed <= 0.001:
+		return previous_speed > 0.001 or current_speed > 0.001
+	var angle_delta_degrees: float = absf(rad_to_deg(
+		_latest_staged_launch_velocity.angle_to(launch_velocity)
+	))
+	return angle_delta_degrees > STAGED_DIRECTION_TOLERANCE_DEGREES
+
+
+func _classify_immediate_update_reason(
+	origin: Vector2,
+	launch_velocity: Vector2,
+	effect_hash: int,
+	effect_changed: bool
+) -> String:
+	if not _has_staged_input:
+		return "immediate_preview_initial"
+	if effect_changed or effect_hash != _latest_staged_effect_hash:
+		return "immediate_preview_config"
+	if _pending_deep_reason == "table_revision_deep_prediction" and (
+		staged_prediction_state in [STAGED_STATE_WAITING_FOR_SETTLE, STAGED_STATE_DEEP_STALE]
+	):
+		return "immediate_preview_table_revision"
+	if origin.distance_to(_latest_staged_origin) > STAGED_ORIGIN_TOLERANCE_PX:
+		return "immediate_preview_origin"
+	var previous_speed: float = _latest_staged_launch_velocity.length()
+	var current_speed: float = launch_velocity.length()
+	var speed_scale: float = maxf(maxf(previous_speed, current_speed), 1.0)
+	if absf(current_speed - previous_speed) / speed_scale > STAGED_POWER_RELATIVE_TOLERANCE:
+		return "immediate_preview_power"
+	if previous_speed > 0.001 and current_speed > 0.001:
+		var angle_delta_degrees: float = absf(rad_to_deg(
+			_latest_staged_launch_velocity.angle_to(launch_velocity)
+		))
+		if angle_delta_degrees > STAGED_DIRECTION_TOLERANCE_DEGREES:
+			return "immediate_preview_drag"
+	return "immediate_preview_refresh"
+
+
+func _update_staged_prediction(input_refresh_pending: bool) -> void:
+	if (
+		not preview_active
+		or not _has_staged_input
+		or not _is_deep_prediction_requested()
+		or not _is_staged_deep_prediction_enabled()
+		or input_refresh_pending
+	):
+		return
+	if staged_prediction_state == STAGED_STATE_DEEP_STALE:
+		staged_prediction_state = STAGED_STATE_WAITING_FOR_SETTLE
+		staged_prediction_reason = "waiting_for_aim_to_settle"
+	if staged_prediction_state != STAGED_STATE_WAITING_FOR_SETTLE:
+		return
+	var delay_usec: int = _get_deep_settle_delay_ms() * 1000
+	if Time.get_ticks_usec() - _last_meaningful_input_usec < delay_usec:
+		return
+	_request_deep_prediction(_pending_deep_reason, false)
+
+
+func _begin_profiled_pending_deep_request() -> void:
+	if _profiled_pending_deep_request:
+		return
+	_profiled_pending_deep_request = true
+	_note_deep_request_created(false)
+
+
+func _note_deep_request_created(forced: bool) -> void:
+	_deep_requests_created += 1
+	if trajectory_profiler != null:
+		trajectory_profiler.note_deep_request_created(forced)
+	if benchmark_session != null:
+		benchmark_session.note_deep_request_created(forced)
+
+
+func _request_deep_prediction(rebuild_reason: String, forced: bool) -> bool:
+	if not preview_active or not _has_staged_input or not _is_deep_prediction_requested():
+		return false
+	if _profiled_pending_deep_request:
+		if forced:
+			if trajectory_profiler != null:
+				trajectory_profiler.note_deep_request_forced()
+			if benchmark_session != null:
+				benchmark_session.note_deep_request_forced()
+		_profiled_pending_deep_request = false
+	else:
+		_note_deep_request_created(forced)
+	_request_generation += 1
+	var request_id: int = _request_generation
+	_current_deep_request_id = request_id
+	_current_deep_request_snapshot = _make_deep_request_snapshot(request_id)
+	staged_prediction_state = STAGED_STATE_DEEP_REQUESTED
+	staged_prediction_reason = rebuild_reason
+	var request_usec: int = Time.get_ticks_usec()
+	var compute_start_latency_usec: int = (
+		maxi(request_usec - _last_meaningful_input_usec, 0)
+		if _is_staged_deep_prediction_enabled()
+		else 0
+	)
+	_deep_compute_start_latency_total_usec += compute_start_latency_usec
+	_deep_compute_start_latency_samples += 1
+	if trajectory_profiler != null:
+		trajectory_profiler.note_deep_compute_started(compute_start_latency_usec)
+	if benchmark_session != null:
+		benchmark_session.note_deep_compute_started(compute_start_latency_usec)
+
+	staged_prediction_state = STAGED_STATE_DEEP_RUNNING
+	var use_debug_limits: bool = debug_aim_line_enabled
+	_simulate_cloned_trajectory(
+		_latest_staged_origin,
+		_latest_staged_launch_velocity,
+		use_debug_limits,
+		rebuild_reason
+	)
+	var compute_usec: int = maxi(Time.get_ticks_usec() - request_usec, 0)
+	_deep_compute_total_usec += compute_usec
+	_deep_compute_samples += 1
+	var cache_attempted: bool = current_cloned_prediction.has("cache_hit")
+	var cache_hit: bool = bool(current_cloned_prediction.get("cache_hit", false))
+	if cache_attempted:
+		if cache_hit:
+			_deep_cache_hits += 1
+		else:
+			_deep_cache_misses += 1
+
+	var request_id_matches: bool = (
+		request_id == _request_generation
+		and request_id == _current_deep_request_id
+	)
+	var revisions_match: bool = _deep_request_snapshot_matches_current(
+		_current_deep_request_snapshot
+	)
+	var request_is_current: bool = request_id_matches and revisions_match
+	if not request_is_current:
+		_deep_requests_completed += 1
+		var rejection_reason: String = (
+			"discarded_request_id_mismatch"
+			if not request_id_matches
+			else "discarded_revision_mismatch"
+		)
+		_deep_results_discarded_on_arrival += 1
+		if rejection_reason == "discarded_request_id_mismatch":
+			_deep_results_rejected_request_id_mismatch += 1
+		else:
+			_deep_results_rejected_revision_mismatch += 1
+		if cache_hit:
+			_cached_results_rejected += 1
+		current_cloned_prediction = {}
+		_current_deep_request_snapshot = {}
+		staged_prediction_state = STAGED_STATE_DEEP_STALE
+		staged_prediction_reason = rejection_reason
+		if trajectory_profiler != null:
+			trajectory_profiler.note_deep_completion(
+				compute_usec,
+				false,
+				cache_hit,
+				rejection_reason,
+				cache_attempted
+			)
+		if benchmark_session != null:
+			benchmark_session.note_deep_completion(
+				compute_usec,
+				false,
+				cache_hit,
+				rejection_reason,
+				cache_attempted
+			)
+		return false
+
+	if not bool(current_cloned_prediction.get("valid", false)) and not cache_attempted:
+		_deep_requests_blocked_before_run += 1
+		var blocked_reason: String = str(
+			cloned_prediction_availability.get("blocker_reason", "deep_prediction_blocked")
+		)
+		if trajectory_profiler != null:
+			trajectory_profiler.note_deep_request_blocked_before_run(blocked_reason)
+		if benchmark_session != null:
+			benchmark_session.note_deep_request_blocked_before_run(blocked_reason)
+		_current_deep_request_snapshot = {}
+		staged_prediction_state = STAGED_STATE_BLOCKED
+		staged_prediction_reason = blocked_reason
+		return false
+
+	_deep_requests_completed += 1
+	if not bool(current_cloned_prediction.get("valid", false)):
+		_current_deep_request_snapshot = {}
+		staged_prediction_state = STAGED_STATE_BLOCKED
+		staged_prediction_reason = str(
+			cloned_prediction_availability.get("blocker_reason", "deep_prediction_blocked")
+		)
+		if trajectory_profiler != null:
+			trajectory_profiler.note_deep_completion(
+				compute_usec,
+				false,
+				cache_hit,
+				"",
+				cache_attempted
+			)
+		if benchmark_session != null:
+			benchmark_session.note_deep_completion(
+				compute_usec,
+				false,
+				cache_hit,
+				"",
+				cache_attempted
+			)
+		return false
+
+	current_cloned_prediction["deep_request_id"] = request_id
+	current_cloned_prediction["deep_request_snapshot"] = _current_deep_request_snapshot.duplicate(true)
+	if cache_hit:
+		current_cloned_prediction["rebuild_reason"] = "cache_hit_deep_prediction"
+		_deep_reused_results += 1
+	_accepted_deep_cache_hit = cache_hit
+	_last_accepted_deep_request_id = request_id
+	_last_stale_deep_request_id = 0
+	_accepted_deep_request_snapshot = _current_deep_request_snapshot.duplicate(true)
+	_current_deep_request_snapshot = {}
+	_stale_cloned_prediction = {}
+	_deep_requests_accepted += 1
+	if cache_hit:
+		_cached_results_accepted += 1
+	if forced:
+		pass
+	elif rebuild_reason in ["settled_deep_prediction", "table_revision_deep_prediction", "config_deep_prediction"]:
+		_settled_deep_rebuilds += 1
+	else:
+		_active_drag_deep_rebuilds += 1
+	staged_prediction_state = STAGED_STATE_DEEP_READY
+	staged_prediction_reason = (
+		"cache_hit_deep_prediction" if cache_hit else "deep_prediction_ready"
+	)
+	_prepare_deep_reveal()
+	if trajectory_profiler != null:
+		trajectory_profiler.note_deep_completion(
+			compute_usec,
+			true,
+			cache_hit,
+			"",
+			cache_attempted
+		)
+	if benchmark_session != null:
+		benchmark_session.note_deep_completion(
+			compute_usec,
+			true,
+			cache_hit,
+			"",
+			cache_attempted
+		)
+	_queue_aim_redraw()
+	return true
+
+
+func _make_deep_request_snapshot(request_id: int) -> Dictionary:
+	return {
+		"request_id": request_id,
+		"aim_direction": _latest_staged_launch_velocity.normalized(),
+		"launch_velocity": _latest_staged_launch_velocity,
+		"cue_origin": _latest_staged_origin,
+		"table_prediction_revision": _observed_table_prediction_revision,
+		"configuration_revision": _configuration_revision,
+		"effect_snapshot_revision": _effect_snapshot_revision,
+		"effect_snapshot_hash": _latest_staged_effect_hash,
+		"boundary_geometry_revision": (
+			table.boundary_system.get_prediction_geometry_revision()
+			if table != null and table.boundary_system != null
+			else -1
+		),
+		"pocket_geometry_revision": (
+			table.pocket_system.get_prediction_geometry_revision()
+			if table != null and table.pocket_system != null
+			else -1
+		),
+		"result_detail_mode": _get_requested_deep_result_mode(),
+	}
+
+
+func _deep_request_snapshot_matches_current(snapshot: Dictionary) -> bool:
+	if snapshot.is_empty():
+		return false
+	if int(snapshot.get("table_prediction_revision", -1)) != _observed_table_prediction_revision:
+		return false
+	if int(snapshot.get("configuration_revision", -1)) != _configuration_revision:
+		return false
+	if int(snapshot.get("effect_snapshot_revision", -1)) != _effect_snapshot_revision:
+		return false
+	if int(snapshot.get("effect_snapshot_hash", 0)) != _latest_staged_effect_hash:
+		return false
+	var snapshot_origin: Vector2 = snapshot.get("cue_origin", Vector2.ZERO)
+	if snapshot_origin.distance_to(_latest_staged_origin) > 0.001:
+		return false
+	var snapshot_velocity: Vector2 = snapshot.get("launch_velocity", Vector2.ZERO)
+	if snapshot_velocity.distance_to(_latest_staged_launch_velocity) > 0.001:
+		return false
+	if table != null and table.boundary_system != null:
+		if int(snapshot.get("boundary_geometry_revision", -1)) != int(
+			table.boundary_system.get_prediction_geometry_revision()
+		):
+			return false
+	if table != null and table.pocket_system != null:
+		if int(snapshot.get("pocket_geometry_revision", -1)) != int(
+			table.pocket_system.get_prediction_geometry_revision()
+		):
+			return false
+	return str(snapshot.get("result_detail_mode", "")) == _get_requested_deep_result_mode()
+
+
+func _get_requested_deep_result_mode() -> String:
+	if debug_aim_line_enabled:
+		return str(cloned_trajectory_configuration.get(
+			"result_detail_mode",
+			AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+		))
+	return str(AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_player_long_sight_configuration(
+		_get_active_aim_chain_depth(),
+		int(table.PHYSICS_SUBSTEPS) if table != null else 4
+	).get("result_detail_mode", AimTrajectoryPredictor.RESULT_MODE_PLAYER_MINIMAL))
+
+
+func _is_deep_prediction_requested() -> bool:
+	var cloned_enabled: bool = bool(cloned_trajectory_configuration.get("enabled", true))
+	return cloned_enabled and (
+		debug_aim_line_enabled
+		or (
+			_get_active_aim_chain_depth() > 0
+			and bool(cloned_trajectory_configuration.get("use_for_long_sight", true))
+		)
+	)
+
+
+func _is_staged_deep_prediction_enabled() -> bool:
+	return bool(staged_prediction_configuration.get(
+		AIM_STAGING_CONFIGURATION_SCRIPT.USE_STAGED_DEEP_PREDICTION,
+		true
+	))
+
+
+func _get_deep_settle_delay_ms() -> int:
+	return int(staged_prediction_configuration.get(
+		AIM_STAGING_CONFIGURATION_SCRIPT.DEEP_AIM_SETTLE_DELAY_MS,
+		75
+	))
+
+
+func _invalidate_staged_deep_prediction(reason: String, restart_wait: bool) -> void:
+	var had_deep_result: bool = bool(current_cloned_prediction.get("valid", false))
+	var had_pending_before_run: bool = _profiled_pending_deep_request
+	var keep_stale_visible: bool = had_deep_result and bool(
+		staged_prediction_configuration.get(
+			AIM_STAGING_CONFIGURATION_SCRIPT.KEEP_STALE_DEEP_AIM_FAINTLY_VISIBLE,
+			false
+		)
+	)
+	var shown_result: bool = had_deep_result and _deep_reveal_visible_noted
+	var hidden_by_new_aim: bool = (
+		shown_result
+		and not keep_stale_visible
+		and reason in [
+			"invalidated_aim_changed",
+			"invalidated_power_changed",
+			"invalidated_effect_revision",
+		]
+	)
+	if had_pending_before_run:
+		_profiled_pending_deep_request = false
+		_deep_requests_invalidated_before_run += 1
+		if trajectory_profiler != null:
+			trajectory_profiler.note_deep_request_invalidated_before_run(reason)
+		if benchmark_session != null:
+			benchmark_session.note_deep_request_invalidated_before_run(reason)
+	if had_deep_result:
+		_last_stale_deep_request_id = _last_accepted_deep_request_id
+		if shown_result:
+			_shown_results_later_invalidated += 1
+			if hidden_by_new_aim:
+				_shown_results_hidden_by_new_aim += 1
+			if trajectory_profiler != null:
+				trajectory_profiler.note_shown_result_later_invalidated(
+					reason,
+					hidden_by_new_aim
+				)
+			if benchmark_session != null:
+				benchmark_session.note_shown_result_later_invalidated(
+					reason,
+					hidden_by_new_aim
+				)
+	_interrupt_active_deep_reveal(_get_reveal_interruption_reason(reason))
+	if keep_stale_visible:
+		_stale_cloned_prediction = current_cloned_prediction
+	else:
+		_stale_cloned_prediction = {}
+	_request_generation += 1
+	_current_deep_request_id = 0
+	_current_deep_request_snapshot = {}
+	_accepted_deep_request_snapshot = {}
+	_accepted_deep_cache_hit = false
+	current_cloned_prediction = {}
+	_deep_reveal_progress = 0.0
+	_deep_reveal_active = false
+	_deep_reveal_preparation_pending_us = 0
+	_deep_reveal_visible_noted = false
+	_deep_reveal_completed_noted = false
+	if restart_wait and preview_active and _has_staged_input and _is_deep_prediction_requested():
+		_last_meaningful_input_usec = Time.get_ticks_usec()
+		if had_deep_result:
+			staged_prediction_state = STAGED_STATE_DEEP_STALE
+			staged_prediction_reason = "deep_result_stale: %s" % reason
+		else:
+			staged_prediction_state = STAGED_STATE_WAITING_FOR_SETTLE
+			staged_prediction_reason = "waiting_for_aim_to_settle"
+		_begin_profiled_pending_deep_request()
+	else:
+		staged_prediction_state = STAGED_STATE_IMMEDIATE_ONLY if preview_active else STAGED_STATE_IDLE
+		staged_prediction_reason = reason
+
+
+func _reset_staged_prediction_runtime(reason: String) -> void:
+	if _profiled_pending_deep_request:
+		_profiled_pending_deep_request = false
+		_deep_requests_invalidated_before_run += 1
+		if trajectory_profiler != null:
+			trajectory_profiler.note_deep_request_invalidated_before_run(
+				"invalidated_preview_inactive"
+			)
+		if benchmark_session != null:
+			benchmark_session.note_deep_request_invalidated_before_run(
+				"invalidated_preview_inactive"
+			)
+	_interrupt_active_deep_reveal("reveal_interrupted_by_preview_inactive")
+	_request_generation += 1
+	_current_deep_request_id = 0
+	_current_deep_request_snapshot = {}
+	_accepted_deep_request_snapshot = {}
+	_accepted_deep_cache_hit = false
+	_has_staged_input = false
+	_deep_reveal_progress = 0.0
+	_deep_reveal_active = false
+	_deep_reveal_visible_noted = false
+	_deep_reveal_completed_noted = false
+	_deep_reveal_preparation_pending_us = 0
+	_deep_reveal_max_depth = 0
+	_deep_reveal_visible_branches = 0
+	_last_stale_deep_request_id = 0
+	_deep_request_suppressed_until_input_change = false
+	_profiled_pending_deep_request = false
+	staged_prediction_state = STAGED_STATE_IDLE
+	staged_prediction_reason = reason
+
+
+func _get_reveal_interruption_reason(invalidation_reason: String) -> String:
+	if invalidation_reason in [
+		"invalidated_aim_changed",
+		"invalidated_power_changed",
+		"invalidated_effect_revision",
+	]:
+		return "reveal_interrupted_by_aim"
+	if invalidation_reason == "invalidated_table_revision":
+		return "reveal_interrupted_by_table_change"
+	if invalidation_reason == "invalidated_config_revision":
+		return "reveal_interrupted_by_config_revision"
+	return "reveal_interrupted_by_other"
+
+
+func _interrupt_active_deep_reveal(reason: String) -> void:
+	if not _deep_reveal_active or _deep_reveal_completed_noted:
+		return
+	_deep_reveal_active = false
+	_reveal_interrupted_count += 1
+	if trajectory_profiler != null:
+		trajectory_profiler.note_reveal_interrupted(reason)
+	if benchmark_session != null:
+		benchmark_session.note_reveal_interrupted(reason)
+
+
+func _prepare_deep_reveal() -> void:
+	var preparation_start_usec: int = Time.get_ticks_usec()
+	_deep_reveal_max_depth = 0
+	_deep_reveal_visible_branches = 0
+	for ball_value in current_cloned_prediction.get("balls", []):
+		if not ball_value is Dictionary:
+			continue
+		var ball_result: Dictionary = ball_value
+		_deep_reveal_max_depth = maxi(
+			_deep_reveal_max_depth,
+			int(ball_result.get("generation_depth", 0))
+		)
+	_deep_reveal_preparation_us = maxi(Time.get_ticks_usec() - preparation_start_usec, 0)
+	_deep_reveal_preparation_pending_us = _deep_reveal_preparation_us
+	_deep_reveal_start_usec = Time.get_ticks_usec()
+	_deep_reveal_active = true
+	_deep_reveal_visible_noted = false
+	_deep_reveal_completed_noted = false
+	var progressive: bool = bool(staged_prediction_configuration.get(
+		AIM_STAGING_CONFIGURATION_SCRIPT.PROGRESSIVE_DEEP_AIM_REVEAL,
+		true
+	))
+	var reveal_duration_ms: int = int(staged_prediction_configuration.get(
+		AIM_STAGING_CONFIGURATION_SCRIPT.DEEP_AIM_REVEAL_DURATION_MS,
+		125
+	))
+	_deep_reveal_progress = 0.0 if progressive and reveal_duration_ms > 0 else 1.0
+	if _deep_reveal_progress < 1.0:
+		_deep_ready_but_hidden_count += 1
+
+
+func _update_deep_reveal() -> void:
+	if staged_prediction_state != STAGED_STATE_DEEP_READY:
+		return
+	if _deep_reveal_completed_noted:
+		return
+	var reveal_duration_ms: int = int(staged_prediction_configuration.get(
+		AIM_STAGING_CONFIGURATION_SCRIPT.DEEP_AIM_REVEAL_DURATION_MS,
+		125
+	))
+	if reveal_duration_ms <= 0 or not bool(staged_prediction_configuration.get(
+		AIM_STAGING_CONFIGURATION_SCRIPT.PROGRESSIVE_DEEP_AIM_REVEAL,
+		true
+	)):
+		_deep_reveal_progress = 1.0
+	else:
+		var elapsed_usec: int = maxi(Time.get_ticks_usec() - _deep_reveal_start_usec, 0)
+		_deep_reveal_progress = clampf(
+			float(elapsed_usec) / float(reveal_duration_ms * 1000),
+			0.0,
+			1.0
+		)
+	if _deep_reveal_progress > 0.0:
+		_note_deep_result_visible()
+	else:
+		_deep_ready_but_hidden_count += 1
+	if _deep_reveal_progress >= 1.0:
+		_note_deep_reveal_completed()
+	_queue_aim_redraw()
+
+
+func _note_deep_result_visible() -> void:
+	if _deep_reveal_visible_noted:
+		return
+	_deep_reveal_visible_noted = true
+	_accepted_results_shown += 1
+	if _accepted_deep_cache_hit:
+		_shown_results_reused_from_cache += 1
+	var visible_latency_usec: int = maxi(
+		Time.get_ticks_usec() - _last_meaningful_input_usec,
+		0
+	)
+	_deep_first_visible_latency_total_usec += visible_latency_usec
+	_deep_first_visible_latency_samples += 1
+	if trajectory_profiler != null:
+		trajectory_profiler.note_deep_visible(visible_latency_usec, _accepted_deep_cache_hit)
+	if benchmark_session != null:
+		benchmark_session.note_deep_visible(visible_latency_usec, _accepted_deep_cache_hit)
+
+
+func _note_deep_reveal_completed() -> void:
+	if _deep_reveal_completed_noted:
+		return
+	_deep_reveal_completed_noted = true
+	_deep_reveal_active = false
+	var now_usec: int = Time.get_ticks_usec()
+	var fully_visible_latency_usec: int = maxi(now_usec - _last_meaningful_input_usec, 0)
+	var actual_reveal_duration_usec: int = maxi(now_usec - _deep_reveal_start_usec, 0)
+	_reveal_completed_count += 1
+	_reveal_completed_before_next_aim_count += 1
+	if trajectory_profiler != null:
+		trajectory_profiler.note_reveal_completed(
+			fully_visible_latency_usec,
+			actual_reveal_duration_usec
+		)
+	if benchmark_session != null:
+		benchmark_session.note_reveal_completed(
+			fully_visible_latency_usec,
+			actual_reveal_duration_usec
+		)
+
+
+func _get_deep_reveal_alpha(generation_depth: int, is_cue: bool) -> float:
+	if _deep_reveal_progress >= 1.0:
+		return 1.0
+	var reveal_start: float = 0.0
+	if not is_cue:
+		if generation_depth <= 1:
+			reveal_start = 0.22
+		else:
+			var depth_ratio: float = float(generation_depth - 2) / float(
+				maxi(_deep_reveal_max_depth - 1, 1)
+			)
+			reveal_start = lerpf(0.46, 0.82, clampf(depth_ratio, 0.0, 1.0))
+	var reveal_end: float = minf(reveal_start + 0.28, 1.0)
+	return smoothstep(reveal_start, reveal_end, _deep_reveal_progress)
+
+
+func _get_deep_prediction_commit_status(origin: Vector2, launch_velocity: Vector2) -> String:
+	if (
+		staged_prediction_state == STAGED_STATE_DEEP_READY
+		and bool(current_cloned_prediction.get("valid", false))
+		and _deep_request_snapshot_matches_commit(
+			_accepted_deep_request_snapshot,
+			origin,
+			launch_velocity
+		)
+	):
+		return "deep_prediction_ready"
+	if (
+		_last_stale_deep_request_id > 0
+		or not _stale_cloned_prediction.is_empty()
+		or not _accepted_deep_request_snapshot.is_empty()
+	):
+		return "stale_prediction_at_commit"
+	if current_prediction != null:
+		return "immediate_only_at_commit"
+	return "deep_prediction_not_ready"
+
+
+func _deep_request_snapshot_matches_commit(
+	snapshot: Dictionary,
+	origin: Vector2,
+	launch_velocity: Vector2
+) -> bool:
+	if not _deep_request_snapshot_matches_current(snapshot):
+		return false
+	var snapshot_origin: Vector2 = snapshot.get("cue_origin", Vector2.ZERO)
+	var snapshot_velocity: Vector2 = snapshot.get("launch_velocity", Vector2.ZERO)
+	return (
+		snapshot_origin.distance_to(origin) <= 0.001
+		and snapshot_velocity.distance_to(launch_velocity) <= 0.001
+	)
 
 
 func _simulate_cloned_trajectory(
@@ -938,7 +1825,7 @@ func _simulate_cloned_trajectory(
 	rebuild_reason: String = "unknown"
 ) -> void:
 	if trajectory_predictor == null or table == null:
-		current_cloned_prediction.clear()
+		current_cloned_prediction = {}
 		return
 	var configuration: Dictionary = cloned_trajectory_configuration.duplicate(true)
 	if not use_debug_limits:
@@ -1465,8 +2352,18 @@ func _classify_cloned_rebuild(
 	launch_velocity: Vector2,
 	rebuild_reason: String
 ) -> String:
-	if rebuild_reason == "shot_commit" or rebuild_reason.contains("forced"):
+	if rebuild_reason == "forced_deep_prediction" or rebuild_reason.contains("forced"):
 		return "forced"
+	if rebuild_reason == "config_deep_prediction":
+		return "forced_config"
+	if rebuild_reason in [
+		"settled_deep_prediction",
+		"table_revision_deep_prediction",
+		"cache_hit_deep_prediction",
+	]:
+		return "settled"
+	if rebuild_reason.begins_with("immediate_preview_"):
+		return "active_drag"
 	if _cloned_configuration_changed_since_rebuild:
 		return "forced_config"
 	var input_changed: bool = (
@@ -1525,6 +2422,7 @@ func _make_cloned_benchmark_setup_snapshot(
 		"simulation_frame_rate": int(configuration.get("simulation_frame_rate", 0)),
 		"simulation_substeps": int(configuration.get("simulation_substeps", 0)),
 		"trace_spacing": trace_spacing,
+		"staged_prediction": staged_prediction_configuration.duplicate(true),
 	}
 
 
@@ -1595,7 +2493,10 @@ func get_prediction_time_ms() -> float:
 func _make_debug_shot_overlay(
 	prediction: AimPrediction,
 	launch_position: Vector2,
-	launch_velocity: Vector2
+	launch_velocity: Vector2,
+	deep_result: Dictionary = {},
+	deep_commit_status: String = "deep_prediction_not_ready",
+	deep_request_snapshot: Dictionary = {}
 ) -> DebugAimShotOverlay:
 	var overlay: DebugAimShotOverlay = DebugAimShotOverlay.new()
 	overlay.predicted_launch_position = launch_position
@@ -1605,7 +2506,9 @@ func _make_debug_shot_overlay(
 	overlay.first_hit_candidate_log = _copy_debug_first_hit_candidate_log()
 	overlay.first_hit_selected_ball_id = _debug_first_hit_selected_ball_id
 	overlay.first_hit_selected_ball_number = _debug_first_hit_selected_ball_number
-	overlay.cloned_prediction_result = current_cloned_prediction.duplicate(true)
+	overlay.cloned_prediction_result = deep_result.duplicate(true)
+	overlay.deep_prediction_commit_status = deep_commit_status
+	overlay.deep_request_snapshot = deep_request_snapshot.duplicate(true)
 	if prediction == null:
 		return overlay
 
@@ -1826,6 +2729,11 @@ func _get_debug_aim_compare_snapshot() -> Dictionary:
 	var contact_order_snapshot: Dictionary = _get_debug_contact_order_snapshot(overlay, contact_snapshot)
 	return {
 		"source": active_source,
+		"deep_prediction_commit_status": (
+			overlay.deep_prediction_commit_status
+			if overlay != null
+			else "deep_prediction_not_ready"
+		),
 		"debug_aim_line_enabled": debug_aim_line_enabled,
 		"persisted_overlay": debug_persisted_shot != null,
 		"recording_actual_trace": debug_actual_trace_recording,
@@ -1847,10 +2755,26 @@ func _get_active_cloned_prediction_result() -> Dictionary:
 
 
 func _get_cloned_event_comparison_snapshot() -> Dictionary:
+	if (
+		(not preview_active or current_cloned_prediction.is_empty())
+		and debug_persisted_shot != null
+		and debug_persisted_shot.deep_prediction_commit_status != "deep_prediction_ready"
+	):
+		return {
+			"enabled": false,
+			"matched_event_count": 0,
+			"predicted_event_count": 0,
+			"actual_event_count": debug_persisted_shot.actual_events.size(),
+			"first_divergent_event_index": -1,
+			"divergence_reason": debug_persisted_shot.deep_prediction_commit_status,
+			"entries": [],
+			"predicted_events": [],
+			"actual_events": debug_persisted_shot.actual_events.duplicate(true),
+		}
 	var prediction_result: Dictionary = _get_active_cloned_prediction_result()
 	var predicted_events: Array = prediction_result.get("events", [])
 	var actual_events: Array = []
-	if debug_persisted_shot != null:
+	if not preview_active and debug_persisted_shot != null:
 		actual_events = debug_persisted_shot.actual_events
 	var result_configuration: Dictionary = prediction_result.get(
 		"configuration",
@@ -1885,7 +2809,11 @@ func _get_cloned_event_comparison_snapshot() -> Dictionary:
 			first_divergent_index = event_index
 			first_divergence_reason = str(comparison.get("result", "event_mismatch"))
 
-	var actual_chain_complete: bool = debug_persisted_shot != null and not debug_actual_trace_recording
+	var actual_chain_complete: bool = (
+		not preview_active
+		and debug_persisted_shot != null
+		and not debug_actual_trace_recording
+	)
 	if first_divergent_index < 0 and actual_chain_complete and predicted_events.size() != actual_events.size():
 		first_divergent_index = shared_count
 		if predicted_events.size() < actual_events.size():
@@ -1949,7 +2877,18 @@ func _compare_cloned_event_pair(predicted: Dictionary, actual: Dictionary, event
 
 func _get_active_debug_compare_overlay() -> DebugAimShotOverlay:
 	if debug_aim_line_enabled and preview_active and current_prediction != null:
-		return _make_debug_shot_overlay(current_prediction, preview_origin, preview_initial_velocity)
+		var commit_status: String = _get_deep_prediction_commit_status(
+			preview_origin,
+			preview_initial_velocity
+		)
+		return _make_debug_shot_overlay(
+			current_prediction,
+			preview_origin,
+			preview_initial_velocity,
+			current_cloned_prediction if commit_status == "deep_prediction_ready" else {},
+			commit_status,
+			_accepted_deep_request_snapshot if commit_status == "deep_prediction_ready" else {}
+		)
 	return debug_persisted_shot
 
 
@@ -2251,9 +3190,112 @@ func _get_cloned_profiler_snapshot() -> Dictionary:
 	)
 	var profiler_snapshot: Dictionary = trajectory_profiler.get_snapshot(cache_snapshot)
 	profiler_snapshot["aim_preview_draw_cpu_us"] = maxi(int(round(draw_ms_last_draw * 1000.0)), 0)
+	profiler_snapshot["staging_state"] = _get_staged_prediction_snapshot()
 	profiler_snapshot["benchmark"] = get_cloned_trajectory_benchmark_snapshot()
 	profiler_snapshot["invalidation"] = _get_cloned_invalidation_snapshot()
 	return profiler_snapshot
+
+
+func _get_staged_prediction_snapshot() -> Dictionary:
+	var now_usec: int = Time.get_ticks_usec()
+	var settle_delay_ms: int = _get_deep_settle_delay_ms()
+	var settle_remaining_ms: float = 0.0
+	if staged_prediction_state == STAGED_STATE_WAITING_FOR_SETTLE:
+		settle_remaining_ms = maxf(
+			float(settle_delay_ms) - float(now_usec - _last_meaningful_input_usec) / 1000.0,
+			0.0
+		)
+	return {
+		"enabled": _is_staged_deep_prediction_enabled(),
+		"show_status": bool(staged_prediction_configuration.get(
+			AIM_STAGING_CONFIGURATION_SCRIPT.SHOW_STAGING_STATUS,
+			true
+		)),
+		"state": staged_prediction_state,
+		"reason": staged_prediction_reason,
+		"settle_delay_ms": settle_delay_ms,
+		"direction_tolerance_degrees": STAGED_DIRECTION_TOLERANCE_DEGREES,
+		"power_relative_tolerance": STAGED_POWER_RELATIVE_TOLERANCE,
+		"origin_tolerance_px": STAGED_ORIGIN_TOLERANCE_PX,
+		"settle_remaining_ms": settle_remaining_ms,
+		"reveal_duration_ms": int(staged_prediction_configuration.get(
+			AIM_STAGING_CONFIGURATION_SCRIPT.DEEP_AIM_REVEAL_DURATION_MS,
+			125
+		)),
+		"progressive_reveal": bool(staged_prediction_configuration.get(
+			AIM_STAGING_CONFIGURATION_SCRIPT.PROGRESSIVE_DEEP_AIM_REVEAL,
+			true
+		)),
+		"reveal_progress": _deep_reveal_progress,
+		"visible_depth": int(round(_deep_reveal_progress * float(_deep_reveal_max_depth))),
+		"maximum_depth": _deep_reveal_max_depth,
+		"visible_branches": _deep_reveal_visible_branches,
+		"reveal_preparation_us": _deep_reveal_preparation_us,
+		"current_request_id": _current_deep_request_id,
+		"last_accepted_request_id": _last_accepted_deep_request_id,
+		"last_stale_request_id": _last_stale_deep_request_id,
+		"pending_request_count": (
+			1
+			if (
+				_profiled_pending_deep_request
+				or staged_prediction_state in [
+					STAGED_STATE_DEEP_REQUESTED,
+					STAGED_STATE_DEEP_RUNNING,
+				]
+			)
+			else 0
+		),
+		"deep_requests_created": _deep_requests_created,
+		"deep_requests_forced": _deep_force_requests,
+		"deep_requests_canceled_before_run": _deep_requests_canceled_before_run,
+		"deep_requests_invalidated_before_run": _deep_requests_invalidated_before_run,
+		"deep_requests_blocked_before_run": _deep_requests_blocked_before_run,
+		"deep_results_completed": _deep_requests_completed,
+		"deep_results_accepted": _deep_requests_accepted,
+		"deep_results_discarded_on_arrival": _deep_results_discarded_on_arrival,
+		"deep_results_rejected_revision_mismatch": _deep_results_rejected_revision_mismatch,
+		"deep_results_rejected_request_id_mismatch": _deep_results_rejected_request_id_mismatch,
+		"accepted_results_shown": _accepted_results_shown,
+		"shown_results_later_invalidated": _shown_results_later_invalidated,
+		"shown_results_hidden_by_new_aim": _shown_results_hidden_by_new_aim,
+		"shown_results_reused_from_cache": _shown_results_reused_from_cache,
+		"reveal_completed_count": _reveal_completed_count,
+		"reveal_interrupted_count": _reveal_interrupted_count,
+		"reveal_completed_before_next_aim_count": _reveal_completed_before_next_aim_count,
+		"force_requests": _deep_force_requests,
+		"immediate_updates": _immediate_updates,
+		"active_drag_deep_rebuilds": _active_drag_deep_rebuilds,
+		"settled_deep_rebuilds": _settled_deep_rebuilds,
+		"average_compute_start_latency_ms": (
+			float(_deep_compute_start_latency_total_usec)
+			/ float(_deep_compute_start_latency_samples)
+			/ 1000.0
+			if _deep_compute_start_latency_samples > 0
+			else 0.0
+		),
+		"average_deep_computation_ms": (
+			float(_deep_compute_total_usec) / float(_deep_compute_samples) / 1000.0
+			if _deep_compute_samples > 0
+			else 0.0
+		),
+		"average_first_visible_latency_ms": (
+			float(_deep_first_visible_latency_total_usec)
+			/ float(_deep_first_visible_latency_samples)
+			/ 1000.0
+			if _deep_first_visible_latency_samples > 0
+			else 0.0
+		),
+		"deep_cache_hits": _deep_cache_hits,
+		"deep_cache_misses": _deep_cache_misses,
+		"cached_results_accepted": _cached_results_accepted,
+		"cached_results_rejected": _cached_results_rejected,
+		"reused_results": _deep_reused_results,
+		"accepted_result_cache_hit": _accepted_deep_cache_hit,
+		"ready_but_hidden_count": _deep_ready_but_hidden_count,
+		"stale_result_available": not _stale_cloned_prediction.is_empty(),
+		"request_snapshot": _current_deep_request_snapshot.duplicate(true),
+		"accepted_request_snapshot": _accepted_deep_request_snapshot.duplicate(true),
+	}
 
 
 func _get_cloned_invalidation_snapshot() -> Dictionary:
@@ -2297,6 +3339,7 @@ func get_debug_snapshot() -> Dictionary:
 		"cloned_invalidation": _get_cloned_invalidation_snapshot(),
 		"cloned_event_comparison": _get_cloned_event_comparison_snapshot(),
 		"cloned_profiler": _get_cloned_profiler_snapshot(),
+		"staged_prediction": _get_staged_prediction_snapshot(),
 		"prediction_ms": prediction_ms,
 		"prediction_frame_ms": prediction_frame_ms,
 		"prediction_recalculations": prediction_recalculations_this_frame,
@@ -2417,6 +3460,8 @@ func _draw() -> void:
 	_draw_ghost_balls_in_progress = 0
 	_draw_labels_in_progress = 0
 	_draw_event_markers_in_progress = 0
+	_deep_reveal_visible_branches = 0
+	_deep_draw_cpu_us_in_progress = 0
 	_draw_bank_debug_markers()
 	_draw_aim_path_comparison_debug()
 	if not preview_active:
@@ -2460,7 +3505,12 @@ func _draw_prediction(prediction: AimPrediction) -> void:
 
 	_draw_target_prediction_line(prediction)
 	if _is_cloned_long_sight_active():
+		var deep_draw_start_usec: int = Time.get_ticks_usec()
 		_draw_cloned_long_sight_paths()
+		_deep_draw_cpu_us_in_progress += maxi(
+			Time.get_ticks_usec() - deep_draw_start_usec,
+			0
+		)
 	else:
 		_draw_long_sight_chain()
 
@@ -2474,9 +3524,6 @@ func _draw_basic_guide_line() -> void:
 
 
 func _draw_debug_aim_line(prediction: AimPrediction) -> void:
-	if bool(current_cloned_prediction.get("valid", false)):
-		_draw_cloned_debug_prediction(current_cloned_prediction)
-		return
 	if prediction == null or prediction.path_points.size() < 2:
 		_draw_debug_basic_guide_line()
 		_draw_cloned_unavailable_message()
@@ -2491,7 +3538,35 @@ func _draw_debug_aim_line(prediction: AimPrediction) -> void:
 		_get_debug_child_marker_position(prediction),
 		_get_debug_prediction_child_radius(prediction)
 	)
-	_draw_cloned_unavailable_message()
+	if not _stale_cloned_prediction.is_empty() and bool(staged_prediction_configuration.get(
+		AIM_STAGING_CONFIGURATION_SCRIPT.KEEP_STALE_DEEP_AIM_FAINTLY_VISIBLE,
+		false
+	)):
+		var stale_draw_start_usec: int = Time.get_ticks_usec()
+		_draw_cloned_debug_prediction(_stale_cloned_prediction, STAGED_STALE_ALPHA, -1.0, false)
+		_draw_cloned_text(
+			preview_origin + Vector2(20.0, -24.0),
+			"STALE DEEP",
+			Color(0.72, 0.76, 0.82, 0.45)
+		)
+		_deep_draw_cpu_us_in_progress += maxi(
+			Time.get_ticks_usec() - stale_draw_start_usec,
+			0
+		)
+	if bool(current_cloned_prediction.get("valid", false)):
+		var deep_draw_start_usec: int = Time.get_ticks_usec()
+		_draw_cloned_debug_prediction(
+			current_cloned_prediction,
+			1.0,
+			_deep_reveal_progress,
+			true
+		)
+		_deep_draw_cpu_us_in_progress += maxi(
+			Time.get_ticks_usec() - deep_draw_start_usec,
+			0
+		)
+	else:
+		_draw_cloned_unavailable_message()
 
 
 func _draw_cloned_unavailable_message() -> void:
@@ -2558,10 +3633,16 @@ func _draw_debug_persisted_overlay() -> void:
 	_draw_debug_actual_trace(debug_persisted_shot)
 
 
-func _draw_cloned_debug_prediction(result: Dictionary) -> void:
+func _draw_cloned_debug_prediction(
+	result: Dictionary,
+	base_alpha: float = 1.0,
+	reveal_progress: float = -1.0,
+	draw_events: bool = true
+) -> void:
 	var configuration: Dictionary = result.get("configuration", {})
 	var draw_cue_continuation: bool = bool(configuration.get("draw_cue_continuation", true))
 	var draw_child_paths: bool = bool(configuration.get("draw_child_ball_paths", true))
+	_deep_reveal_visible_branches = 0
 	for ball_value in result.get("balls", []):
 		if not ball_value is Dictionary:
 			continue
@@ -2574,59 +3655,85 @@ func _draw_cloned_debug_prediction(result: Dictionary) -> void:
 		var points: Array[Vector2] = _to_vector2_points(ball_result.get("path_points", []))
 		if points.size() < 2:
 			continue
+		var path_alpha: float = base_alpha
+		if reveal_progress >= 0.0:
+			path_alpha *= _get_deep_reveal_alpha(
+				int(ball_result.get("generation_depth", 0)),
+				is_cue
+			)
+		if path_alpha <= 0.001:
+			continue
 		_draw_predicted_balls_in_progress += 1
 		_draw_visible_paths_in_progress += 1
+		_deep_reveal_visible_branches += 1
 		var color: Color = DEBUG_AIM_LINE_COLOR if is_cue else _get_cloned_ball_color(
 			int(ball_result.get("source_ball_id", -1))
 		)
+		color.a *= path_alpha
 		_draw_debug_polyline(points, color, DEBUG_AIM_LINE_WIDTH)
-		if bool(configuration.get("draw_ball_labels", true)):
+		if bool(configuration.get("draw_ball_labels", true)) and path_alpha >= 0.35:
 			_draw_cloned_text(points[points.size() - 1] + Vector2(6.0, -5.0), str(ball_result.get("source_ball_label", "Ball")), color)
 
-	for event_value in result.get("events", []):
-		if not event_value is Dictionary:
-			continue
-		var event: Dictionary = event_value
-		_draw_cloned_debug_event(event, configuration)
+	if draw_events:
+		var events: Array = result.get("events", [])
+		var visible_event_count: int = events.size()
+		if reveal_progress >= 0.0:
+			visible_event_count = clampi(
+				int(ceil(float(events.size()) * reveal_progress)),
+				0,
+				events.size()
+			)
+		for event_index in range(visible_event_count):
+			var event_value: Variant = events[event_index]
+			if not event_value is Dictionary:
+				continue
+			var event: Dictionary = event_value
+			_draw_cloned_debug_event(event, configuration, base_alpha)
 
 	if (
 		bool(result.get("truncated", false))
+		and (reveal_progress < 0.0 or reveal_progress >= 1.0)
 		and str(configuration.get("result_detail_mode", "full_debug"))
 		== AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
 	):
 		_draw_cloned_cap_marker(result)
 
 
-func _draw_cloned_debug_event(event: Dictionary, configuration: Dictionary) -> void:
+func _draw_cloned_debug_event(
+	event: Dictionary,
+	configuration: Dictionary,
+	alpha_multiplier: float = 1.0
+) -> void:
 	var drew_event_marker := false
 	var event_type: String = str(event.get("event_type", ""))
 	var position: Vector2 = event.get("contact_point", Vector2.ZERO)
 	var supported: bool = bool(event.get("supported", true))
 	var marker_color: Color = Color(1.0, 0.22, 0.68, 0.98) if not supported else DEBUG_AIM_MARKER_COLOR
+	marker_color.a *= alpha_multiplier
 	if bool(configuration.get("draw_ghost_balls", true)) and event_type == AimTrajectoryPredictor.EVENT_BALL_CONTACT:
 		drew_event_marker = true
 		_draw_debug_ghost_ball(
 			event.get("source_center", position),
 			float(event.get("source_radius", _get_debug_cue_ball_radius())),
-			_get_cloned_ball_color(int(event.get("source_ball_id", -1)))
+			_get_cloned_ball_color(int(event.get("source_ball_id", -1))) * Color(1.0, 1.0, 1.0, alpha_multiplier)
 		)
 		_draw_debug_ghost_ball(
 			event.get("target_center", position),
 			float(event.get("target_radius", _get_debug_cue_ball_radius())),
-			_get_cloned_ball_color(int(event.get("target_ball_id", -1)))
+			_get_cloned_ball_color(int(event.get("target_ball_id", -1))) * Color(1.0, 1.0, 1.0, alpha_multiplier)
 		)
 	elif bool(configuration.get("draw_ghost_balls", true)):
 		drew_event_marker = true
 		_draw_debug_ghost_ball(
 			event.get("source_center", position),
 			float(event.get("source_radius", _get_debug_cue_ball_radius())),
-			_get_cloned_ball_color(int(event.get("source_ball_id", -1)))
+			_get_cloned_ball_color(int(event.get("source_ball_id", -1))) * Color(1.0, 1.0, 1.0, alpha_multiplier)
 		)
 	if bool(configuration.get("draw_stop_pocket_markers", true)):
 		if event_type == AimTrajectoryPredictor.EVENT_POCKET:
 			drew_event_marker = true
 			_draw_calls_in_progress += 1
-			draw_circle(position, 5.0, Color(0.36, 1.0, 0.76, 0.82), false, 1.5)
+			draw_circle(position, 5.0, Color(0.36, 1.0, 0.76, 0.82 * alpha_multiplier), false, 1.5)
 		elif event_type == AimTrajectoryPredictor.EVENT_STOPPED:
 			drew_event_marker = true
 			_draw_calls_in_progress += 2
@@ -2971,9 +4078,18 @@ func _draw_cloned_long_sight_paths() -> void:
 			points = _slice_cloned_path_from_contact(points, first_cue_contact)
 		if points.size() < 2:
 			continue
+		var reveal_alpha: float = _get_deep_reveal_alpha(
+			generation_depth,
+			bool(ball_result.get("is_cue_ball", false))
+		)
+		if reveal_alpha <= 0.001:
+			continue
 		_draw_predicted_balls_in_progress += 1
 		_draw_visible_paths_in_progress += 1
-		var alpha_multiplier: float = maxf(0.24, 0.72 - float(generation_depth) * 0.09)
+		_deep_reveal_visible_branches += 1
+		var alpha_multiplier: float = (
+			maxf(0.24, 0.72 - float(generation_depth) * 0.09) * reveal_alpha
+		)
 		var segment_count: int = points.size() - 1
 		for segment_index in range(segment_count):
 			_draw_guidance_line_segment(
@@ -4384,6 +5500,28 @@ func _store_draw_stats(draw_start_usec: int) -> void:
 	draw_ms_last_draw = float(draw_cpu_us) / 1000.0
 	draw_segments_last_draw = _draw_segments_in_progress
 	draw_calls_last_draw = _draw_calls_in_progress
+	if staged_prediction_state == STAGED_STATE_DEEP_READY:
+		var visible_depth: int = int(round(
+			_deep_reveal_progress * float(_deep_reveal_max_depth)
+		))
+		var ready_hidden_sample: int = 0 if _deep_reveal_visible_noted else 1
+		if trajectory_profiler != null:
+			trajectory_profiler.record_reveal_sample(
+				_deep_reveal_preparation_pending_us,
+				_deep_draw_cpu_us_in_progress,
+				visible_depth,
+				_deep_reveal_visible_branches,
+				ready_hidden_sample
+			)
+		if benchmark_session != null:
+			benchmark_session.record_reveal_sample(
+				_deep_reveal_preparation_pending_us,
+				_deep_draw_cpu_us_in_progress,
+				visible_depth,
+				_deep_reveal_visible_branches,
+				ready_hidden_sample
+			)
+		_deep_reveal_preparation_pending_us = 0
 	if benchmark_session != null and benchmark_session.is_recording():
 		benchmark_session.record_draw_sample({
 			"cpu_us": draw_cpu_us,

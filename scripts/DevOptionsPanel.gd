@@ -17,7 +17,7 @@ const TAB_DEFINITIONS: Array[Dictionary] = [
 ]
 const SECTION_ORDER_BY_TAB := {
 	TAB_SESSION: ["Display & Session", "Session Utilities"],
-	TAB_AIM_PHYSICS: ["Aim Testing", "Player Aim Benchmark", "Live Collision Accuracy", "Cloned Predictor", "Simulation Timing & Work", "Event & Contact Limits", "Trace Limits", "Aim Drawing", "Aim Profiler"],
+	TAB_AIM_PHYSICS: ["Aim Testing", "Player Aim Benchmark", "Live Collision Accuracy", "Cloned Predictor", "Staged Deep Prediction", "Simulation Timing & Work", "Event & Contact Limits", "Trace Limits", "Aim Drawing", "Aim Profiler"],
 	TAB_BALLS_EVENTS: ["Table Events", "Cargo & Contraband", "Table Debris", "Anchor Testing / Visuals", "Treasure Testing / Visuals", "Powder Keg Presentation"],
 	TAB_RUN_SYSTEMS: ["Back Room", "Kraken Boons", "Reserve Stack Tests", "Sunken Spoils", "Oath Testing"],
 	TAB_PANELS_DIAGNOSTICS: ["Panel Workspace Actions", "Aim Panels", "Performance Panels", "System Panels", "Overlay Diagnostics"],
