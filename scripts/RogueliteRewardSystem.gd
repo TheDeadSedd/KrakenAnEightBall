@@ -155,6 +155,69 @@ func get_reward_snapshot() -> Dictionary:
 	}
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"chosen_reward_ids": chosen_reward_ids.duplicate(true),
+		"chosen_reward_lookup": chosen_reward_lookup.duplicate(true),
+		"chosen_reward_history": chosen_reward_history.duplicate(true),
+		"active_offer_ids": active_offer_ids.duplicate(true),
+		"active_offer_round": active_offer_round,
+		"max_hull_bonus": max_hull_bonus,
+		"future_shot_bonus": future_shot_bonus,
+		"future_object_ball_bonus": future_object_ball_bonus,
+		"future_quota_bonus": future_quota_bonus,
+		"object_sink_quota_bonus": object_sink_quota_bonus,
+		"bank_shot_quota_bonus": bank_shot_quota_bonus,
+		"opening_volley_quota_bonus": opening_volley_quota_bonus,
+		"opening_volley_used_rounds": opening_volley_used_rounds.duplicate(true),
+		"rng_state": int(rng.state),
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	chosen_reward_ids = _rewind_string_array(state, "chosen_reward_ids")
+	chosen_reward_lookup = _rewind_dictionary(state, "chosen_reward_lookup")
+	chosen_reward_history = _rewind_dictionary_array(state, "chosen_reward_history")
+	active_offer_ids = _rewind_string_array(state, "active_offer_ids")
+	active_offer_round = maxi(int(state.get("active_offer_round", 0)), 0)
+	max_hull_bonus = maxi(int(state.get("max_hull_bonus", 0)), 0)
+	future_shot_bonus = maxi(int(state.get("future_shot_bonus", 0)), 0)
+	future_object_ball_bonus = maxi(int(state.get("future_object_ball_bonus", 0)), 0)
+	future_quota_bonus = maxi(int(state.get("future_quota_bonus", 0)), 0)
+	object_sink_quota_bonus = maxi(int(state.get("object_sink_quota_bonus", 0)), 0)
+	bank_shot_quota_bonus = maxi(int(state.get("bank_shot_quota_bonus", 0)), 0)
+	opening_volley_quota_bonus = maxi(int(state.get("opening_volley_quota_bonus", 0)), 0)
+	opening_volley_used_rounds = _rewind_dictionary(state, "opening_volley_used_rounds")
+	rng.state = int(state.get("rng_state", rng.state))
+	_emit_changed()
+
+
+func _rewind_string_array(state: Dictionary, key: String) -> Array[String]:
+	var result: Array[String] = []
+	var value: Variant = state.get(key, [])
+	if value is Array:
+		for entry in value:
+			result.append(str(entry))
+	return result
+
+
+func _rewind_dictionary_array(state: Dictionary, key: String) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var value: Variant = state.get(key, [])
+	if value is Array:
+		for entry in value:
+			if entry is Dictionary:
+				result.append((entry as Dictionary).duplicate(true))
+	return result
+
+
+func _rewind_dictionary(state: Dictionary, key: String) -> Dictionary:
+	var value: Variant = state.get(key, {})
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	return {}
+
+
 func get_effects_snapshot() -> Dictionary:
 	return {
 		"max_hull_bonus": max_hull_bonus,

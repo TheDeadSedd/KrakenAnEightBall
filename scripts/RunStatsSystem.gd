@@ -140,6 +140,77 @@ func get_run_stats_snapshot() -> Dictionary:
 	}
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"doubloons_earned": doubloons_earned,
+		"doubloons_spent": doubloons_spent,
+		"doubloons_lost_to_penalties": doubloons_lost_to_penalties,
+		"shots_taken": shots_taken,
+		"balls_sunk": balls_sunk,
+		"highest_pocket_streak": highest_pocket_streak,
+		"interventions_triggered": interventions_triggered,
+		"quartermaster_refreshes_used": quartermaster_refreshes_used,
+		"quartermaster_refresh_doubloons_spent": quartermaster_refresh_doubloons_spent,
+		"back_room_deals_made": back_room_deals_made,
+		"back_room_deal_doubloons_spent": back_room_deal_doubloons_spent,
+		"kraken_request_rerolls_used": kraken_request_rerolls_used,
+		"passage_added_by_request_rerolls": passage_added_by_request_rerolls,
+		"kraken_requests_completed": kraken_requests_completed,
+		"legendary_events_awarded": legendary_events_awarded,
+		"contraband_found": contraband_found,
+		"treasure_claimed": treasure_claimed,
+		"current_ball_count": current_ball_count,
+		"run_time_seconds": run_time_seconds,
+		"emit_timer": emit_timer,
+		"intervention_purchase_order": intervention_purchase_order.duplicate(true),
+		"intervention_purchase_summaries": intervention_purchase_summaries.duplicate(true),
+		"passage_snapshot": passage_snapshot.duplicate(true),
+		"oath_snapshot": oath_snapshot.duplicate(true),
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	doubloons_earned = maxi(int(state.get("doubloons_earned", 0)), 0)
+	doubloons_spent = maxi(int(state.get("doubloons_spent", 0)), 0)
+	doubloons_lost_to_penalties = maxi(int(state.get("doubloons_lost_to_penalties", 0)), 0)
+	shots_taken = maxi(int(state.get("shots_taken", 0)), 0)
+	balls_sunk = maxi(int(state.get("balls_sunk", 0)), 0)
+	highest_pocket_streak = maxi(int(state.get("highest_pocket_streak", 1)), 1)
+	interventions_triggered = maxi(int(state.get("interventions_triggered", 0)), 0)
+	quartermaster_refreshes_used = maxi(int(state.get("quartermaster_refreshes_used", 0)), 0)
+	quartermaster_refresh_doubloons_spent = maxi(int(state.get("quartermaster_refresh_doubloons_spent", 0)), 0)
+	back_room_deals_made = maxi(int(state.get("back_room_deals_made", 0)), 0)
+	back_room_deal_doubloons_spent = maxi(int(state.get("back_room_deal_doubloons_spent", 0)), 0)
+	kraken_request_rerolls_used = maxi(int(state.get("kraken_request_rerolls_used", 0)), 0)
+	passage_added_by_request_rerolls = maxi(int(state.get("passage_added_by_request_rerolls", 0)), 0)
+	kraken_requests_completed = maxi(int(state.get("kraken_requests_completed", 0)), 0)
+	legendary_events_awarded = maxi(int(state.get("legendary_events_awarded", 0)), 0)
+	contraband_found = maxi(int(state.get("contraband_found", 0)), 0)
+	treasure_claimed = maxi(int(state.get("treasure_claimed", 0)), 0)
+	current_ball_count = maxi(int(state.get("current_ball_count", 0)), 0)
+	run_time_seconds = maxf(float(state.get("run_time_seconds", 0.0)), 0.0)
+	emit_timer = maxf(float(state.get("emit_timer", 0.0)), 0.0)
+	intervention_purchase_order = _rewind_array(state, "intervention_purchase_order")
+	intervention_purchase_summaries = _rewind_dictionary(state, "intervention_purchase_summaries")
+	passage_snapshot = _rewind_dictionary(state, "passage_snapshot")
+	oath_snapshot = _rewind_dictionary(state, "oath_snapshot")
+	_emit_stats_changed()
+
+
+func _rewind_array(state: Dictionary, key: String) -> Array:
+	var value: Variant = state.get(key, [])
+	if value is Array:
+		return (value as Array).duplicate(true)
+	return []
+
+
+func _rewind_dictionary(state: Dictionary, key: String) -> Dictionary:
+	var value: Variant = state.get(key, {})
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	return {}
+
+
 static func get_run_stats_rows() -> Array:
 	return RUN_STATS_ROWS.duplicate(true)
 

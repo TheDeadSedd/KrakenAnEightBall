@@ -93,6 +93,50 @@ func get_debug_snapshot() -> Dictionary:
 	}
 
 
+func get_rewind_state() -> Dictionary:
+	_ensure_slots_initialized()
+	return {
+		"slot_contents": slot_contents.duplicate(true),
+		"selected_slot_index": selected_slot_index,
+		"deploying_slot_index": deploying_slot_index,
+		"snapshot_requests": snapshot_requests,
+		"store_attempts": store_attempts,
+		"failed_store_attempts": failed_store_attempts,
+		"cleared_slots": cleared_slots,
+		"slot_clicks": slot_clicks,
+		"empty_slot_clicks": empty_slot_clicks,
+		"invalid_slot_accesses": invalid_slot_accesses,
+		"deploy_attempts": deploy_attempts,
+		"deploy_started_count": deploy_started_count,
+		"deploy_confirmed_count": deploy_confirmed_count,
+		"deploy_canceled_count": deploy_canceled_count,
+		"deploy_blocked_count": deploy_blocked_count,
+		"last_deploy_blocker_reason": last_deploy_blocker_reason,
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	var stored_slots: Variant = state.get("slot_contents", [])
+	slot_contents = (stored_slots as Array).duplicate(true) if stored_slots is Array else []
+	_ensure_slots_initialized()
+	selected_slot_index = int(state.get("selected_slot_index", -1))
+	deploying_slot_index = int(state.get("deploying_slot_index", -1))
+	snapshot_requests = int(state.get("snapshot_requests", snapshot_requests))
+	store_attempts = int(state.get("store_attempts", store_attempts))
+	failed_store_attempts = int(state.get("failed_store_attempts", failed_store_attempts))
+	cleared_slots = int(state.get("cleared_slots", cleared_slots))
+	slot_clicks = int(state.get("slot_clicks", slot_clicks))
+	empty_slot_clicks = int(state.get("empty_slot_clicks", empty_slot_clicks))
+	invalid_slot_accesses = int(state.get("invalid_slot_accesses", invalid_slot_accesses))
+	deploy_attempts = int(state.get("deploy_attempts", deploy_attempts))
+	deploy_started_count = int(state.get("deploy_started_count", deploy_started_count))
+	deploy_confirmed_count = int(state.get("deploy_confirmed_count", deploy_confirmed_count))
+	deploy_canceled_count = int(state.get("deploy_canceled_count", deploy_canceled_count))
+	deploy_blocked_count = int(state.get("deploy_blocked_count", deploy_blocked_count))
+	last_deploy_blocker_reason = str(state.get("last_deploy_blocker_reason", ""))
+	_emit_slots_changed()
+
+
 func get_filled_slot_count() -> int:
 	_ensure_slots_initialized()
 	var filled_count := 0

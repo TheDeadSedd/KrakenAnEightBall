@@ -57,6 +57,25 @@ func add_message(text: String, category: String = DEFAULT_CATEGORY, amount: int 
 	_refresh_labels()
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"messages": messages.duplicate(true),
+		"review_scroll_offset": review_scroll_offset,
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	messages.clear()
+	var messages_value: Variant = state.get("messages", [])
+	if messages_value is Array:
+		for message_value in messages_value:
+			if message_value is Dictionary:
+				messages.append((message_value as Dictionary).duplicate(true))
+	review_scroll_offset = clampi(int(state.get("review_scroll_offset", 0)), 0, _get_max_review_scroll_offset())
+	is_hovered = false
+	_refresh_labels()
+
+
 func set_hover_ui_suppressed(suppressed: bool) -> void:
 	if hover_ui_suppressed == suppressed:
 		return

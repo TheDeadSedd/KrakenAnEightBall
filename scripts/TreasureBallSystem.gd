@@ -73,6 +73,7 @@ var perception_reacquired_events := 0
 var perception_linger_activations := 0
 var perception_lingered_this_frame := 0
 var claimed_treasure_ball_ids: Dictionary = {}
+var debug_aim_mode_suppressed := false
 var treasure_claims_total := 0
 var treasure_claimed_doubloons_total := 0
 var last_treasure_claim_payout := 0
@@ -81,6 +82,29 @@ var double_award_preventions := 0
 
 func setup(table_ref) -> void:
 	table = table_ref
+
+
+func set_debug_aim_mode_suppressed(suppressed: bool) -> void:
+	debug_aim_mode_suppressed = suppressed
+	if not suppressed:
+		return
+	for treasure_ball in treasure_balls:
+		if treasure_ball != null and is_instance_valid(treasure_ball):
+			treasure_ball.note_treasure_fleeing(0.0, Vector2.ZERO)
+	treasure_balls.clear()
+	direct_seen_treasure_ball_ids.clear()
+	seen_treasure_ball_ids.clear()
+	hide_targets_by_treasure_id.clear()
+	visibility_debug_entries.clear()
+	self_steering_until_by_ball_id.clear()
+	self_scuttle_velocity_by_ball_id.clear()
+	recent_seen_entries_by_treasure_id.clear()
+	perception_grace_remaining_by_treasure_id.clear()
+	perception_lost_pending_by_treasure_id.clear()
+
+
+func get_debug_aim_active_tracker_count() -> int:
+	return treasure_balls.size() + hide_targets_by_treasure_id.size()
 
 
 func reset_frame_stats() -> void:
@@ -96,6 +120,8 @@ func reset_frame_stats() -> void:
 
 
 func register_treasure_ball(ball: Ball) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if ball == null or treasure_balls.has(ball):
 		return
 
@@ -103,6 +129,8 @@ func register_treasure_ball(ball: Ball) -> void:
 
 
 func handle_treasure_claimed(ball: Ball, sink_context: Dictionary) -> int:
+	if debug_aim_mode_suppressed:
+		return 0
 	if ball == null:
 		return 0
 
@@ -132,6 +160,8 @@ func handle_treasure_claimed(ball: Ball, sink_context: Dictionary) -> int:
 
 
 func try_apply_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2, impulse: Vector2) -> bool:
+	if debug_aim_mode_suppressed:
+		return false
 	if ball_a == null or ball_b == null:
 		return false
 	if ball_a.is_cannon_ball or ball_b.is_cannon_ball:
@@ -152,6 +182,8 @@ func try_apply_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2, i
 
 
 func handle_aim_perception_snapshot(snapshot: Dictionary) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	var perception_epoch: int = int(snapshot.get("epoch", -1))
 	if perception_epoch == last_perception_epoch:
 		return
@@ -170,6 +202,8 @@ func handle_aim_perception_snapshot(snapshot: Dictionary) -> void:
 
 
 func update_hiding(delta: float) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if delta <= 0.0:
 		return
 
@@ -199,6 +233,12 @@ func update_hiding(delta: float) -> void:
 
 	if steering_active_this_frame and debug_visual_enabled and table != null:
 		table.queue_redraw()
+
+
+func is_prediction_self_motion_active(ball: Ball) -> bool:
+	if ball == null or not is_instance_valid(ball) or not hiding_movement_enabled:
+		return false
+	return hide_targets_by_treasure_id.has(ball.get_instance_id())
 
 
 func get_debug_snapshot() -> Dictionary:

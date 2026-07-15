@@ -315,6 +315,58 @@ func get_refresh_snapshot() -> Dictionary:
 	}
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"pending_item_id": pending_item_id,
+		"purchase_attempts": purchase_attempts,
+		"denied_purchase_attempts": denied_purchase_attempts,
+		"purchase_intents_started": purchase_intents_started,
+		"confirmed_purchases": confirmed_purchases,
+		"canceled_purchases": canceled_purchases,
+		"stock_refreshes": stock_refreshes,
+		"offer_replacements": offer_replacements,
+		"duplicate_offer_fallbacks": duplicate_offer_fallbacks,
+		"manual_stock_refreshes": manual_stock_refreshes,
+		"denied_stock_refresh_attempts": denied_stock_refresh_attempts,
+		"refresh_doubloons_spent": refresh_doubloons_spent,
+		"current_refresh_cost": current_refresh_cost,
+		"stock_refresh_serial": stock_refresh_serial,
+		"last_refreshed_offer_index": last_refreshed_offer_index,
+		"last_blocker_reason": last_blocker_reason,
+		"active_offer_item_ids": active_offer_item_ids.duplicate(true),
+		"stock_rng_state": int(stock_rng.state),
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	pending_item_id = str(state.get("pending_item_id", ""))
+	purchase_attempts = maxi(int(state.get("purchase_attempts", 0)), 0)
+	denied_purchase_attempts = maxi(int(state.get("denied_purchase_attempts", 0)), 0)
+	purchase_intents_started = maxi(int(state.get("purchase_intents_started", 0)), 0)
+	confirmed_purchases = maxi(int(state.get("confirmed_purchases", 0)), 0)
+	canceled_purchases = maxi(int(state.get("canceled_purchases", 0)), 0)
+	stock_refreshes = maxi(int(state.get("stock_refreshes", 0)), 0)
+	offer_replacements = maxi(int(state.get("offer_replacements", 0)), 0)
+	duplicate_offer_fallbacks = maxi(int(state.get("duplicate_offer_fallbacks", 0)), 0)
+	manual_stock_refreshes = maxi(int(state.get("manual_stock_refreshes", 0)), 0)
+	denied_stock_refresh_attempts = maxi(int(state.get("denied_stock_refresh_attempts", 0)), 0)
+	refresh_doubloons_spent = maxi(int(state.get("refresh_doubloons_spent", 0)), 0)
+	current_refresh_cost = maxi(int(state.get("current_refresh_cost", _get_base_refresh_cost())), _get_base_refresh_cost())
+	stock_refresh_serial = maxi(int(state.get("stock_refresh_serial", 0)), 0)
+	last_refreshed_offer_index = int(state.get("last_refreshed_offer_index", -1))
+	last_blocker_reason = str(state.get("last_blocker_reason", ""))
+	active_offer_item_ids = _get_rewind_offer_ids(state)
+	stock_rng.state = int(state.get("stock_rng_state", stock_rng.state))
+	_emit_shop_state_changed()
+
+
+func _get_rewind_offer_ids(state: Dictionary) -> Array:
+	var value: Variant = state.get("active_offer_item_ids", [])
+	if value is Array:
+		return (value as Array).duplicate(true)
+	return []
+
+
 func get_refresh_decay_snapshot() -> Dictionary:
 	var base_decay := _get_base_refresh_decay_amount()
 	var cue_bonus := _get_refresh_decay_cue_bonus()

@@ -115,6 +115,20 @@ func show_streak(multiplier: int, pocket_position: Vector2, pocket_radius: float
 	set_process(true)
 
 
+func clear_for_rewind() -> void:
+	presentation_queue.clear()
+	presentation_delay_remaining = 0.0
+	for audio_player in audio_players:
+		if audio_player != null:
+			audio_player.stop()
+	for effect in active_effects:
+		if effect != null and is_instance_valid(effect.label):
+			effect.label.queue_free()
+	active_effects.clear()
+	set_process(false)
+	queue_redraw()
+
+
 func _try_start_next_queued_presentation() -> void:
 	if presentation_delay_remaining > 0.0 or presentation_queue.is_empty():
 		return

@@ -30,6 +30,16 @@ signal debug_sunken_spoils_trigger_requested
 signal debug_sunken_spoils_reset_requested
 signal debug_aim_line_toggled(enabled: bool)
 signal debug_aim_compare_panels_toggled(enabled: bool)
+signal debug_verbose_aim_candidates_toggled(enabled: bool)
+signal debug_cue_first_contact_toi_toggled(enabled: bool)
+signal debug_cloned_aim_configuration_changed(configuration: Dictionary)
+signal debug_reset_aim_profiler_requested
+signal debug_reset_aim_benchmark_requested
+signal debug_start_aim_benchmark_requested(label: String, preset_label: String)
+signal debug_stop_aim_benchmark_requested
+signal debug_copy_aim_benchmark_report_requested
+signal debug_reset_table_button_toggled(enabled: bool)
+signal debug_reset_last_shot_button_toggled(enabled: bool)
 signal quartermaster_cancel_placement_requested
 
 const PANEL_CORE_PERFORMANCE := "core_performance"
@@ -44,9 +54,8 @@ const PANEL_PHYSICS := "physics"
 const PANEL_EMBEZZLER := "embezzler"
 const NORMAL_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.62)
 const PLACEMENT_SHADE_COLOR := Color(0.01, 0.012, 0.016, 0.18)
-# Keep the pause shade above live gameplay HUD siblings.
-# Passage completion modal uses higher priority around 79/80.
-const PAUSE_MENU_Z_INDEX := 70
+# Debug panels use local z-indices through 120. Keep the pause modal above them.
+const PAUSE_MENU_Z_INDEX := 200
 const EVENT_TEST_SECTION_TITLE := "Event Test Buttons"
 const EVENT_TEST_WAYFINDER_TEXT := "Show Wayfinder Current Test Button"
 const EVENT_TEST_BROADSIDE_TEXT := "Show Broadside Attack Test Button"
@@ -58,6 +67,10 @@ const EVENT_TEST_OBSTACLE_COLLISION_DRAW_TEXT := "Show Debris Collision Shape"
 const AIM_PREVIEW_TEST_SECTION_TITLE := "Aim Preview Testing"
 const AIM_PREVIEW_TEST_DEBUG_LINE_TEXT := "Debug Aim Line"
 const AIM_PREVIEW_TEST_COMPARE_PANELS_TEXT := "Aim Compare Panels"
+const AIM_PREVIEW_TEST_VERBOSE_CANDIDATES_TEXT := "Verbose Aim Candidates"
+const AIM_PREVIEW_TEST_CUE_TOI_TEXT := "Cue First-Contact TOI"
+const AIM_PREVIEW_TEST_RESET_TABLE_TEXT := "Show Reset Table Button"
+const AIM_PREVIEW_TEST_RESET_LAST_SHOT_TEXT := "Show Reset Last Shot Button"
 const BACK_ROOM_TEST_SECTION_TITLE := "Back Room Testing"
 const BACK_ROOM_TEST_FORCE_AVAILABLE_TEXT := "Force Back Room Available"
 const BACK_ROOM_TEST_OPEN_TEXT := "Open Back Room Deal"
@@ -126,7 +139,6 @@ const OATH_TESTING_SELECTOR_ITEMS := [
 	{"label": "Oath of Sacrifice", "oath_id": OathSystem.OATH_OF_SACRIFICE},
 	{"label": "Oath of Humility", "oath_id": OathSystem.OATH_OF_HUMILITY},
 ]
-const DEV_OPTIONS_TITLE_TEXT := "Dev Options"
 const RUN_STATS_TITLE_TEXT := "Run Stats"
 const RUN_STATS_SUBTITLE_TEXT := "Current Run Ledger"
 const DEBUG_CONTRABAND_KIND_RANDOM := "random"
@@ -139,6 +151,9 @@ const DEBUG_CONTRABAND_SELECTOR_ITEMS := [
 	{"label": "Embezzler", "kind": "embezzler"},
 ]
 const OPTIONS_MENU_SCRIPT := preload("res://scripts/OptionsMenu.gd")
+const AIM_TRAJECTORY_PREDICTOR_SCRIPT := preload("res://scripts/AimTrajectoryPredictor.gd")
+const DEV_OPTION_REGISTRY_SCRIPT := preload("res://scripts/DevOptionRegistry.gd")
+const DEV_OPTIONS_PANEL_SCRIPT := preload("res://scripts/DevOptionsPanel.gd")
 const CONFIRM_PANEL_SIZE := Vector2(430.0, 220.0)
 const RUN_STATS_PANEL_SIZE := Vector2(590.0, 1080.0)
 
@@ -177,6 +192,15 @@ var obstacle_collision_debug_check_box: CheckBox
 var aim_preview_testing_section_label: Label
 var debug_aim_line_check_box: CheckBox
 var aim_compare_panels_check_box: CheckBox
+var verbose_aim_candidates_check_box: CheckBox
+var cue_first_contact_toi_check_box: CheckBox
+var reset_table_button_check_box: CheckBox
+var reset_last_shot_button_check_box: CheckBox
+var cloned_aim_testing_section_label: Label
+var cloned_aim_controls: Dictionary = {}
+var reset_aim_profiler_button: Button
+var selected_aim_benchmark_preset_id := AimTrajectoryPredictor.BENCHMARK_PRESET_LONG_SIGHT_5
+var aim_benchmark_label := ""
 var back_room_testing_section_label: Label
 var force_back_room_available_check_box: CheckBox
 var open_back_room_deal_button: Button
@@ -207,10 +231,10 @@ var run_stats_value_labels: Dictionary = {}
 var latest_run_stats_snapshot: Dictionary = {}
 var run_stats_purchase_history_label: Label
 var dev_options_button: Button
-var dev_options_title_label: Label
-var dev_options_scroll_container: ScrollContainer
-var dev_options_scroll_content: VBoxContainer
-var dev_options_back_button: Button
+var dev_options_panel: DevOptionsPanel
+var dev_option_registry: DevOptionRegistry
+var debug_overlay_bridge: DebugOverlay
+var _external_dev_options_registered := false
 var options_button: Button
 var options_panel: OptionsMenu
 var end_run_button: Button
@@ -244,6 +268,9 @@ func _ready() -> void:
 	_ensure_sunken_spoils_testing_controls()
 	_ensure_oath_testing_controls()
 	_connect_debug_panel_toggles()
+	_register_local_dev_options()
+	if dev_options_panel != null:
+		dev_options_panel.rebuild_options()
 	_show_pause_panel()
 
 
@@ -285,6 +312,16 @@ func _connect_debug_panel_toggles() -> void:
 		debug_aim_line_check_box.toggled.connect(_on_debug_aim_line_toggled)
 	if not aim_compare_panels_check_box.toggled.is_connected(_on_aim_compare_panels_toggled):
 		aim_compare_panels_check_box.toggled.connect(_on_aim_compare_panels_toggled)
+	if not verbose_aim_candidates_check_box.toggled.is_connected(_on_verbose_aim_candidates_toggled):
+		verbose_aim_candidates_check_box.toggled.connect(_on_verbose_aim_candidates_toggled)
+	if not cue_first_contact_toi_check_box.toggled.is_connected(_on_cue_first_contact_toi_toggled):
+		cue_first_contact_toi_check_box.toggled.connect(_on_cue_first_contact_toi_toggled)
+	if reset_aim_profiler_button != null and not reset_aim_profiler_button.pressed.is_connected(_on_reset_aim_profiler_pressed):
+		reset_aim_profiler_button.pressed.connect(_on_reset_aim_profiler_pressed)
+	if not reset_table_button_check_box.toggled.is_connected(_on_reset_table_button_toggled):
+		reset_table_button_check_box.toggled.connect(_on_reset_table_button_toggled)
+	if not reset_last_shot_button_check_box.toggled.is_connected(_on_reset_last_shot_button_toggled):
+		reset_last_shot_button_check_box.toggled.connect(_on_reset_last_shot_button_toggled)
 	if not force_back_room_available_check_box.toggled.is_connected(_on_back_room_force_available_toggled):
 		force_back_room_available_check_box.toggled.connect(_on_back_room_force_available_toggled)
 	if not open_back_room_deal_button.pressed.is_connected(_on_open_back_room_deal_pressed):
@@ -343,18 +380,22 @@ func set_pause_visible(should_show: bool) -> void:
 		_show_pause_panel()
 		resume_button.grab_focus()
 	else:
+		if dev_options_panel != null:
+			dev_options_panel.close_panel()
 		if options_panel != null:
 			options_panel.visible = false
 		if run_stats_panel != null:
 			run_stats_panel.visible = false
 		if end_run_confirm_panel != null:
 			end_run_confirm_panel.visible = false
-		if dev_options_back_button != null:
-			debug_section.visible = false
+		debug_section.visible = false
 		resume_button.release_focus()
 
 
 func set_quartermaster_placement_mode(enabled: bool, item_name: String = "") -> void:
+	if dev_options_panel != null:
+		dev_options_panel.close_panel()
+	shade.visible = true
 	if options_panel != null:
 		options_panel.visible = false
 	if run_stats_panel != null:
@@ -370,6 +411,38 @@ func set_quartermaster_placement_mode(enabled: bool, item_name: String = "") -> 
 		placement_hint_label.text = ""
 
 
+func is_dev_options_open() -> bool:
+	return dev_options_panel != null and dev_options_panel.is_open()
+
+
+func close_dev_options_to_pause() -> void:
+	if is_dev_options_open():
+		_on_dev_options_back_pressed()
+
+
+func handle_dev_options_cancel_request() -> void:
+	if not is_dev_options_open():
+		return
+	if dev_options_panel != null and dev_options_panel.handle_cancel_request():
+		return
+	_on_dev_options_back_pressed()
+
+
+func configure_dev_options_debug_overlay(overlay: DebugOverlay) -> void:
+	if debug_overlay_bridge != null and debug_overlay_bridge.dev_option_state_changed.is_connected(_on_debug_overlay_dev_option_changed):
+		debug_overlay_bridge.dev_option_state_changed.disconnect(_on_debug_overlay_dev_option_changed)
+	debug_overlay_bridge = overlay
+	if debug_overlay_bridge == null:
+		return
+	if not debug_overlay_bridge.dev_option_state_changed.is_connected(_on_debug_overlay_dev_option_changed):
+		debug_overlay_bridge.dev_option_state_changed.connect(_on_debug_overlay_dev_option_changed)
+	_register_external_dev_options()
+	if dev_options_panel != null:
+		dev_options_panel.rebuild_options()
+	if dev_option_registry != null:
+		dev_option_registry.refresh_all()
+
+
 func set_debug_panel_states(panel_states: Dictionary) -> void:
 	core_performance_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_CORE_PERFORMANCE, false)))
 	aim_preview_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_AIM_PREVIEW, false)))
@@ -383,6 +456,88 @@ func set_debug_panel_states(panel_states: Dictionary) -> void:
 	physics_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_PHYSICS, false)))
 	if aim_compare_panels_check_box != null:
 		aim_compare_panels_check_box.set_pressed_no_signal(bool(panel_states.get("aim_compare_panels", false)))
+	if dev_option_registry != null:
+		for panel_id_value in panel_states.keys():
+			var panel_id: String = str(panel_id_value)
+			dev_option_registry.refresh_option("panel.%s" % panel_id)
+
+
+func get_debug_session_snapshot() -> Dictionary:
+	return {
+		"wayfinder_current_button": wayfinder_current_test_check_box.button_pressed,
+		"broadside_button": broadside_attack_test_check_box.button_pressed,
+		"force_contraband": force_loose_cargo_contraband_check_box.button_pressed,
+		"contraband_kind": _get_selected_loose_cargo_contraband_kind(),
+		"obstacle_collision": obstacle_collision_check_box.button_pressed,
+		"obstacle_collision_draw": obstacle_collision_debug_check_box.button_pressed,
+		"debug_aim_line": debug_aim_line_check_box.button_pressed,
+		"aim_compare_panels": aim_compare_panels_check_box.button_pressed,
+		"verbose_aim_candidates": verbose_aim_candidates_check_box.button_pressed,
+		"cue_first_contact_toi": cue_first_contact_toi_check_box.button_pressed,
+		"show_reset_table_button": reset_table_button_check_box.button_pressed,
+		"show_reset_last_shot_button": reset_last_shot_button_check_box.button_pressed,
+		"cloned_aim_configuration": get_cloned_aim_configuration(),
+		"aim_benchmark_preset": selected_aim_benchmark_preset_id,
+		"aim_benchmark_label": aim_benchmark_label,
+		"force_back_room": force_back_room_available_check_box.button_pressed,
+		"selected_oath_id": _get_selected_debug_oath_id(),
+		"dev_options_ui": dev_options_panel.get_session_snapshot() if dev_options_panel != null else {},
+	}
+
+
+func apply_debug_session_snapshot(snapshot: Dictionary) -> void:
+	_set_debug_option(wayfinder_current_test_check_box, bool(snapshot.get("wayfinder_current_button", false)), debug_wayfinder_current_test_button_toggled)
+	_set_debug_option(broadside_attack_test_check_box, bool(snapshot.get("broadside_button", false)), debug_broadside_attack_test_button_toggled)
+	_set_debug_option(force_loose_cargo_contraband_check_box, bool(snapshot.get("force_contraband", false)), debug_force_loose_cargo_contraband_toggled)
+	loose_cargo_contraband_selector.disabled = not force_loose_cargo_contraband_check_box.button_pressed
+	_select_contraband_kind(str(snapshot.get("contraband_kind", DEBUG_CONTRABAND_KIND_RANDOM)))
+	debug_loose_cargo_contraband_kind_selected.emit(_get_selected_loose_cargo_contraband_kind())
+	_set_debug_option(obstacle_collision_check_box, bool(snapshot.get("obstacle_collision", true)), debug_obstacle_collision_toggled)
+	_set_debug_option(obstacle_collision_debug_check_box, bool(snapshot.get("obstacle_collision_draw", false)), debug_obstacle_collision_draw_toggled)
+	_set_debug_option(debug_aim_line_check_box, bool(snapshot.get("debug_aim_line", false)), debug_aim_line_toggled)
+	_set_debug_option(aim_compare_panels_check_box, bool(snapshot.get("aim_compare_panels", false)), debug_aim_compare_panels_toggled)
+	_set_debug_option(verbose_aim_candidates_check_box, bool(snapshot.get("verbose_aim_candidates", false)), debug_verbose_aim_candidates_toggled)
+	_set_debug_option(cue_first_contact_toi_check_box, bool(snapshot.get("cue_first_contact_toi", true)), debug_cue_first_contact_toi_toggled)
+	_set_debug_option(reset_table_button_check_box, bool(snapshot.get("show_reset_table_button", false)), debug_reset_table_button_toggled)
+	_set_debug_option(reset_last_shot_button_check_box, bool(snapshot.get("show_reset_last_shot_button", false)), debug_reset_last_shot_button_toggled)
+	_apply_cloned_aim_configuration(snapshot.get("cloned_aim_configuration", get_cloned_aim_configuration()))
+	selected_aim_benchmark_preset_id = str(snapshot.get(
+		"aim_benchmark_preset",
+		AimTrajectoryPredictor.BENCHMARK_PRESET_LONG_SIGHT_5
+	))
+	aim_benchmark_label = str(snapshot.get("aim_benchmark_label", ""))
+	_set_debug_option(force_back_room_available_check_box, bool(snapshot.get("force_back_room", false)), debug_back_room_force_available_toggled)
+	_select_debug_oath_id(str(snapshot.get("selected_oath_id", OathSystem.OATH_OF_URGENCY)))
+	var dev_options_ui_value: Variant = snapshot.get("dev_options_ui", {})
+	if dev_options_panel != null and dev_options_ui_value is Dictionary:
+		dev_options_panel.apply_session_snapshot(dev_options_ui_value as Dictionary)
+	if dev_option_registry != null:
+		dev_option_registry.refresh_all()
+
+
+func _set_debug_option(check_box: CheckBox, enabled: bool, output_signal: Signal) -> void:
+	if check_box == null:
+		return
+	check_box.set_pressed_no_signal(enabled)
+	output_signal.emit(enabled)
+
+
+func _select_contraband_kind(kind: String) -> void:
+	if loose_cargo_contraband_selector == null:
+		return
+	for item_index in range(loose_cargo_contraband_selector.item_count):
+		if str(loose_cargo_contraband_selector.get_item_metadata(item_index)) == kind:
+			loose_cargo_contraband_selector.select(item_index)
+			return
+
+
+func _select_debug_oath_id(oath_id: String) -> void:
+	if oath_testing_selector == null:
+		return
+	for item_index in range(oath_testing_selector.item_count):
+		if str(oath_testing_selector.get_item_metadata(item_index)) == oath_id:
+			oath_testing_selector.select(item_index)
+			return
 
 
 func set_run_stats_snapshot(snapshot: Dictionary) -> void:
@@ -402,21 +557,29 @@ func set_oath_debug_snapshot(oath_snapshot: Dictionary, cue_modifier_snapshot: D
 		"true" if suppressed else "false",
 		"true" if modifiers_enabled else "false",
 	]
+	if dev_option_registry != null:
+		dev_option_registry.refresh_option("oath.status")
 
 
 func set_debris_collision_debug_state(enabled: bool) -> void:
 	if obstacle_collision_check_box != null:
 		obstacle_collision_check_box.set_pressed_no_signal(enabled)
+	if dev_option_registry != null:
+		dev_option_registry.refresh_option("debris.collision")
 
 
 func set_debris_collision_draw_debug_state(enabled: bool) -> void:
 	if obstacle_collision_debug_check_box != null:
 		obstacle_collision_debug_check_box.set_pressed_no_signal(enabled)
+	if dev_option_registry != null:
+		dev_option_registry.refresh_option("debris.collision_draw")
 
 
 func set_back_room_force_available_debug_state(enabled: bool) -> void:
 	if force_back_room_available_check_box != null:
 		force_back_room_available_check_box.set_pressed_no_signal(enabled)
+	if dev_option_registry != null:
+		dev_option_registry.refresh_option("back_room.force_available")
 
 
 func _ensure_options_controls() -> void:
@@ -555,51 +718,20 @@ func _make_run_stats_value_label() -> Label:
 
 
 func _ensure_dev_options_controls() -> void:
-	debug_section.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	if dev_options_button == null:
 		dev_options_button = _make_pause_button("Dev Options", "DevOptionsButton")
 		menu_stack.add_child(dev_options_button)
 		menu_stack.move_child(dev_options_button, run_stats_button.get_index() + 1)
 		dev_options_button.pressed.connect(_on_dev_options_pressed)
 
-	if dev_options_title_label == null:
-		dev_options_title_label = Label.new()
-		dev_options_title_label.text = DEV_OPTIONS_TITLE_TEXT
-		dev_options_title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		dev_options_title_label.add_theme_color_override("font_color", Color(1.0, 0.88, 0.54, 1.0))
-		dev_options_title_label.add_theme_color_override("font_outline_color", Color(0.08, 0.04, 0.02, 0.95))
-		dev_options_title_label.add_theme_constant_override("outline_size", 2)
-		dev_options_title_label.add_theme_font_override("font", resume_button.get_theme_font("font"))
-		dev_options_title_label.add_theme_font_size_override("font_size", 26)
-		debug_section.add_child(dev_options_title_label)
-		debug_section.move_child(dev_options_title_label, 0)
-
-	if dev_options_scroll_container == null:
-		dev_options_scroll_container = ScrollContainer.new()
-		dev_options_scroll_container.name = "DevOptionsScroll"
-		dev_options_scroll_container.custom_minimum_size = Vector2(0.0, 500.0)
-		dev_options_scroll_container.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		dev_options_scroll_container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		dev_options_scroll_container.mouse_filter = Control.MOUSE_FILTER_STOP
-		debug_section.add_child(dev_options_scroll_container)
-		debug_section.move_child(dev_options_scroll_container, 1)
-
-	if dev_options_scroll_content == null:
-		dev_options_scroll_content = VBoxContainer.new()
-		dev_options_scroll_content.name = "DevOptionsScrollContent"
-		dev_options_scroll_content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		dev_options_scroll_content.add_theme_constant_override("separation", 8)
-		dev_options_scroll_container.add_child(dev_options_scroll_content)
-
-	_move_dev_options_controls_into_scroll()
-
-	if dev_options_back_button == null:
-		dev_options_back_button = _make_pause_button("Back", "DevOptionsBackButton")
-		dev_options_back_button.custom_minimum_size = Vector2(0.0, 42.0)
-		dev_options_back_button.add_theme_font_size_override("font_size", 18)
-		debug_section.add_child(dev_options_back_button)
-		dev_options_back_button.pressed.connect(_on_dev_options_back_pressed)
-	debug_section.move_child(dev_options_back_button, min(2, debug_section.get_child_count() - 1))
+	if dev_options_panel == null:
+		if dev_option_registry == null:
+			dev_option_registry = DEV_OPTION_REGISTRY_SCRIPT.new() as DevOptionRegistry
+		dev_options_panel = DEV_OPTIONS_PANEL_SCRIPT.new() as DevOptionsPanel
+		dev_options_panel.name = "DevOptionsPanel"
+		add_child(dev_options_panel)
+		dev_options_panel.setup(resume_button, menu_panel, dev_option_registry)
+		dev_options_panel.back_requested.connect(_on_dev_options_back_pressed)
 
 
 func _ensure_end_run_controls() -> void:
@@ -722,8 +854,6 @@ func _ensure_event_test_controls() -> void:
 		obstacle_collision_debug_check_box.set_pressed_no_signal(false)
 		debug_section.add_child(obstacle_collision_debug_check_box)
 		debug_section.move_child(obstacle_collision_debug_check_box, 10)
-	_move_dev_options_controls_into_scroll()
-
 
 func _ensure_aim_preview_testing_controls() -> void:
 	if aim_preview_testing_section_label == null:
@@ -734,15 +864,156 @@ func _ensure_aim_preview_testing_controls() -> void:
 
 	if debug_aim_line_check_box == null:
 		debug_aim_line_check_box = _make_event_test_check_box(AIM_PREVIEW_TEST_DEBUG_LINE_TEXT)
-		debug_aim_line_check_box.tooltip_text = "Debug-only: replaces the polished aim preview with a thin raw cue-ball path."
+		debug_aim_line_check_box.tooltip_text = "Debug-only: enables raw aim diagnostics, converts current anomalies to ordinary balls, and suppresses future anomaly behavior."
 		debug_section.add_child(debug_aim_line_check_box)
 
 	if aim_compare_panels_check_box == null:
 		aim_compare_panels_check_box = _make_event_test_check_box(AIM_PREVIEW_TEST_COMPARE_PANELS_TEXT)
-		aim_compare_panels_check_box.tooltip_text = "Debug-only: shows launch/contact/response/trace comparison panels."
+		aim_compare_panels_check_box.tooltip_text = "Debug-only: shows launch, contact, simulation, event-chain, trace, and resolver-order panels."
 		debug_section.add_child(aim_compare_panels_check_box)
 
-	_move_dev_options_controls_into_scroll()
+	if verbose_aim_candidates_check_box == null:
+		verbose_aim_candidates_check_box = _make_event_test_check_box(AIM_PREVIEW_TEST_VERBOSE_CANDIDATES_TEXT)
+		verbose_aim_candidates_check_box.tooltip_text = "Show the complete first-hit candidate sweep instead of the focused subset."
+		debug_section.add_child(verbose_aim_candidates_check_box)
+
+	if cue_first_contact_toi_check_box == null:
+		cue_first_contact_toi_check_box = _make_event_test_check_box(AIM_PREVIEW_TEST_CUE_TOI_TEXT)
+		cue_first_contact_toi_check_box.set_pressed_no_signal(true)
+		cue_first_contact_toi_check_box.tooltip_text = "Use swept earliest-contact order for the cue ball's initial object-ball contact."
+		debug_section.add_child(cue_first_contact_toi_check_box)
+
+	if reset_table_button_check_box == null:
+		reset_table_button_check_box = _make_event_test_check_box(AIM_PREVIEW_TEST_RESET_TABLE_TEXT)
+		reset_table_button_check_box.tooltip_text = "Show the on-table current-mode restart utility."
+		debug_section.add_child(reset_table_button_check_box)
+
+	if reset_last_shot_button_check_box == null:
+		reset_last_shot_button_check_box = _make_event_test_check_box(AIM_PREVIEW_TEST_RESET_LAST_SHOT_TEXT)
+		reset_last_shot_button_check_box.tooltip_text = "Show the reusable one-shot checkpoint restore utility."
+		debug_section.add_child(reset_last_shot_button_check_box)
+
+	_ensure_cloned_aim_simulation_controls()
+
+
+func _ensure_cloned_aim_simulation_controls() -> void:
+	if cloned_aim_testing_section_label == null:
+		cloned_aim_testing_section_label = Label.new()
+		cloned_aim_testing_section_label.text = "Cloned Aim Simulation"
+		_apply_debug_section_label_style(cloned_aim_testing_section_label)
+		debug_section.add_child(cloned_aim_testing_section_label)
+	for definition in AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_configuration_schema(4):
+		var key: String = str(definition.get("key", ""))
+		if key.is_empty() or cloned_aim_controls.has(key):
+			continue
+		if str(definition.get("type", "")) == "bool":
+			var check_box: CheckBox = _make_event_test_check_box(str(definition.get("label", key)))
+			check_box.set_pressed_no_signal(bool(definition.get("default", false)))
+			check_box.toggled.connect(_on_cloned_aim_bool_changed.bind(key))
+			debug_section.add_child(check_box)
+			cloned_aim_controls[key] = check_box
+		elif str(definition.get("type", "")) == "select":
+			var selector_row: HBoxContainer = HBoxContainer.new()
+			selector_row.name = "ClonedAim%sRow" % key.to_pascal_case()
+			selector_row.add_theme_constant_override("separation", 8)
+			var selector_label: Label = Label.new()
+			selector_label.text = str(definition.get("label", key))
+			selector_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			selector_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			selector_label.add_theme_font_override("font", core_performance_check_box.get_theme_font("font"))
+			selector_label.add_theme_font_size_override("font_size", 13)
+			selector_row.add_child(selector_label)
+			var selector: OptionButton = OptionButton.new()
+			selector.custom_minimum_size = Vector2(180.0, 30.0)
+			for choice_value in definition.get("choices", []):
+				if not choice_value is Dictionary:
+					continue
+				var choice: Dictionary = choice_value
+				var choice_index: int = selector.item_count
+				selector.add_item(str(choice.get("label", choice.get("value", "Choice"))))
+				selector.set_item_metadata(choice_index, choice.get("value"))
+				if str(choice.get("value", "")) == str(definition.get("default", "")):
+					selector.select(choice_index)
+			selector.item_selected.connect(_on_cloned_aim_select_changed.bind(key, selector))
+			selector_row.add_child(selector)
+			debug_section.add_child(selector_row)
+			cloned_aim_controls[key] = selector
+		else:
+			var row: HBoxContainer = HBoxContainer.new()
+			row.name = "ClonedAim%sRow" % key.to_pascal_case()
+			row.add_theme_constant_override("separation", 8)
+			var label: Label = Label.new()
+			label.text = str(definition.get("label", key))
+			label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			label.add_theme_font_override("font", core_performance_check_box.get_theme_font("font"))
+			label.add_theme_font_size_override("font_size", 13)
+			row.add_child(label)
+			var spin_box: SpinBox = SpinBox.new()
+			spin_box.custom_minimum_size = Vector2(118.0, 30.0)
+			spin_box.min_value = float(definition.get("minimum", 0.0))
+			spin_box.max_value = float(definition.get("maximum", 0.0))
+			spin_box.step = float(definition.get("step", 1.0))
+			spin_box.allow_greater = false
+			spin_box.allow_lesser = false
+			spin_box.value = float(definition.get("default", 0.0))
+			spin_box.value_changed.connect(_on_cloned_aim_numeric_changed.bind(key))
+			row.add_child(spin_box)
+			debug_section.add_child(row)
+			cloned_aim_controls[key] = spin_box
+	if reset_aim_profiler_button == null:
+		reset_aim_profiler_button = _make_event_test_button(
+			"Reset Aim Profiler Stats",
+			"ResetAimProfilerStatsButton"
+		)
+		reset_aim_profiler_button.tooltip_text = "Clears the bounded cloned-prediction timing history and cache counters shown by AIM PROFILER."
+		debug_section.add_child(reset_aim_profiler_button)
+
+
+func get_cloned_aim_configuration() -> Dictionary:
+	var configuration: Dictionary = {}
+	for definition in AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_configuration_schema(4):
+		var key: String = str(definition.get("key", ""))
+		var control: Control = cloned_aim_controls.get(key) as Control
+		if control is CheckBox:
+			configuration[key] = (control as CheckBox).button_pressed
+		elif control is SpinBox:
+			var value: float = (control as SpinBox).value
+			configuration[key] = int(value) if str(definition.get("type", "")) == "int" else value
+		elif control is OptionButton:
+			configuration[key] = _get_option_button_value(control as OptionButton)
+	return AIM_TRAJECTORY_PREDICTOR_SCRIPT.normalize_configuration(configuration, 4)
+
+
+func _apply_cloned_aim_configuration(configuration_value: Variant) -> void:
+	if not configuration_value is Dictionary:
+		return
+	var configuration: Dictionary = AIM_TRAJECTORY_PREDICTOR_SCRIPT.normalize_configuration(
+		configuration_value,
+		4
+	)
+	for key_value in configuration.keys():
+		var key: String = str(key_value)
+		var control: Control = cloned_aim_controls.get(key) as Control
+		if control is CheckBox:
+			(control as CheckBox).set_pressed_no_signal(bool(configuration[key_value]))
+		elif control is SpinBox:
+			(control as SpinBox).set_value_no_signal(float(configuration[key_value]))
+		elif control is OptionButton:
+			_select_option_button_value(control as OptionButton, configuration[key_value], false)
+	debug_cloned_aim_configuration_changed.emit(configuration)
+
+
+func _on_cloned_aim_bool_changed(_enabled: bool, _key: String) -> void:
+	debug_cloned_aim_configuration_changed.emit(get_cloned_aim_configuration())
+
+
+func _on_cloned_aim_numeric_changed(_value: float, _key: String) -> void:
+	debug_cloned_aim_configuration_changed.emit(get_cloned_aim_configuration())
+
+
+func _on_cloned_aim_select_changed(_index: int, _key: String, _selector: OptionButton) -> void:
+	debug_cloned_aim_configuration_changed.emit(get_cloned_aim_configuration())
 
 
 func _ensure_back_room_testing_controls() -> void:
@@ -761,8 +1032,6 @@ func _ensure_back_room_testing_controls() -> void:
 		open_back_room_deal_button = _make_event_test_button(BACK_ROOM_TEST_OPEN_TEXT, "OpenBackRoomDealButton")
 		open_back_room_deal_button.tooltip_text = "Debug-only: opens the live Back Room Deal panel."
 		debug_section.add_child(open_back_room_deal_button)
-
-	_move_dev_options_controls_into_scroll()
 
 
 func _ensure_boon_testing_controls() -> void:
@@ -797,8 +1066,6 @@ func _ensure_boon_testing_controls() -> void:
 		expire_all_boons_button.tooltip_text = "Debug-only: expires every active Kraken Boon."
 		debug_section.add_child(expire_all_boons_button)
 
-	_move_dev_options_controls_into_scroll()
-
 
 func _ensure_reserve_stack_testing_controls() -> void:
 	if reserve_stack_testing_section_label == null:
@@ -816,8 +1083,6 @@ func _ensure_reserve_stack_testing_controls() -> void:
 		button.pressed.connect(_on_reserve_stack_test_pressed.bind(test_index))
 		reserve_stack_test_buttons.append(button)
 		debug_section.add_child(button)
-
-	_move_dev_options_controls_into_scroll()
 
 
 func _ensure_sunken_spoils_testing_controls() -> void:
@@ -841,8 +1106,6 @@ func _ensure_sunken_spoils_testing_controls() -> void:
 		sunken_spoils_reset_button = _make_event_test_button(SUNKEN_SPOILS_TEST_RESET_TEXT, "ResetSunkenSpoilsButton")
 		sunken_spoils_reset_button.tooltip_text = "Debug-only: resets Sunken Spoils progress and pending rewards."
 		debug_section.add_child(sunken_spoils_reset_button)
-
-	_move_dev_options_controls_into_scroll()
 
 
 func _ensure_oath_testing_controls() -> void:
@@ -889,23 +1152,684 @@ func _ensure_oath_testing_controls() -> void:
 		oath_testing_readout_label.add_theme_font_size_override("font_size", 13)
 		debug_section.add_child(oath_testing_readout_label)
 		set_oath_debug_snapshot({})
-	_move_dev_options_controls_into_scroll()
 
 
-func _move_dev_options_controls_into_scroll() -> void:
-	if dev_options_scroll_content == null or dev_options_scroll_container == null:
+func _register_local_dev_options() -> void:
+	if dev_option_registry == null:
 		return
 
-	var children := debug_section.get_children().duplicate()
-	for child in children:
-		if child == dev_options_title_label:
+	_register_bool_control(
+		"session.show_reset_table_button",
+		"Show Reset Table Button",
+		reset_table_button_check_box,
+		[_dev_location(DevOptionsPanel.TAB_SESSION, "Session Utilities")],
+		"Shows an on-table button that restarts the current mode. Using that button replaces the current run state.",
+		"The restart button is visible during gameplay.",
+		"The restart button stays hidden.",
+		["restart", "reset run", "mode restart"]
+	)
+	_register_bool_control(
+		"session.show_reset_last_shot_button",
+		"Show Reset Last Shot Button",
+		reset_last_shot_button_check_box,
+		[_dev_location(DevOptionsPanel.TAB_SESSION, "Session Utilities")],
+		"Shows the one-shot checkpoint restore button. Restoring rewinds the current table to the saved pre-shot state.",
+		"The shot-rewind button is visible.",
+		"The shot-rewind button stays hidden.",
+		["rewind", "checkpoint", "restore shot"]
+	)
+
+	_register_bool_control(
+		"aim.debug_line",
+		"Debug Aim Line",
+		debug_aim_line_check_box,
+		[_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Testing")],
+		"Enables raw aim diagnostics in a compatibility mode: current anomaly balls become ordinary object balls and future anomaly behavior is suppressed until disabled.",
+		"Raw aim diagnostics are drawn and anomaly behavior is suppressed.",
+		"The normal player-facing aim preview and future anomaly behavior are used.",
+		["raw aim", "prediction line", "aim diagnostics", "disable anomalies"]
+	)
+	_register_bool_control(
+		"aim.verbose_candidates",
+		"Verbose Aim Candidates",
+		verbose_aim_candidates_check_box,
+		[_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Testing")],
+		"Shows every ball considered by the first-hit aim sweep instead of only the focused candidate subset. This can make diagnostics much denser.",
+		"All considered first-hit candidates are reported.",
+		"Only the focused candidate subset is reported.",
+		["candidate sweep", "first hit", "contact candidates"]
+	)
+	_register_bool_control(
+		"aim.cue_first_contact_toi",
+		"Cue First-Contact TOI",
+		cue_first_contact_toi_check_box,
+		[_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Live Collision Accuracy")],
+		"Makes the cue ball resolve its first collision in true travel order instead of whichever ball pair the collision loop encounters first. This changes the active collision test path.",
+		"Swept time-of-impact ordering is used for the cue ball's first contact.",
+		"The legacy pair-loop order is used for that first contact.",
+		["toi", "time of impact", "first collision", "travel order"]
+	)
+	_register_cloned_aim_options()
+	_register_aim_benchmark_options()
+	_register_action_option(
+		"aim.reset_profiler",
+		"Reset Aim Profiler Stats",
+		reset_aim_profiler_button,
+		[_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Profiler")],
+		"Clears the cloned predictor's bounded timing history and profiler counters. It does not change prediction settings or gameplay.",
+		["clear timings", "profile history", "performance baseline"]
+	)
+
+	_register_bool_control(
+		"events.show_wayfinder_current_button",
+		"Show Wayfinder Current Test Button",
+		wayfinder_current_test_check_box,
+		[_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Table Events")],
+		"Shows a gameplay-side debug button that triggers Wayfinder Current without paying its normal Intervention cost.",
+		"The event test button is visible.",
+		"The event test button is hidden.",
+		["wayfinder event", "current test"]
+	)
+	_register_bool_control(
+		"events.show_broadside_button",
+		"Show Broadside Attack Test Button",
+		broadside_attack_test_check_box,
+		[_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Table Events")],
+		"Shows a gameplay-side debug button that triggers Broadside Attack without paying its normal Intervention cost.",
+		"The event test button is visible.",
+		"The event test button is hidden.",
+		["broadside", "cannon event", "attack test"]
+	)
+	_register_bool_control(
+		"cargo.force_contraband",
+		"Force Loose Cargo Contraband",
+		force_loose_cargo_contraband_check_box,
+		[_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Cargo & Contraband")],
+		"Forces the next Loose Cargo test path to use Contraband instead of its normal chance. This changes active test outcomes while enabled.",
+		"Loose Cargo Contraband is forced using the selected kind.",
+		"Normal Contraband odds are used.",
+		["cargo rng", "special replacement", "forced cargo"]
+	)
+	_register_select_control(
+		"cargo.contraband_kind",
+		"Forced Contraband Kind",
+		loose_cargo_contraband_selector,
+		_make_contraband_choices(),
+		[_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Cargo & Contraband")],
+		"Chooses which Contraband replacement is used while forced Contraband is enabled. Random uses the normal weighted Contraband table.",
+		["wayfinder", "powder keg", "treasure", "cannon", "embezzler"],
+		_is_contraband_selector_disabled
+	)
+	_register_action_option("debris.spawn", "Spawn Wood Debris", spawn_wood_debris_button, [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Table Debris")], "Spawns one authored wood obstacle at a safe randomized felt position. This modifies the current table.", ["obstacle", "plank"])
+	_register_action_option("debris.clear", "Clear Debris", clear_debris_button, [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Table Debris")], "Removes all currently spawned wood debris from the table.", ["obstacle", "remove planks"])
+	_register_bool_control("debris.collision", "Enable Debris Collision", obstacle_collision_check_box, [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Table Debris")], "Enables custom ball collision against the authored debris polygons. This changes active table collision behavior.", "Balls bounce from wood debris.", "Debris remains visual-only.", ["polygon collision", "wood blocker"])
+	_register_bool_control("debris.collision_draw", "Show Debris Collision Shape", obstacle_collision_debug_check_box, [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Table Debris")], "Draws the exact transformed polygon used by debris collision so art alignment can be inspected.", "Collision polygons are visible.", "Collision polygons are hidden.", ["polygon debug", "obstacle outline"])
+
+	_register_bool_control("back_room.force_available", "Force Back Room Available", force_back_room_available_check_box, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Back Room")], "Bypasses only the Back Room refresh-cost unlock threshold. Real cost, Reserve capacity, Embezzler limits, and Oath blockers still apply.", "The Back Room is treated as unlocked for testing.", "The normal unlock threshold is required.", ["deal unlock", "quartermaster"])
+	_register_action_option("back_room.open", "Open Back Room Deal", open_back_room_deal_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Back Room")], "Opens the real Back Room Deal panel. Purchases still use normal costs and validation.", ["deal panel", "quartermaster"])
+	_register_action_option("boon.activate_long_sight", "Activate Long Sight", activate_long_sight_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Kraken Boons")], "Activates or refreshes Long Sight through the real Boon system without a purchase.", ["aim boon", "refresh boon"])
+	_register_action_option("boon.activate_patience", "Activate Kraken's Patience", activate_krakens_patience_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Kraken Boons")], "Activates or refreshes Kraken's Patience through the real Boon system without a purchase.", ["meter carry", "refresh boon"])
+	_register_action_option("boon.activate_deep_ledger", "Activate Deep Ledger", activate_deep_ledger_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Kraken Boons")], "Activates or refreshes Deep Ledger through the real Boon system without a purchase.", ["ledger boon", "refresh boon"])
+	_register_action_option("boon.activate_iron_wake", "Activate Iron Wake", activate_iron_wake_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Kraken Boons")], "Activates or refreshes Iron Wake through the real Boon system without a purchase.", ["cannon wake", "impact boon"])
+	_register_action_option("boon.expire_all", "Expire All Boons", expire_all_boons_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Kraken Boons")], "Expires every active Kraken Boon immediately so cleanup and HUD behavior can be tested.", ["clear boons", "remove boon"])
+
+	for test_index in range(RESERVE_STACK_TEST_ITEMS.size()):
+		var test_item: Dictionary = RESERVE_STACK_TEST_ITEMS[test_index]
+		var button: Button = reserve_stack_test_buttons[test_index] as Button
+		var item_id: String = str(test_item.get("item_id", test_index))
+		_register_action_option(
+			"reserve.stack.%s" % item_id,
+			str(test_item.get("label", "Add Reserve Stack")),
+			button,
+			[_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Reserve Stack Tests")],
+			"Adds this debug stack to the first empty Reserve slot without spending Doubloons. A full Reserve is left unchanged.",
+			["quantity", "bundle", "stack payload"]
+		)
+
+	_register_action_option("spoils.advance", "Advance Spoils Progress +1", sunken_spoils_advance_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Sunken Spoils")], "Advances the current Sunken Spoils milestone by one debug step. This modifies current-run reward progress.", ["milestone", "sink reward"])
+	_register_action_option("spoils.trigger", "Trigger Spoils Reward", sunken_spoils_trigger_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Sunken Spoils")], "Makes the current Sunken Spoils reward ready and opens its normal choice flow when allowed.", ["reward panel", "spoils ready"])
+	_register_action_option("spoils.reset", "Reset Spoils", sunken_spoils_reset_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Sunken Spoils")], "Clears current Sunken Spoils progress and pending reward state.", ["clear milestone", "reset reward"])
+
+	_register_select_control("oath.selected", "Selected Oath", oath_testing_selector, _make_oath_choices(), [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Oath Testing")], "Chooses which Oath the debug activate, fail, and complete actions target. Selection alone does not activate an Oath.", ["urgency", "isolation", "sacrifice", "humility"])
+	_register_action_option("oath.activate", "Activate Selected Oath", oath_activate_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Oath Testing")], "Activates the selected Oath through OathSystem's normal compatibility checks. This can change the active run.", ["swear oath", "start oath"])
+	_register_action_option("oath.advance", "Advance Oath Shot", oath_advance_shot_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Oath Testing")], "Decrements Oath shot timers once without simulating a gameplay shot or advancing unrelated shot systems.", ["timer", "countdown"])
+	_register_action_option("oath.fail", "Fail Active Oath", oath_fail_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Oath Testing")], "Runs the selected or first active Oath's real failure path, including its configured penalty, then removes it.", ["penalty", "failure"])
+	_register_action_option("oath.complete", "Complete Active Oath", oath_complete_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Oath Testing")], "Completes and removes the selected or first active Oath without applying a failure penalty.", ["satisfy oath", "success"])
+	_register_action_option("oath.clear", "Clear Active Oaths", oath_clear_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Oath Testing")], "Safely removes all active Oaths and restores suppressed cue modifiers without applying penalties.", ["remove oaths", "restore modifiers"])
+	_register_readout_option("oath.status", "Oath State", oath_testing_readout_label, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Oath Testing")], "Reports active Oaths, cue-modifier suppression, and the final modifier-enabled state.", ["remaining shots", "silenced", "snapshot"])
+
+
+func _register_external_dev_options() -> void:
+	if dev_option_registry == null or debug_overlay_bridge == null or _external_dev_options_registered:
+		return
+	_external_dev_options_registered = true
+
+	_register_overlay_bool(
+		"overlay.show_fps",
+		"Show FPS",
+		[
+			_dev_location(DevOptionsPanel.TAB_SESSION, "Display & Session"),
+			_dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Overlay Diagnostics"),
+		],
+		"Shows a compact frame-rate readout near the upper-right edge. This is presentation-only and persists across application restarts.",
+		"The standalone FPS readout is visible and updates four times per second.",
+		"The standalone FPS readout is hidden.",
+		["frames per second", "performance counter", "persistent"]
+	)
+	_register_overlay_action("panels.hide_all", "Hide All Debug Panels", [_dev_location(DevOptionsPanel.TAB_SESSION, "Session Utilities"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Panel Workspace Actions")], "Hides every modular debug panel plus the full performance, physics-debug, and legacy quick-menu overlays. It preserves panel layout and does not disable Debug Aim Line.", ["close workspace", "clear overlays"])
+	_register_overlay_action("panels.reset_layout", "Reset Debug Panel Layout", [_dev_location(DevOptionsPanel.TAB_SESSION, "Session Utilities"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Panel Workspace Actions")], "Restores every debug panel's authored position and size while preserving which panels are visible and which diagnostics are active.", ["default positions", "restore sizes"])
+	_register_overlay_bool("panel.aim_compare_panels", "Show Complete Aim Workspace", [_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Testing"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Panel Workspace Actions")], "Shows or hides the complete group of aim-comparison panels together. Individual aim panels remain independently controllable.", "All aim comparison panels are shown.", "The group is hidden unless individual panels are enabled.", ["aim compare panels", "workspace", "all aim panels"], ["Aim Compare Panels"])
+
+	var aim_panels: Array[Dictionary] = [
+		{"id": "aim_preview", "label": "Aim Preview", "description": "Shows timing and workload diagnostics for the polished and cloned aim-preview paths."},
+		{"id": "aim_launch", "label": "Aim Launch", "description": "Compares predicted launch direction and speed with the real cue-ball launch."},
+		{"id": "aim_contact", "label": "Aim Contact", "description": "Shows the predicted and actual first contacted ball and the resulting verdict."},
+		{"id": "aim_response", "label": "Aim Response", "description": "Shows contact geometry, distance, radii, and response measurements for the first hit."},
+		{"id": "aim_trace", "label": "Aim Trace", "description": "Shows the recorded predicted and actual cue-ball path trace diagnostics."},
+		{"id": "aim_candidates", "label": "Aim Candidates", "description": "Shows every nearby ball considered as the cue ball's possible first target and why each was accepted or rejected."},
+		{"id": "aim_collisions", "label": "Aim Collisions", "description": "Shows predicted collision events and resolver details from the aim path."},
+		{"id": "aim_contact_order", "label": "Aim Contact Order", "description": "Shows first-contact sweep ordering so candidate selection can be compared with true travel order."},
+		{"id": "aim_simulation", "label": "Aim Simulation", "description": "Shows cloned simulation state, work limits, counts, and stop reasons."},
+		{"id": "aim_profiler", "label": "Aim Profiler", "description": "Shows gated phase timings, cache behavior, rebuild reasons, and cloned-prediction workload."},
+		{"id": "aim_event_chain", "label": "Aim Event Chain", "description": "Compares the ordered predicted event chain with events observed during the real shot."},
+	]
+	for panel_definition in aim_panels:
+		_register_panel_option(panel_definition, "Aim Panels")
+
+	var performance_panels: Array[Dictionary] = [
+		{"id": "core_performance", "label": "Core Performance", "description": "Shows frame, physics, ball-count, and core system performance counters."},
+		{"id": "physics", "label": "Physics Performance", "description": "Shows detailed custom billiards physics timing and collision workload."},
+		{"id": "visual_effects", "label": "Visual Cost / Effects", "description": "Shows presentation and visual-effect workload so draw-only costs can be inspected."},
+	]
+	for panel_definition in performance_panels:
+		_register_panel_option(panel_definition, "Performance Panels")
+
+	var system_panels: Array[Dictionary] = [
+		{"id": "treasure", "label": "Treasure", "description": "Shows Treasure Ball perception, hide-target, and movement diagnostics."},
+		{"id": "embezzler", "label": "Embezzler", "description": "Shows Embezzler value, movement, escape, and capture state."},
+		{"id": "anchor", "label": "Anchor", "description": "Shows Anchor curse-seed chain, tightening, warning, spread, and collapse diagnostics."},
+		{"id": "ball_drops_score", "label": "Ball Drops / Score", "description": "Shows legacy BallDrop gating and active scoring-system counters."},
+		{"id": "cannon", "label": "Cannon", "description": "Shows Cannon Ball movement, heat, impact, and performance diagnostics."},
+		{"id": "powder_keg_wayfinder", "label": "Powder Keg / Wayfinder", "description": "Shows Powder Keg explosion and Wayfinder guidance/current diagnostics."},
+	]
+	for panel_definition in system_panels:
+		_register_panel_option(panel_definition, "System Panels")
+
+	_register_overlay_bool("overlay.performance", "Full Performance Overlay", [_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Testing"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Performance Panels")], "Shows the original full-screen performance text overlay. It is denser and more expensive to format than the focused modular panels.", "The full performance overlay is visible.", "The full performance overlay is hidden.", ["f3", "all performance", "legacy diagnostics"])
+	_register_overlay_bool("overlay.physics_debug", "Physics Debug", [_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Testing"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Performance Panels")], "Shows the legacy on-screen physics debug text for moving balls and collision state.", "Physics debug text is visible.", "Physics debug text is hidden.", ["ball velocity", "collision state", "legacy overlay"])
+	_register_overlay_bool("overlay.shot_path", "Shot Path Debug", [_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Testing"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Overlay Diagnostics")], "Draws the actual shot path for comparison with aim prediction. This is diagnostic presentation only.", "Actual shot-path diagnostics are drawn.", "Actual shot-path diagnostics are hidden.", ["real trajectory", "path trace"])
+	_register_overlay_bool("overlay.quick_menu", "Debug Quick Menu", [_dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Overlay Diagnostics")], "Shows the retained legacy quick-debug menu. Its controls mirror the same underlying debug states exposed here.", "The legacy quick menu is visible.", "The legacy quick menu is hidden.", ["f2", "old debug menu", "legacy menu"])
+
+	_register_overlay_bool("anchor.visuals", "Anchor Visuals", [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Anchor Testing / Visuals"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Overlay Diagnostics")], "Shows Anchor chains, warning marks, and other authored Anchor presentation. This changes visuals only.", "Anchor presentation is drawn.", "Anchor presentation is hidden while Anchor state still runs.", ["chains", "curse seed visuals"])
+	_register_overlay_bool("anchor.debug_visual", "Anchor Debug Visual", [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Anchor Testing / Visuals"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Overlay Diagnostics")], "Adds technical Anchor chain and constraint drawings for debugging.", "Anchor diagnostic geometry is visible.", "Only normal Anchor presentation is used.", ["constraint debug", "leash"])
+	_register_overlay_bool("anchor.single_latch", "Anchor Single Latch Per Target", [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Anchor Testing / Visuals")], "Limits each eligible target ball to one Anchor latch during the active test path. This can change Anchor test behavior.", "A target can hold only one Anchor latch.", "Normal Anchor latch rules are used.", ["chain target", "latch limit"])
+	_register_overlay_bool("treasure.debug_visual", "Treasure Debug Visual", [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Treasure Testing / Visuals"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Overlay Diagnostics")], "Draws Treasure perception corridors, committed hide targets, and steering diagnostics.", "Treasure diagnostic drawings are visible.", "Treasure uses only normal presentation.", ["hide target", "aim corridor", "scuttle"])
+	_register_overlay_bool("powder.particles", "Powder Keg Particles", [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Powder Keg Presentation")], "Enables normal Powder Keg explosion particles. This affects presentation workload, not explosion force.", "Powder Keg explosion particles are allowed.", "Powder Keg explosion particles are suppressed.", ["explosion vfx", "powder presentation"])
+	_register_overlay_bool("powder.reduced_particles", "Reduced Powder Keg Particles", [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Powder Keg Presentation")], "Uses a reduced Powder Keg particle count to compare presentation cost while retaining the effect.", "Reduced particle density is used.", "Normal particle density is used when particles are enabled.", ["low particles", "vfx cost"])
+	_register_overlay_bool("powder.suppress_trails", "Suppress Powder Keg Trails", [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Powder Keg Presentation")], "Hides Powder Keg trails for visual-cost testing without changing ball movement.", "Powder Keg trails are hidden.", "Powder Keg trails use their normal presentation.", ["trail vfx", "visual cost"])
+
+
+func _register_panel_option(panel_definition: Dictionary, section: String) -> void:
+	var panel_id: String = str(panel_definition.get("id", ""))
+	_register_overlay_bool(
+		"panel.%s" % panel_id,
+		str(panel_definition.get("label", panel_id)),
+		[_dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, section)],
+		str(panel_definition.get("description", "Shows this modular debug panel.")),
+		"The modular panel is visible and updates only the diagnostics it needs.",
+		"The modular panel is hidden and does not format its text.",
+		[panel_id.replace("_", " "), "debug panel", "diagnostics"]
+	)
+
+
+func _register_overlay_bool(option_id: String, label: String, locations: Array, description: String, on_effect: String, off_effect: String, keywords: Array = [], aliases: Array = []) -> void:
+	if dev_option_registry.has_option(option_id):
+		return
+	dev_option_registry.register_option({
+		"id": option_id,
+		"label": label,
+		"kind": "bool",
+		"locations": locations,
+		"description": description,
+		"on_effect": on_effect,
+		"off_effect": off_effect,
+		"keywords": keywords,
+		"aliases": aliases,
+		"getter": _get_debug_overlay_option_value.bind(option_id),
+		"setter": _set_debug_overlay_option_value.bind(option_id),
+	})
+
+
+func _register_overlay_action(option_id: String, label: String, locations: Array, description: String, keywords: Array = []) -> void:
+	if dev_option_registry.has_option(option_id):
+		return
+	dev_option_registry.register_option({
+		"id": option_id,
+		"label": label,
+		"kind": "action",
+		"locations": locations,
+		"description": description,
+		"keywords": keywords,
+		"action": _trigger_debug_overlay_action.bind(option_id),
+	})
+
+
+func _get_debug_overlay_option_value(option_id: String) -> Variant:
+	if debug_overlay_bridge == null:
+		return false
+	return debug_overlay_bridge.get_dev_option_state(option_id)
+
+
+func _set_debug_overlay_option_value(value: Variant, option_id: String) -> void:
+	if debug_overlay_bridge != null:
+		debug_overlay_bridge.set_dev_option_state(option_id, bool(value))
+
+
+func _trigger_debug_overlay_action(option_id: String) -> void:
+	if debug_overlay_bridge != null:
+		debug_overlay_bridge.trigger_dev_option_action(option_id)
+
+
+func _on_debug_overlay_dev_option_changed(option_id: String, _value: Variant) -> void:
+	_sync_legacy_panel_check_box(option_id)
+	if dev_option_registry != null:
+		dev_option_registry.refresh_option(option_id)
+		if option_id.begins_with("panel.aim_"):
+			dev_option_registry.refresh_option("panel.aim_compare_panels")
+
+
+func _sync_legacy_panel_check_box(option_id: String) -> void:
+	if debug_overlay_bridge == null:
+		return
+	var check_box_by_option: Dictionary = {
+		"panel.core_performance": core_performance_check_box,
+		"panel.aim_preview": aim_preview_check_box,
+		"panel.treasure": treasure_check_box,
+		"panel.embezzler": embezzler_check_box,
+		"panel.anchor": anchor_check_box,
+		"panel.ball_drops_score": ball_drops_score_check_box,
+		"panel.cannon": cannon_check_box,
+		"panel.powder_keg_wayfinder": powder_keg_wayfinder_check_box,
+		"panel.visual_effects": visual_effects_check_box,
+		"panel.physics": physics_check_box,
+		"panel.aim_compare_panels": aim_compare_panels_check_box,
+	}
+	var check_box: CheckBox = check_box_by_option.get(option_id) as CheckBox
+	if check_box != null:
+		check_box.set_pressed_no_signal(bool(debug_overlay_bridge.get_dev_option_state(option_id)))
+
+
+func _register_cloned_aim_options() -> void:
+	for definition_value in AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_configuration_schema(4):
+		var schema: Dictionary = definition_value
+		var key: String = str(schema.get("key", ""))
+		var source: Control = cloned_aim_controls.get(key) as Control
+		if key.is_empty() or source == null:
 			continue
-		if child == dev_options_scroll_container:
-			continue
-		if child == dev_options_back_button:
-			continue
-		debug_section.remove_child(child)
-		dev_options_scroll_content.add_child(child)
+		var registry_definition: Dictionary = schema.duplicate(true)
+		registry_definition["id"] = "aim.cloned.%s" % key
+		var schema_type: String = str(schema.get("type", ""))
+		if schema_type == "bool":
+			registry_definition["kind"] = "bool"
+		elif schema_type == "select":
+			registry_definition["kind"] = "select"
+		else:
+			registry_definition["kind"] = "number"
+		registry_definition["locations"] = [_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, _get_cloned_aim_section(key))]
+		registry_definition["getter"] = _get_control_value.bind(source, str(schema.get("type", "")))
+		registry_definition["setter"] = _set_control_value.bind(source, str(schema.get("type", "")))
+		dev_option_registry.register_option(registry_definition)
+
+
+func _register_aim_benchmark_options() -> void:
+	var locations: Array = [_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Player Aim Benchmark")]
+	var preset_choices: Array = []
+	for preset_value in AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_benchmark_preset_definitions(4):
+		var preset: Dictionary = preset_value
+		preset_choices.append({
+			"label": str(preset.get("label", "Preset")),
+			"value": str(preset.get("id", "")),
+			"description": str(preset.get("description", "Applies this benchmark configuration.")),
+		})
+	dev_option_registry.register_option({
+		"id": "aim.benchmark.preset",
+		"label": "Benchmark Preset",
+		"kind": "select",
+		"locations": locations,
+		"description": "Selects a named production-like or deep-debug cloned aim configuration. Use Apply Preset to update the real predictor controls.",
+		"keywords": ["long sight 5", "extended 10", "extended 20", "stress 40", "deep debug"],
+		"choices": preset_choices,
+		"getter": _get_selected_aim_benchmark_preset,
+		"setter": _set_selected_aim_benchmark_preset,
+	})
+	dev_option_registry.register_option({
+		"id": "aim.benchmark.apply_preset",
+		"label": "Apply Preset",
+		"kind": "action",
+		"locations": locations,
+		"description": "Applies the selected preset to the existing cloned aim controls. Every value remains editable afterward.",
+		"keywords": ["load preset", "benchmark configuration"],
+		"action": _apply_selected_aim_benchmark_preset,
+	})
+	dev_option_registry.register_option({
+		"id": "aim.benchmark.label",
+		"label": "Benchmark Label",
+		"kind": "text",
+		"locations": locations,
+		"description": "Adds an optional human-readable setup label to the copied benchmark report.",
+		"placeholder": "Round 2 - 3 balls - depth 10",
+		"keywords": ["report name", "capture label"],
+		"getter": _get_aim_benchmark_label,
+		"setter": _set_aim_benchmark_label,
+	})
+	_register_direct_action_option(
+		"aim.benchmark.reset",
+		"Reset Benchmark Stats",
+		locations,
+		"Clears only the bounded player benchmark capture and report state.",
+		_reset_aim_benchmark,
+		["clear capture", "benchmark history"]
+	)
+	_register_direct_action_option(
+		"aim.benchmark.start",
+		"Start Benchmark Capture",
+		locations,
+		"Starts a fresh bounded capture and records only completed cloned prediction rebuilds after this action.",
+		_start_aim_benchmark,
+		["record benchmark", "begin capture"]
+	)
+	_register_direct_action_option(
+		"aim.benchmark.stop",
+		"Stop Benchmark Capture",
+		locations,
+		"Stops the active benchmark window and finalizes its duration and report statistics.",
+		_stop_aim_benchmark,
+		["finish capture", "finalize report"]
+	)
+	_register_direct_action_option(
+		"aim.benchmark.copy",
+		"Copy Benchmark Report",
+		locations,
+		"Copies a compact plain-text setup, timing, workload, cache, stop-reason, and contamination report to the system clipboard.",
+		_copy_aim_benchmark_report,
+		["clipboard", "performance report"]
+	)
+
+
+func _register_direct_action_option(
+	option_id: String,
+	label: String,
+	locations: Array,
+	description: String,
+	action: Callable,
+	keywords: Array = []
+) -> void:
+	if dev_option_registry.has_option(option_id):
+		return
+	dev_option_registry.register_option({
+		"id": option_id,
+		"label": label,
+		"kind": "action",
+		"locations": locations,
+		"description": description,
+		"keywords": keywords,
+		"action": action,
+	})
+
+
+func _get_selected_aim_benchmark_preset() -> String:
+	return selected_aim_benchmark_preset_id
+
+
+func _set_selected_aim_benchmark_preset(value: Variant) -> void:
+	selected_aim_benchmark_preset_id = str(value)
+
+
+func _get_aim_benchmark_label() -> String:
+	return aim_benchmark_label
+
+
+func _set_aim_benchmark_label(value: Variant) -> void:
+	aim_benchmark_label = str(value)
+
+
+func _apply_selected_aim_benchmark_preset() -> void:
+	var configuration: Dictionary = AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_benchmark_preset_configuration(
+		selected_aim_benchmark_preset_id,
+		4
+	)
+	_apply_cloned_aim_configuration(configuration)
+	if debug_aim_line_check_box != null and not debug_aim_line_check_box.button_pressed:
+		debug_aim_line_check_box.button_pressed = true
+	if (
+		str(configuration.get("result_detail_mode", ""))
+		!= AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+		and verbose_aim_candidates_check_box != null
+		and verbose_aim_candidates_check_box.button_pressed
+	):
+		verbose_aim_candidates_check_box.button_pressed = false
+	if dev_option_registry != null:
+		dev_option_registry.refresh_all()
+
+
+func _reset_aim_benchmark() -> void:
+	debug_reset_aim_benchmark_requested.emit()
+
+
+func _start_aim_benchmark() -> void:
+	var profile_control: Control = cloned_aim_controls.get("profile_enabled") as Control
+	if profile_control is CheckBox and not (profile_control as CheckBox).button_pressed:
+		(profile_control as CheckBox).button_pressed = true
+	debug_start_aim_benchmark_requested.emit(
+		aim_benchmark_label,
+		AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_benchmark_preset_label(
+			selected_aim_benchmark_preset_id,
+			4
+		)
+	)
+
+
+func _stop_aim_benchmark() -> void:
+	debug_stop_aim_benchmark_requested.emit()
+
+
+func _copy_aim_benchmark_report() -> void:
+	debug_copy_aim_benchmark_report_requested.emit()
+
+
+func _get_cloned_aim_section(key: String) -> String:
+	if key == "profile_enabled":
+		return "Aim Profiler"
+	if key in ["enabled", "use_for_long_sight", "result_detail_mode"]:
+		return "Cloned Predictor"
+	if key in ["max_simulated_seconds", "simulation_frame_rate", "simulation_substeps", "max_physics_frames", "max_total_iterations", "max_geometry_probes", "max_processing_time_ms", "max_collision_events_per_substep"]:
+		return "Simulation Timing & Work"
+	if key in ["max_total_events", "max_ball_contacts", "max_cue_ball_contacts", "max_rail_contacts", "max_pocket_events", "max_tracked_balls", "max_child_generation_depth"]:
+		return "Event & Contact Limits"
+	if key in ["max_points_per_ball", "max_total_trace_points", "trace_point_spacing", "player_trace_spacing"]:
+		return "Trace Limits"
+	return "Aim Drawing"
+
+
+func _register_bool_control(
+	option_id: String,
+	label: String,
+	check_box: CheckBox,
+	locations: Array,
+	description: String,
+	on_effect: String,
+	off_effect: String,
+	keywords: Array = [],
+	aliases: Array = []
+) -> void:
+	if check_box == null or dev_option_registry.has_option(option_id):
+		return
+	dev_option_registry.register_option({
+		"id": option_id,
+		"label": label,
+		"kind": "bool",
+		"locations": locations,
+		"description": description,
+		"on_effect": on_effect,
+		"off_effect": off_effect,
+		"keywords": keywords,
+		"aliases": aliases,
+		"getter": _get_check_box_value.bind(check_box),
+		"setter": _set_check_box_value.bind(check_box),
+	})
+
+
+func _register_action_option(option_id: String, label: String, button: Button, locations: Array, description: String, keywords: Array = [], aliases: Array = []) -> void:
+	if button == null or dev_option_registry.has_option(option_id):
+		return
+	dev_option_registry.register_option({
+		"id": option_id,
+		"label": label,
+		"kind": "action",
+		"locations": locations,
+		"description": description,
+		"keywords": keywords,
+		"aliases": aliases,
+		"action": _press_debug_button.bind(button),
+	})
+
+
+func _register_select_control(option_id: String, label: String, selector: OptionButton, choices: Array, locations: Array, description: String, keywords: Array = [], disabled_getter: Callable = Callable()) -> void:
+	if selector == null or dev_option_registry.has_option(option_id):
+		return
+	dev_option_registry.register_option({
+		"id": option_id,
+		"label": label,
+		"kind": "select",
+		"locations": locations,
+		"description": description,
+		"keywords": keywords,
+		"choices": choices,
+		"getter": _get_option_button_value.bind(selector),
+		"setter": _set_option_button_value.bind(selector),
+		"disabled_getter": disabled_getter,
+	})
+
+
+func _register_readout_option(option_id: String, label: String, source_label: Label, locations: Array, description: String, keywords: Array = []) -> void:
+	if source_label == null or dev_option_registry.has_option(option_id):
+		return
+	dev_option_registry.register_option({
+		"id": option_id,
+		"label": label,
+		"kind": "readout",
+		"locations": locations,
+		"description": description,
+		"keywords": keywords,
+		"getter": _get_label_text.bind(source_label),
+	})
+
+
+func _dev_location(tab_id: String, section: String) -> Dictionary:
+	return {"tab_id": tab_id, "section": section}
+
+
+func _make_contraband_choices() -> Array:
+	var choices: Array = []
+	var descriptions: Dictionary = {
+		DEBUG_CONTRABAND_KIND_RANDOM: "Use the normal weighted Contraband table.",
+		"wayfinder": "Force one Wayfinder Ball replacement.",
+		"powder_keg": "Force one Powder Keg replacement.",
+		"treasure": "Force one Treasure Ball replacement.",
+		"cannon": "Force one Cannon Ball replacement.",
+		"embezzler": "Force one Embezzler replacement when its cap permits.",
+	}
+	for item_value in DEBUG_CONTRABAND_SELECTOR_ITEMS:
+		var item: Dictionary = item_value
+		var kind: String = str(item.get("kind", DEBUG_CONTRABAND_KIND_RANDOM))
+		choices.append({"label": str(item.get("label", "Random")), "value": kind, "description": str(descriptions.get(kind, "Select this replacement."))})
+	return choices
+
+
+func _make_oath_choices() -> Array:
+	var choices: Array = []
+	var descriptions: Dictionary = {
+		OathSystem.OATH_OF_URGENCY: "Complete any Kraken Request before the shot timer expires.",
+		OathSystem.OATH_OF_ISOLATION: "Temporarily locks Quartermaster purchases, refreshes, and Back Room access.",
+		OathSystem.OATH_OF_SACRIFICE: "Exercises the eligible-ball loss failure path.",
+		OathSystem.OATH_OF_HUMILITY: "Temporarily suppresses equipped cue gameplay modifiers.",
+	}
+	for item_value in OATH_TESTING_SELECTOR_ITEMS:
+		var item: Dictionary = item_value
+		var oath_id: String = str(item.get("oath_id", ""))
+		choices.append({"label": str(item.get("label", "Oath")), "value": oath_id, "description": str(descriptions.get(oath_id, "Select this Oath for debug actions."))})
+	return choices
+
+
+func _get_check_box_value(check_box: CheckBox) -> bool:
+	return check_box != null and check_box.button_pressed
+
+
+func _is_contraband_selector_disabled() -> bool:
+	return loose_cargo_contraband_selector == null or loose_cargo_contraband_selector.disabled
+
+
+func _get_label_text(label: Label) -> String:
+	return label.text if label != null else ""
+
+
+func _set_check_box_value(value: Variant, check_box: CheckBox) -> void:
+	if check_box == null:
+		return
+	var enabled: bool = bool(value)
+	if check_box.button_pressed != enabled:
+		check_box.button_pressed = enabled
+
+
+func _press_debug_button(button: Button) -> void:
+	if button != null and not button.disabled:
+		button.pressed.emit()
+
+
+func _get_option_button_value(selector: OptionButton) -> Variant:
+	if selector == null or selector.selected < 0 or selector.selected >= selector.item_count:
+		return ""
+	return selector.get_item_metadata(selector.selected)
+
+
+func _set_option_button_value(value: Variant, selector: OptionButton) -> void:
+	_select_option_button_value(selector, value, true)
+
+
+func _select_option_button_value(selector: OptionButton, value: Variant, emit_change: bool) -> void:
+	if selector == null:
+		return
+	for item_index in range(selector.item_count):
+		if selector.get_item_metadata(item_index) == value or str(selector.get_item_metadata(item_index)) == str(value):
+			if selector.selected != item_index:
+				selector.select(item_index)
+				if emit_change:
+					selector.item_selected.emit(item_index)
+			return
+
+
+func _get_control_value(control: Control, value_type: String) -> Variant:
+	if control is CheckBox:
+		return (control as CheckBox).button_pressed
+	if control is SpinBox:
+		var numeric_value: float = (control as SpinBox).value
+		return int(numeric_value) if value_type == "int" else numeric_value
+	if control is OptionButton:
+		return _get_option_button_value(control as OptionButton)
+	return null
+
+
+func _set_control_value(value: Variant, control: Control, value_type: String) -> void:
+	if control is CheckBox:
+		_set_check_box_value(value, control as CheckBox)
+	elif control is SpinBox:
+		var numeric_value: float = float(value)
+		if value_type == "int":
+			numeric_value = float(int(numeric_value))
+		if not is_equal_approx((control as SpinBox).value, numeric_value):
+			(control as SpinBox).value = numeric_value
+	elif control is OptionButton:
+		_select_option_button_value(control as OptionButton, value, true)
 
 
 func _make_event_test_check_box(text: String) -> CheckBox:
@@ -1035,6 +1959,9 @@ func _gui_input(event: InputEvent) -> void:
 
 
 func _show_pause_panel() -> void:
+	if dev_options_panel != null:
+		dev_options_panel.close_panel()
+	shade.visible = true
 	if options_panel != null:
 		options_panel.visible = false
 	if run_stats_panel != null:
@@ -1079,15 +2006,16 @@ func _show_dev_options_panel() -> void:
 	if end_run_confirm_panel != null:
 		end_run_confirm_panel.visible = false
 	placement_hint_panel.visible = false
-	menu_panel.visible = true
+	menu_panel.visible = false
 	tab_bar.visible = false
 	quartermaster_section.visible = false
-	debug_section.visible = true
+	debug_section.visible = false
 	quartermaster_tab_button.disabled = true
 	debug_tab_button.disabled = true
 	shade.color = NORMAL_SHADE_COLOR
-	if dev_options_back_button != null:
-		dev_options_back_button.grab_focus()
+	shade.visible = false
+	if dev_options_panel != null:
+		dev_options_panel.open_panel()
 
 
 func _update_options_panel_layout() -> void:
@@ -1254,6 +2182,8 @@ func _on_dev_options_pressed() -> void:
 
 
 func _on_dev_options_back_pressed() -> void:
+	if dev_options_panel != null:
+		dev_options_panel.close_panel()
 	_show_pause_panel()
 	dev_options_button.grab_focus()
 
@@ -1294,6 +2224,8 @@ func _on_broadside_attack_test_button_toggled(enabled: bool) -> void:
 func _on_force_loose_cargo_contraband_toggled(enabled: bool) -> void:
 	if loose_cargo_contraband_selector != null:
 		loose_cargo_contraband_selector.disabled = not enabled
+	if dev_option_registry != null:
+		dev_option_registry.refresh_option("cargo.contraband_kind")
 	debug_force_loose_cargo_contraband_toggled.emit(enabled)
 	if enabled:
 		debug_loose_cargo_contraband_kind_selected.emit(_get_selected_loose_cargo_contraband_kind())
@@ -1324,7 +2256,30 @@ func _on_debug_aim_line_toggled(enabled: bool) -> void:
 
 
 func _on_aim_compare_panels_toggled(enabled: bool) -> void:
+	if aim_preview_check_box != null:
+		aim_preview_check_box.set_pressed_no_signal(enabled)
+		debug_panel_toggled.emit(PANEL_AIM_PREVIEW, enabled)
 	debug_aim_compare_panels_toggled.emit(enabled)
+
+
+func _on_verbose_aim_candidates_toggled(enabled: bool) -> void:
+	debug_verbose_aim_candidates_toggled.emit(enabled)
+
+
+func _on_cue_first_contact_toi_toggled(enabled: bool) -> void:
+	debug_cue_first_contact_toi_toggled.emit(enabled)
+
+
+func _on_reset_aim_profiler_pressed() -> void:
+	debug_reset_aim_profiler_requested.emit()
+
+
+func _on_reset_table_button_toggled(enabled: bool) -> void:
+	debug_reset_table_button_toggled.emit(enabled)
+
+
+func _on_reset_last_shot_button_toggled(enabled: bool) -> void:
+	debug_reset_last_shot_button_toggled.emit(enabled)
 
 
 func _on_back_room_force_available_toggled(enabled: bool) -> void:

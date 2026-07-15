@@ -347,6 +347,47 @@ func get_spoils_snapshot() -> Dictionary:
 	}
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"current_milestone_index": current_milestone_index,
+		"current_milestone_progress": current_milestone_progress,
+		"pending_reward_available": pending_reward_available,
+		"pending_reward_ready": pending_reward_ready,
+		"active_reward_offer_ids": active_reward_offer_ids.duplicate(),
+		"doubloon_rerolls_this_menu": doubloon_rerolls_this_menu,
+		"total_doubloon_rerolls": total_doubloon_rerolls,
+		"doubloons_spent_on_rerolls": doubloons_spent_on_rerolls,
+		"rewards_claimed": rewards_claimed,
+		"cast_backs_used": cast_backs_used,
+		"qualifying_sinks_tracked": qualifying_sinks_tracked,
+		"final_milestone_repeats": final_milestone_repeats,
+		"last_status": last_status,
+		"rng_state": int(rng.state),
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	current_milestone_index = maxi(int(state.get("current_milestone_index", 0)), 0)
+	current_milestone_progress = maxi(int(state.get("current_milestone_progress", 0)), 0)
+	pending_reward_available = bool(state.get("pending_reward_available", false))
+	pending_reward_ready = bool(state.get("pending_reward_ready", false))
+	active_reward_offer_ids.clear()
+	var offers_value: Variant = state.get("active_reward_offer_ids", [])
+	if offers_value is Array:
+		for offer_id_value in offers_value:
+			active_reward_offer_ids.append(str(offer_id_value))
+	doubloon_rerolls_this_menu = maxi(int(state.get("doubloon_rerolls_this_menu", 0)), 0)
+	total_doubloon_rerolls = maxi(int(state.get("total_doubloon_rerolls", 0)), 0)
+	doubloons_spent_on_rerolls = maxi(int(state.get("doubloons_spent_on_rerolls", 0)), 0)
+	rewards_claimed = maxi(int(state.get("rewards_claimed", 0)), 0)
+	cast_backs_used = maxi(int(state.get("cast_backs_used", 0)), 0)
+	qualifying_sinks_tracked = maxi(int(state.get("qualifying_sinks_tracked", 0)), 0)
+	final_milestone_repeats = maxi(int(state.get("final_milestone_repeats", 0)), 0)
+	last_status = str(state.get("last_status", ""))
+	rng.state = int(state.get("rng_state", rng.state))
+	_emit_changed()
+
+
 func get_debug_snapshot() -> Dictionary:
 	return get_spoils_snapshot()
 

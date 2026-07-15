@@ -378,6 +378,88 @@ func is_event_menu_open() -> bool:
 	return event_menu_open
 
 
+func has_staged_event_work() -> bool:
+	return broadside_phase != BROADSIDE_PHASE_NONE or broadside_delay_remaining > 0.0
+
+
+func get_rewind_state() -> Dictionary:
+	return {
+		"shot_active": shot_active,
+		"current_shot_doubloons": current_shot_doubloons,
+		"current_segment_progress": current_segment_progress,
+		"current_segment_index": current_segment_index,
+		"pending_intervention_charges": pending_intervention_charges,
+		"pending_event_available": pending_event_available,
+		"pending_event_ready": pending_event_ready,
+		"event_menu_open": event_menu_open,
+		"active_offer_ids": active_offer_ids.duplicate(true),
+		"active_boon_offer_ids": active_boon_offer_ids.duplicate(true),
+		"total_tracked_doubloons": total_tracked_doubloons,
+		"pending_events_earned": pending_events_earned,
+		"pending_events_readied": pending_events_readied,
+		"purchased_events": purchased_events,
+		"denied_purchases": denied_purchases,
+		"offer_oath_rerolls": offer_oath_rerolls,
+		"denied_offer_oath_rerolls": denied_offer_oath_rerolls,
+		"offers_generated": offers_generated,
+		"ignored_awards_while_pending": ignored_awards_while_pending,
+		"last_award_amount": last_award_amount,
+		"shot_intervention_charges_earned": shot_intervention_charges_earned,
+		"shot_additional_charge_message_sent": shot_additional_charge_message_sent,
+		"last_purchase_event_id": last_purchase_event_id,
+		"last_purchase_charge_cost": last_purchase_charge_cost,
+		"last_purchase_doubloon_cost": last_purchase_doubloon_cost,
+		"last_blocker_reason": last_blocker_reason,
+		"event_earned_message_index": event_earned_message_index,
+		"offer_rng_state": int(offer_rng.state),
+		"cargo_stowaway_rng_state": int(cargo_stowaway_rng.state),
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	shot_active = bool(state.get("shot_active", false))
+	current_shot_doubloons = int(state.get("current_shot_doubloons", 0))
+	current_segment_progress = maxi(int(state.get("current_segment_progress", 0)), 0)
+	current_segment_index = maxi(int(state.get("current_segment_index", 0)), 0)
+	pending_intervention_charges = maxi(int(state.get("pending_intervention_charges", 0)), 0)
+	pending_event_available = bool(state.get("pending_event_available", false))
+	pending_event_ready = bool(state.get("pending_event_ready", false))
+	event_menu_open = bool(state.get("event_menu_open", false))
+	active_offer_ids = _rewind_array(state, "active_offer_ids")
+	active_boon_offer_ids = _rewind_array(state, "active_boon_offer_ids")
+	total_tracked_doubloons = maxi(int(state.get("total_tracked_doubloons", 0)), 0)
+	pending_events_earned = maxi(int(state.get("pending_events_earned", 0)), 0)
+	pending_events_readied = maxi(int(state.get("pending_events_readied", 0)), 0)
+	purchased_events = maxi(int(state.get("purchased_events", 0)), 0)
+	denied_purchases = maxi(int(state.get("denied_purchases", 0)), 0)
+	offer_oath_rerolls = maxi(int(state.get("offer_oath_rerolls", 0)), 0)
+	denied_offer_oath_rerolls = maxi(int(state.get("denied_offer_oath_rerolls", 0)), 0)
+	offers_generated = maxi(int(state.get("offers_generated", 0)), 0)
+	ignored_awards_while_pending = maxi(int(state.get("ignored_awards_while_pending", 0)), 0)
+	last_award_amount = int(state.get("last_award_amount", 0))
+	shot_intervention_charges_earned = maxi(int(state.get("shot_intervention_charges_earned", 0)), 0)
+	shot_additional_charge_message_sent = bool(state.get("shot_additional_charge_message_sent", false))
+	last_purchase_event_id = str(state.get("last_purchase_event_id", ""))
+	last_purchase_charge_cost = maxi(int(state.get("last_purchase_charge_cost", 0)), 0)
+	last_purchase_doubloon_cost = maxi(int(state.get("last_purchase_doubloon_cost", 0)), 0)
+	last_blocker_reason = str(state.get("last_blocker_reason", ""))
+	event_earned_message_index = maxi(int(state.get("event_earned_message_index", 0)), 0)
+	offer_rng.state = int(state.get("offer_rng_state", offer_rng.state))
+	cargo_stowaway_rng.state = int(state.get("cargo_stowaway_rng_state", cargo_stowaway_rng.state))
+	broadside_delay_remaining = 0.0
+	broadside_phase = BROADSIDE_PHASE_NONE
+	broadside_pending_powder_positions.clear()
+	set_process(false)
+	_emit_state()
+
+
+func _rewind_array(state: Dictionary, key: String) -> Array:
+	var value: Variant = state.get(key, [])
+	if value is Array:
+		return (value as Array).duplicate(true)
+	return []
+
+
 func is_event_icon_clickable() -> bool:
 	return enabled and pending_event_available and pending_event_ready and not event_menu_open
 

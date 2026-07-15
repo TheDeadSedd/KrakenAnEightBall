@@ -79,6 +79,61 @@ func get_progression_snapshot() -> Dictionary:
 	}
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"total_kraken_favor": total_kraken_favor,
+		"lifetime_kraken_favor_earned": lifetime_kraken_favor_earned,
+		"successful_passages": successful_passages,
+		"current_run_reward_finalized": current_run_reward_finalized,
+		"last_award_snapshot": last_award_snapshot.duplicate(true),
+		"cue_progression_data": cue_progression_data.duplicate(true),
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> bool:
+	var restored_total: int = maxi(int(state.get("total_kraken_favor", 0)), 0)
+	var restored_lifetime: int = maxi(int(state.get("lifetime_kraken_favor_earned", 0)), 0)
+	var restored_passages: int = maxi(int(state.get("successful_passages", 0)), 0)
+	var restored_finalized: bool = bool(state.get("current_run_reward_finalized", false))
+	var restored_last_award: Dictionary = _get_rewind_dictionary(state, "last_award_snapshot")
+	var restored_cue_data: Dictionary = _get_rewind_dictionary(state, "cue_progression_data")
+	var persistent_data_changed: bool = (
+		total_kraken_favor != restored_total
+		or lifetime_kraken_favor_earned != restored_lifetime
+		or successful_passages != restored_passages
+		or last_award_snapshot != restored_last_award
+		or cue_progression_data != restored_cue_data
+	)
+	var previous_state: Dictionary = get_rewind_state()
+	total_kraken_favor = restored_total
+	lifetime_kraken_favor_earned = restored_lifetime
+	successful_passages = restored_passages
+	current_run_reward_finalized = restored_finalized
+	last_award_snapshot = restored_last_award
+	cue_progression_data = restored_cue_data
+	if persistent_data_changed and not _write_progression():
+		_apply_rewind_state_without_saving(previous_state)
+		return false
+	progression_changed.emit(get_progression_snapshot())
+	return true
+
+
+func _apply_rewind_state_without_saving(state: Dictionary) -> void:
+	total_kraken_favor = maxi(int(state.get("total_kraken_favor", 0)), 0)
+	lifetime_kraken_favor_earned = maxi(int(state.get("lifetime_kraken_favor_earned", 0)), 0)
+	successful_passages = maxi(int(state.get("successful_passages", 0)), 0)
+	current_run_reward_finalized = bool(state.get("current_run_reward_finalized", false))
+	last_award_snapshot = _get_rewind_dictionary(state, "last_award_snapshot")
+	cue_progression_data = _get_rewind_dictionary(state, "cue_progression_data")
+
+
+func _get_rewind_dictionary(state: Dictionary, key: String) -> Dictionary:
+	var value: Variant = state.get(key, {})
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	return {}
+
+
 func can_afford_kraken_favor(amount: int) -> bool:
 	return total_kraken_favor >= maxi(amount, 0)
 

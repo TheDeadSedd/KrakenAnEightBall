@@ -49,10 +49,13 @@ var roguelite_hud: RogueliteHUD
 var roguelite_round_panel: RogueliteRoundPanel
 var roguelite_reward_panel: RogueliteRewardPanel
 var game_mode_id: String = GAME_MODE_SCRIPT.MODE_PASSAGE
+var pending_debug_session_snapshot: Dictionary = {}
+var reset_table_in_progress := false
 
 
 func _enter_tree() -> void:
 	game_mode_id = GAME_MODE_SCRIPT.consume_pending_mode(get_tree())
+	pending_debug_session_snapshot = GAME_MODE_SCRIPT.consume_pending_debug_session(get_tree())
 
 	var table_node: BilliardsTable = get_node_or_null("Table") as BilliardsTable
 	if table_node != null:
@@ -72,6 +75,7 @@ func _ready() -> void:
 	_connect_hud_signals()
 	_setup_hud_presenters()
 	_sync_initial_hud_state()
+	_restore_pending_debug_session()
 
 
 func _connect_table_signals() -> void:
@@ -87,6 +91,8 @@ func _connect_table_signals() -> void:
 		table.roguelite_run_failed.connect(_on_roguelite_run_failed)
 	if not table.roguelite_run_completed.is_connected(_on_roguelite_run_completed):
 		table.roguelite_run_completed.connect(_on_roguelite_run_completed)
+	if not table.shot_rewind_system.state_changed.is_connected(_on_shot_rewind_state_changed):
+		table.shot_rewind_system.state_changed.connect(_on_shot_rewind_state_changed)
 	table.score_system.doubloons_changed.connect(_on_doubloons_changed)
 	table.score_system.score_feed_message.connect(_on_score_feed_message)
 	table.table_event_system.status_changed.connect(_on_table_event_status_changed)
@@ -168,6 +174,26 @@ func _connect_pause_menu_signals() -> void:
 		pause_menu.debug_aim_line_toggled.connect(_on_pause_debug_aim_line_toggled)
 	if not pause_menu.debug_aim_compare_panels_toggled.is_connected(_on_pause_debug_aim_compare_panels_toggled):
 		pause_menu.debug_aim_compare_panels_toggled.connect(_on_pause_debug_aim_compare_panels_toggled)
+	if not pause_menu.debug_verbose_aim_candidates_toggled.is_connected(_on_pause_debug_verbose_aim_candidates_toggled):
+		pause_menu.debug_verbose_aim_candidates_toggled.connect(_on_pause_debug_verbose_aim_candidates_toggled)
+	if not pause_menu.debug_cue_first_contact_toi_toggled.is_connected(_on_pause_debug_cue_first_contact_toi_toggled):
+		pause_menu.debug_cue_first_contact_toi_toggled.connect(_on_pause_debug_cue_first_contact_toi_toggled)
+	if not pause_menu.debug_cloned_aim_configuration_changed.is_connected(_on_pause_debug_cloned_aim_configuration_changed):
+		pause_menu.debug_cloned_aim_configuration_changed.connect(_on_pause_debug_cloned_aim_configuration_changed)
+	if not pause_menu.debug_reset_aim_profiler_requested.is_connected(_on_pause_debug_reset_aim_profiler_requested):
+		pause_menu.debug_reset_aim_profiler_requested.connect(_on_pause_debug_reset_aim_profiler_requested)
+	if not pause_menu.debug_reset_aim_benchmark_requested.is_connected(_on_pause_debug_reset_aim_benchmark_requested):
+		pause_menu.debug_reset_aim_benchmark_requested.connect(_on_pause_debug_reset_aim_benchmark_requested)
+	if not pause_menu.debug_start_aim_benchmark_requested.is_connected(_on_pause_debug_start_aim_benchmark_requested):
+		pause_menu.debug_start_aim_benchmark_requested.connect(_on_pause_debug_start_aim_benchmark_requested)
+	if not pause_menu.debug_stop_aim_benchmark_requested.is_connected(_on_pause_debug_stop_aim_benchmark_requested):
+		pause_menu.debug_stop_aim_benchmark_requested.connect(_on_pause_debug_stop_aim_benchmark_requested)
+	if not pause_menu.debug_copy_aim_benchmark_report_requested.is_connected(_on_pause_debug_copy_aim_benchmark_report_requested):
+		pause_menu.debug_copy_aim_benchmark_report_requested.connect(_on_pause_debug_copy_aim_benchmark_report_requested)
+	if not pause_menu.debug_reset_table_button_toggled.is_connected(_on_pause_debug_reset_table_button_toggled):
+		pause_menu.debug_reset_table_button_toggled.connect(_on_pause_debug_reset_table_button_toggled)
+	if not pause_menu.debug_reset_last_shot_button_toggled.is_connected(_on_pause_debug_reset_last_shot_button_toggled):
+		pause_menu.debug_reset_last_shot_button_toggled.connect(_on_pause_debug_reset_last_shot_button_toggled)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
 
@@ -191,6 +217,10 @@ func _connect_hud_signals() -> void:
 		table_event_menu.boon_offer_selected.connect(_on_table_event_boon_offer_selected)
 	if not table_event_menu.event_offer_replace_requested.is_connected(_on_table_event_offer_replace_requested):
 		table_event_menu.event_offer_replace_requested.connect(_on_table_event_offer_replace_requested)
+	if not debug_overlay.reset_table_requested.is_connected(_on_debug_reset_table_requested):
+		debug_overlay.reset_table_requested.connect(_on_debug_reset_table_requested)
+	if not debug_overlay.reset_last_shot_requested.is_connected(_on_debug_reset_last_shot_requested):
+		debug_overlay.reset_last_shot_requested.connect(_on_debug_reset_last_shot_requested)
 
 
 func _setup_hud_presenters() -> void:
@@ -215,6 +245,9 @@ func _setup_hud_presenters() -> void:
 	reserve_deployment_presenter.setup(table.reserve_system, reserve_slots_ui)
 	table.emit_ready_status_if_needed("")
 	debug_overlay.setup(table)
+	pause_menu.configure_dev_options_debug_overlay(debug_overlay)
+	table.shot_rewind_system.set_ui_bridge(self)
+	debug_overlay.set_shot_rewind_state(table.shot_rewind_system.get_state_snapshot())
 	_apply_mode_visibility()
 
 
@@ -369,6 +402,7 @@ func _sync_initial_hud_state() -> void:
 	pause_menu.set_debris_collision_debug_state(table.table_obstacle_system.obstacle_collision_enabled)
 	pause_menu.set_debris_collision_draw_debug_state(table.table_obstacle_system.debug_collision_draw_enabled)
 	pause_menu.set_back_room_force_available_debug_state(bool(table.back_room_deal_system.get_deal_snapshot().get("debug_force_available", false)))
+	table.set_debug_cloned_aim_configuration(pause_menu.get_cloned_aim_configuration())
 	quartermaster_hud.set_quartermaster_items(table.quartermaster_system.get_shop_items_snapshot())
 	_set_back_room_deal_snapshot(table.back_room_deal_system.get_deal_snapshot())
 	_set_sunken_spoils_snapshot(table.sunken_spoils_system.get_spoils_snapshot())
@@ -523,7 +557,9 @@ func _input(event: InputEvent) -> void:
 		if passage_completion_in_progress:
 			get_viewport().set_input_as_handled()
 			return
-		if table.is_ball_placement_active():
+		if get_tree().paused and pause_menu.is_dev_options_open():
+			pause_menu.handle_dev_options_cancel_request()
+		elif table.is_ball_placement_active():
 			table.cancel_active_ball_placement()
 		else:
 			_set_game_paused(not get_tree().paused)
@@ -1010,12 +1046,211 @@ func _on_pause_debug_aim_line_toggled(enabled: bool) -> void:
 	if table == null:
 		return
 	table.set_debug_aim_line_enabled(enabled)
-	var status_text: String = "Debug aim line enabled." if enabled else "Debug aim line disabled."
+	var snapshot: Dictionary = table.get_debug_aim_mode_snapshot()
+	var converted: int = int(snapshot.get("anomalies_converted_this_activation", 0))
+	var status_text: String
+	if enabled and converted > 0:
+		status_text = "Debug Aim Mode regularized %d anomaly ball%s." % [
+			converted,
+			"" if converted == 1 else "s",
+		]
+	elif enabled:
+		status_text = "Debug Aim Mode enabled. Anomaly behavior is disabled."
+	else:
+		status_text = "Debug Aim Mode ended. Future anomalies are enabled."
 	hud_feed.add_message(status_text, "event")
 
 
 func _on_pause_debug_aim_compare_panels_toggled(enabled: bool) -> void:
 	debug_overlay.set_aim_compare_panels_visible(enabled)
+
+
+func _on_pause_debug_verbose_aim_candidates_toggled(enabled: bool) -> void:
+	debug_overlay.set_verbose_aim_candidates(enabled)
+
+
+func _on_pause_debug_cue_first_contact_toi_toggled(enabled: bool) -> void:
+	table.set_debug_cue_first_contact_toi_enabled(enabled)
+
+
+func _on_pause_debug_cloned_aim_configuration_changed(configuration: Dictionary) -> void:
+	if table == null:
+		return
+	table.set_debug_cloned_aim_configuration(configuration)
+
+
+func _on_pause_debug_reset_aim_profiler_requested() -> void:
+	if table == null:
+		return
+	table.reset_debug_aim_profiler_stats()
+	hud_feed.add_message("Aim profiler statistics reset.", "event")
+
+
+func _on_pause_debug_reset_aim_benchmark_requested() -> void:
+	if table == null:
+		return
+	table.reset_debug_aim_benchmark_stats()
+	hud_feed.add_message("Aim benchmark statistics reset.", "event")
+
+
+func _on_pause_debug_start_aim_benchmark_requested(label: String, preset_label: String) -> void:
+	if table == null:
+		return
+	table.start_debug_aim_benchmark(
+		label,
+		preset_label,
+		_get_aim_benchmark_contamination_snapshot()
+	)
+	hud_feed.add_message("Aim benchmark capture started.", "event")
+
+
+func _on_pause_debug_stop_aim_benchmark_requested() -> void:
+	if table == null:
+		return
+	table.stop_debug_aim_benchmark()
+	hud_feed.add_message("Aim benchmark capture stopped.", "event")
+
+
+func _on_pause_debug_copy_aim_benchmark_report_requested() -> void:
+	if table == null:
+		return
+	if table.copy_debug_aim_benchmark_report():
+		hud_feed.add_message("Aim benchmark report copied.", "event")
+	else:
+		hud_feed.add_message("Aim benchmark report unavailable: capture has no results.", "event")
+
+
+func _get_aim_benchmark_contamination_snapshot() -> Dictionary:
+	var configuration: Dictionary = table.get_debug_cloned_aim_configuration() if table != null else {}
+	var full_debug: bool = str(configuration.get(
+		"result_detail_mode",
+		AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+	)) == AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+	var panel_states: Dictionary = (
+		debug_overlay.get_modular_debug_panel_states()
+		if debug_overlay != null
+		else {}
+	)
+	return {
+		"full_debug_comparison": full_debug and bool(configuration.get("compare_predicted_event_chain", false)),
+		"candidate_diagnostics": full_debug and table != null and table.is_debug_aim_line_enabled(),
+		"actual_trace_comparison": table != null and table.is_shot_path_debug_enabled(),
+		"profiler_panel_visible": bool(panel_states.get("aim_profiler", false)),
+		"complete_aim_workspace_visible": bool(panel_states.get("aim_compare_panels", false)),
+	}
+
+
+func _on_pause_debug_reset_table_button_toggled(enabled: bool) -> void:
+	debug_overlay.set_reset_table_button_visible(enabled)
+
+
+func _on_pause_debug_reset_last_shot_button_toggled(enabled: bool) -> void:
+	debug_overlay.set_reset_last_shot_button_visible(enabled)
+
+
+func _on_shot_rewind_state_changed(snapshot: Dictionary) -> void:
+	debug_overlay.set_shot_rewind_state(snapshot)
+
+
+func _on_debug_reset_table_requested() -> void:
+	if reset_table_in_progress or end_run_in_progress:
+		return
+	reset_table_in_progress = true
+	GAME_MODE_SCRIPT.set_pending_mode(get_tree(), game_mode_id)
+	GAME_MODE_SCRIPT.set_pending_debug_session(get_tree(), _capture_debug_session_snapshot())
+	get_tree().paused = false
+	var error_code: int = get_tree().change_scene_to_file(GAMEPLAY_SCENE_PATH)
+	if error_code != OK:
+		reset_table_in_progress = false
+		hud_feed.add_message("Reset Table failed: scene reload could not start.", "event")
+
+
+func _on_debug_reset_last_shot_requested() -> void:
+	if table == null or table.shot_rewind_system == null:
+		return
+	if table.shot_rewind_system.request_rewind():
+		return
+	var blocker: String = str(table.shot_rewind_system.get_state_snapshot().get("blocker_reason", "Reset unavailable."))
+	hud_feed.add_message(blocker, "event")
+
+
+func _capture_debug_session_snapshot() -> Dictionary:
+	return {
+		"pause_menu": pause_menu.get_debug_session_snapshot(),
+		"debug_overlay": debug_overlay.get_debug_session_snapshot(),
+	}
+
+
+func _restore_pending_debug_session() -> void:
+	if pending_debug_session_snapshot.is_empty():
+		return
+	var pause_value: Variant = pending_debug_session_snapshot.get("pause_menu", {})
+	if pause_value is Dictionary:
+		pause_menu.apply_debug_session_snapshot(pause_value as Dictionary)
+	var overlay_value: Variant = pending_debug_session_snapshot.get("debug_overlay", {})
+	if overlay_value is Dictionary:
+		debug_overlay.apply_debug_session_snapshot(overlay_value as Dictionary)
+	pause_menu.set_debug_panel_states(debug_overlay.get_modular_debug_panel_states())
+	pending_debug_session_snapshot.clear()
+
+
+func capture_shot_rewind_ui_state() -> Dictionary:
+	return {
+		"hud_feed": hud_feed.get_rewind_state(),
+		"result_text": result_label.text,
+		"progression": (
+			progression_system.get_rewind_state()
+			if progression_system != null and table != null and table.is_passage_mode()
+			else {}
+		),
+		"passage_completion_progression_award": passage_completion_progression_award.duplicate(true),
+	}
+
+
+func restore_shot_rewind_ui_state(state: Dictionary) -> void:
+	var progression_value: Variant = state.get("progression", {})
+	if (
+		progression_system != null
+		and progression_value is Dictionary
+		and not (progression_value as Dictionary).is_empty()
+	):
+		if not progression_system.restore_rewind_state(progression_value as Dictionary):
+			push_warning("Shot rewind restored gameplay, but persistent progression could not be rewritten.")
+	var passage_award_value: Variant = state.get("passage_completion_progression_award", {})
+	passage_completion_progression_award = (
+		(passage_award_value as Dictionary).duplicate(true)
+		if passage_award_value is Dictionary
+		else {}
+	)
+	if table_event_menu != null and table_event_menu.visible:
+		table_event_menu.close_menu()
+	if sunken_spoils_panel != null:
+		sunken_spoils_panel.close_panel()
+	if back_room_panel != null:
+		back_room_panel.close_panel()
+	if roguelite_round_panel != null:
+		roguelite_round_panel.close_panel()
+	if roguelite_reward_panel != null:
+		roguelite_reward_panel.close_panel()
+	if passage_completion_panel != null:
+		passage_completion_panel.visible = false
+	if passage_completion_blocker != null:
+		passage_completion_blocker.visible = false
+	passage_completion_in_progress = false
+	end_run_in_progress = false
+	result_label.text = str(state.get("result_text", ""))
+	var feed_value: Variant = state.get("hud_feed", {})
+	if feed_value is Dictionary:
+		hud_feed.restore_rewind_state(feed_value as Dictionary)
+	get_tree().paused = false
+	pause_menu.set_pause_visible(false)
+	_apply_mode_visibility()
+
+
+func get_shot_rewind_transition_blocker() -> String:
+	if reset_table_in_progress or end_run_in_progress:
+		return "Reset unavailable: a scene transition is active."
+	return ""
 
 
 func _unpause_if_sunken_spoils_ready() -> void:

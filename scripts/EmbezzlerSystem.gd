@@ -119,10 +119,42 @@ var last_capture_pocket_name := "none"
 var double_award_preventions := 0
 var shot_decision_serial := 0
 var last_shot_decision_serial_by_ball_id: Dictionary = {}
+var debug_aim_mode_suppressed := false
 
 
 func setup(table_ref) -> void:
 	table = table_ref
+
+
+func set_debug_aim_mode_suppressed(suppressed: bool) -> void:
+	debug_aim_mode_suppressed = suppressed
+	if not suppressed:
+		return
+	for embezzler_ball in embezzler_balls:
+		if embezzler_ball != null and is_instance_valid(embezzler_ball):
+			embezzler_ball.set_embezzler_visual_state(0.0, 0.0, 0.0)
+	embezzler_balls.clear()
+	stored_value_by_ball_id.clear()
+	skim_fraction_by_ball_id.clear()
+	target_pocket_index_by_ball_id.clear()
+	state_by_ball_id.clear()
+	aim_pressure_by_ball_id.clear()
+	aim_pressure_linger_by_ball_id.clear()
+	last_pressure_reason_by_ball_id.clear()
+	move_targets_by_ball_id.clear()
+	self_steering_until_by_ball_id.clear()
+	self_scuttle_velocity_by_ball_id.clear()
+	hide_committed_by_ball_id.clear()
+	escape_committed_by_ball_id.clear()
+	pocket_test_pending_by_ball_id.clear()
+	last_escape_roll_msec_by_ball_id.clear()
+	last_pocket_roll_msec_by_ball_id.clear()
+	panic_retreat_until_by_ball_id.clear()
+	last_shot_decision_serial_by_ball_id.clear()
+
+
+func get_debug_aim_active_tracker_count() -> int:
+	return embezzler_balls.size() + stored_value_by_ball_id.size()
 
 
 func reset_frame_stats() -> void:
@@ -131,11 +163,15 @@ func reset_frame_stats() -> void:
 
 
 func can_spawn_embezzler() -> bool:
+	if debug_aim_mode_suppressed:
+		return true
 	_prune_tracked_embezzlers()
 	return _get_active_embezzler_count() < MAX_ACTIVE_EMBEZZLERS
 
 
 func register_embezzler_ball(ball: Ball) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if ball == null or not is_instance_valid(ball):
 		return
 
@@ -150,6 +186,8 @@ func register_embezzler_ball(ball: Ball) -> void:
 
 
 func handle_doubloons_awarded(amount: int, _new_total: int = 0) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if amount <= 0:
 		return
 
@@ -164,6 +202,8 @@ func handle_doubloons_awarded(amount: int, _new_total: int = 0) -> void:
 
 
 func handle_ball_captured(ball: Ball, sink_context: Dictionary) -> bool:
+	if debug_aim_mode_suppressed:
+		return false
 	if ball == null:
 		return false
 
@@ -199,11 +239,15 @@ func handle_ball_captured(ball: Ball, sink_context: Dictionary) -> bool:
 
 
 func handle_cue_control_regained() -> void:
+	if debug_aim_mode_suppressed:
+		return
 	# Escape rolls are shot-start decisions now; cue-control regain only clears stale refs.
 	_prune_tracked_embezzlers()
 
 
 func handle_shot_started() -> void:
+	if debug_aim_mode_suppressed:
+		return
 	_prune_tracked_embezzlers()
 	if embezzler_balls.is_empty():
 		return
@@ -216,6 +260,8 @@ func handle_shot_started() -> void:
 
 
 func try_apply_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2, impulse: Vector2) -> bool:
+	if debug_aim_mode_suppressed:
+		return false
 	if ball_a == null or ball_b == null:
 		return false
 	if ball_a.is_cannon_ball or ball_b.is_cannon_ball:
@@ -234,6 +280,8 @@ func try_apply_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2, i
 
 
 func handle_aim_perception_snapshot(snapshot: Dictionary) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	var perception_epoch: int = int(snapshot.get("epoch", -1))
 	if perception_epoch == last_perception_epoch:
 		return
@@ -285,6 +333,8 @@ func handle_aim_perception_snapshot(snapshot: Dictionary) -> void:
 
 
 func update_willingness(delta: float) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	_prune_tracked_embezzlers()
 	if embezzler_balls.is_empty():
 		return
@@ -300,6 +350,8 @@ func update_willingness(delta: float) -> void:
 
 
 func update_repositioning(delta: float) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if delta <= 0.0:
 		return
 
@@ -330,6 +382,12 @@ func update_repositioning(delta: float) -> void:
 			_apply_reposition_steer(embezzler_ball, target_data, delta)
 
 	_update_scuttle_velocity(delta, active_scuttle_ids)
+
+
+func is_prediction_self_motion_active(ball: Ball) -> bool:
+	if ball == null or not is_instance_valid(ball) or not hiding_movement_enabled:
+		return false
+	return move_targets_by_ball_id.has(ball.get_instance_id())
 
 
 func get_debug_snapshot() -> Dictionary:

@@ -34,10 +34,25 @@ var table
 var collisions_this_frame := 0
 var heavy_impacts_this_frame := 0
 var _next_cannon_impact_shake_time_msec := 0
+var debug_aim_mode_suppressed := false
 
 
 func setup(table_ref) -> void:
 	table = table_ref
+
+
+func set_debug_aim_mode_suppressed(suppressed: bool) -> void:
+	debug_aim_mode_suppressed = suppressed
+	if not suppressed or table == null:
+		return
+	for child in table.balls.get_children():
+		var ball: Ball = child as Ball
+		if ball != null:
+			ball.set_cannon_presence_visual(0.0, Vector2.ZERO)
+
+
+func get_debug_aim_active_tracker_count() -> int:
+	return 0
 
 
 func reset_frame_stats() -> void:
@@ -66,6 +81,8 @@ func get_active_cannon_ball_count() -> int:
 
 
 func update_presence_visuals() -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if table == null:
 		return
 
@@ -100,6 +117,8 @@ func update_presence_visuals() -> void:
 
 
 func can_trigger_powder_keg(ball: Ball) -> bool:
+	if debug_aim_mode_suppressed:
+		return false
 	return _is_cannon_ball(ball) and ball.is_gameplay_active()
 
 
@@ -108,6 +127,8 @@ func get_powder_keg_launch_velocity(
 	current_velocity: Vector2,
 	base_explosion_delta: Vector2
 ) -> Vector2:
+	if debug_aim_mode_suppressed:
+		return current_velocity + base_explosion_delta
 	if not _is_cannon_ball(cannon_ball):
 		return current_velocity + base_explosion_delta
 
@@ -118,6 +139,8 @@ func get_powder_keg_launch_velocity(
 
 
 func try_apply_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2, impulse: Vector2) -> bool:
+	if debug_aim_mode_suppressed:
+		return false
 	if ball_a == null or ball_b == null:
 		return false
 	if ball_a.is_cannon_ball and _is_cannon_collision_partner(ball_b):

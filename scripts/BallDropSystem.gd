@@ -61,6 +61,21 @@ func get_debug_snapshot() -> Dictionary:
 	}
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"drop_progress": drop_progress,
+		"total_drops_queued": total_drops_queued,
+		"last_score_drops_queued": last_score_drops_queued,
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	drop_progress = maxi(int(state.get("drop_progress", 0)), 0)
+	total_drops_queued = maxi(int(state.get("total_drops_queued", 0)), 0)
+	last_score_drops_queued = maxi(int(state.get("last_score_drops_queued", 0)), 0)
+	_emit_progress_changed()
+
+
 func get_progress_percent() -> float:
 	if doubloons_per_drop <= 0:
 		return 0.0

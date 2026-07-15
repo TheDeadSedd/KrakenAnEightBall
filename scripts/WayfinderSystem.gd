@@ -57,11 +57,42 @@ var wayfinder_current_last_event_transfers := 0
 var wayfinder_current_scored_sinks := 0
 var wayfinder_current_transfer_flashes := 0
 var wayfinder_current_presenter: WayfinderCurrentPresenter
+var debug_aim_mode_suppressed := false
 
 
 func setup(table_ref: BilliardsTable) -> void:
 	table = table_ref
 	_ensure_wayfinder_current_presenter()
+
+
+func set_debug_aim_mode_suppressed(suppressed: bool) -> void:
+	debug_aim_mode_suppressed = suppressed
+	if not suppressed:
+		return
+	for state_value in temporary_current_carriers.values():
+		var state: TemporaryCurrentCarrier = state_value as TemporaryCurrentCarrier
+		if state != null and is_instance_valid(state.ball):
+			state.ball.set_wayfinder_current_visual_active(false)
+	if table != null:
+		for child in table.balls.get_children():
+			var ball: Ball = child as Ball
+			if ball == null:
+				continue
+			ball.set_wayfinder_current_visual_active(false)
+			if ball.is_wayfinder:
+				ball.deactivate_wayfinder("debug_aim_mode")
+	redirect_collision_cooldowns.clear()
+	guided_balls.clear()
+	current_transfer_cooldowns.clear()
+	temporary_current_carriers.clear()
+	pending_current_events.clear()
+	wayfinder_current_scoring_snapshots.clear()
+	if wayfinder_current_presenter != null:
+		wayfinder_current_presenter.clear_effects()
+
+
+func get_debug_aim_active_tracker_count() -> int:
+	return guided_balls.size() + temporary_current_carriers.size() + pending_current_events.size()
 
 
 func _ensure_wayfinder_current_presenter() -> void:
@@ -80,6 +111,8 @@ func _ensure_wayfinder_current_presenter() -> void:
 
 
 func update_redirect_cooldowns(delta: float) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	var expired_keys: Array[String] = []
 	for pair_key in redirect_collision_cooldowns.keys():
 		var remaining_time: float = float(redirect_collision_cooldowns[pair_key]) - delta
@@ -95,6 +128,8 @@ func update_redirect_cooldowns(delta: float) -> void:
 
 
 func update_guidance(delta: float) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	_update_pending_wayfinder_current_events(delta)
 	_update_temporary_currents(delta)
 
@@ -113,6 +148,8 @@ func update_guidance(delta: float) -> void:
 
 
 func handle_collision(ball_a: Ball, ball_b: Ball) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	_try_activate_from_cue_hit(ball_a, ball_b)
 	_try_activate_from_cue_hit(ball_b, ball_a)
 	_try_transfer_temporary_current(ball_a, ball_b)
@@ -151,7 +188,13 @@ func is_ball_guided(ball: Ball) -> bool:
 	return ball != null and guided_balls.has(ball.get_instance_id())
 
 
+func is_temporary_current_carrier(ball: Ball) -> bool:
+	return ball != null and temporary_current_carriers.has(ball.get_instance_id())
+
+
 func trigger_wayfinder_current_from_wayfinder(wayfinder_ball: Ball, _context: Dictionary = {}) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if not _is_valid_wayfinder_current_source(wayfinder_ball):
 		return
 

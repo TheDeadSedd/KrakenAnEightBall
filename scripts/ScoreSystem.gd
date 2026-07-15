@@ -305,6 +305,46 @@ func get_doubloons_total() -> int:
 	return doubloons_total
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"doubloons_total": doubloons_total,
+		"awarded_base_ball_ids": awarded_base_ball_ids.duplicate(true),
+		"awarded_event_types_by_ball": awarded_event_types_by_ball.duplicate(true),
+		"sink_contexts_by_ball": sink_contexts_by_ball.duplicate(true),
+		"pocket_streak_feed_message_index": pocket_streak_feed_message_index,
+		"last_score_popup_route": last_score_popup_route,
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	_clear_score_presentation_for_rewind()
+	doubloons_total = int(state.get("doubloons_total", 0))
+	awarded_base_ball_ids = _rewind_dictionary(state, "awarded_base_ball_ids")
+	awarded_event_types_by_ball = _rewind_dictionary(state, "awarded_event_types_by_ball")
+	sink_contexts_by_ball = _rewind_dictionary(state, "sink_contexts_by_ball")
+	pocket_streak_feed_message_index = maxi(int(state.get("pocket_streak_feed_message_index", 0)), 0)
+	last_score_popup_route = str(state.get("last_score_popup_route", "none"))
+	doubloons_changed.emit(doubloons_total)
+
+
+func _rewind_dictionary(state: Dictionary, key: String) -> Dictionary:
+	var value: Variant = state.get(key, {})
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	return {}
+
+
+func _clear_score_presentation_for_rewind() -> void:
+	for popup in active_score_popups.duplicate():
+		_remove_score_popup(popup)
+	for stack_value in active_score_stacks.duplicate():
+		var stack: ScoreStack = stack_value as ScoreStack
+		if stack != null:
+			_remove_score_stack(stack)
+	score_popups_by_ball.clear()
+	score_stacks_by_key.clear()
+
+
 func can_afford_doubloons(amount: int) -> bool:
 	return doubloons_total >= max(amount, 0)
 

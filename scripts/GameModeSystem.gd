@@ -14,6 +14,7 @@ const MODE_ROGUELITE := "roguelite"
 const DEFAULT_MODE := MODE_PASSAGE
 const PENDING_MODE_META := "kaeb_pending_game_mode"
 const ACTIVE_MODE_META := "kaeb_active_game_mode"
+const PENDING_DEBUG_SESSION_META := "kaeb_pending_debug_session"
 
 
 static func normalize_mode_id(mode_id: String) -> String:
@@ -59,6 +60,22 @@ static func get_active_mode(tree: SceneTree) -> String:
 	if not tree.root.has_meta(ACTIVE_MODE_META):
 		return DEFAULT_MODE
 	return normalize_mode_id(str(tree.root.get_meta(ACTIVE_MODE_META)))
+
+
+static func set_pending_debug_session(tree: SceneTree, snapshot: Dictionary) -> void:
+	if tree == null or tree.root == null:
+		return
+	tree.root.set_meta(PENDING_DEBUG_SESSION_META, snapshot.duplicate(true))
+
+
+static func consume_pending_debug_session(tree: SceneTree) -> Dictionary:
+	if tree == null or tree.root == null or not tree.root.has_meta(PENDING_DEBUG_SESSION_META):
+		return {}
+	var value: Variant = tree.root.get_meta(PENDING_DEBUG_SESSION_META)
+	tree.root.remove_meta(PENDING_DEBUG_SESSION_META)
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	return {}
 
 
 static func is_passage(mode_id: String) -> bool:

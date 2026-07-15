@@ -28,13 +28,26 @@ const EXPLOSION_GLOW_COLOR := Color(1.0, 0.62, 0.2, 1.0)
 var table
 var exploded_ball_ids: Dictionary = {}
 var active_particle_bursts := 0
+var debug_aim_mode_suppressed := false
 
 
 func setup(table_ref) -> void:
 	table = table_ref
 
 
+func set_debug_aim_mode_suppressed(suppressed: bool) -> void:
+	debug_aim_mode_suppressed = suppressed
+	if suppressed:
+		exploded_ball_ids.clear()
+
+
+func get_debug_aim_active_tracker_count() -> int:
+	return exploded_ball_ids.size()
+
+
 func handle_collision(ball_a: Ball, ball_b: Ball) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	_try_explode_from_trigger_contact(ball_a, ball_b)
 	_try_explode_from_trigger_contact(ball_b, ball_a)
 	_try_collapse_anchor_from_powder_contact(ball_a, ball_b)

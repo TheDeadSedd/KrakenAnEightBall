@@ -161,6 +161,45 @@ func get_passage_snapshot() -> Dictionary:
 	}
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"request_index": request_index,
+		"passage_reduced_by_requests": passage_reduced_by_requests,
+		"passage_reduced_by_spoils": passage_reduced_by_spoils,
+		"passage_added_by_request_rerolls": passage_added_by_request_rerolls,
+		"passage_added_by_oaths": passage_added_by_oaths,
+		"request_rerolls_used": request_rerolls_used,
+		"current_request_reroll_cost": current_request_reroll_cost,
+		"remaining_passage": remaining_passage,
+		"completed": completed,
+		"voyage_marks_awarded": voyage_marks_awarded,
+		"request_reroll_lockout_queue": request_reroll_lockout_queue.duplicate(),
+		"last_rejected_request_id": last_rejected_request_id,
+		"rng_state": int(rng.state),
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	request_index = int(state.get("request_index", -1))
+	passage_reduced_by_requests = maxi(int(state.get("passage_reduced_by_requests", 0)), 0)
+	passage_reduced_by_spoils = maxi(int(state.get("passage_reduced_by_spoils", 0)), 0)
+	passage_added_by_request_rerolls = maxi(int(state.get("passage_added_by_request_rerolls", 0)), 0)
+	passage_added_by_oaths = maxi(int(state.get("passage_added_by_oaths", 0)), 0)
+	request_rerolls_used = maxi(int(state.get("request_rerolls_used", 0)), 0)
+	current_request_reroll_cost = maxi(int(state.get("current_request_reroll_cost", _get_request_reroll_base_cost())), _get_request_reroll_base_cost())
+	remaining_passage = maxi(int(state.get("remaining_passage", passage_required)), 0)
+	completed = bool(state.get("completed", false))
+	voyage_marks_awarded = maxi(int(state.get("voyage_marks_awarded", 0)), 0)
+	request_reroll_lockout_queue.clear()
+	var lockout_value: Variant = state.get("request_reroll_lockout_queue", [])
+	if lockout_value is Array:
+		for request_id_value in lockout_value:
+			request_reroll_lockout_queue.append(str(request_id_value))
+	last_rejected_request_id = str(state.get("last_rejected_request_id", ""))
+	rng.state = int(state.get("rng_state", rng.state))
+	passage_changed.emit(get_passage_snapshot())
+
+
 func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
 	cue_modifier_snapshot = snapshot.duplicate(true)
 	_recalculate_remaining_passage()

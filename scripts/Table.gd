@@ -2,6 +2,8 @@
 extends Node2D
 class_name BilliardsTable
 
+const BALL_COLLISION_MATH := preload("res://scripts/BallCollisionMath.gd")
+
 signal status_text_changed(text: String)
 signal game_finished(text: String)
 signal run_ball_counts_changed(active_ball_count: int, balls_sunk_count: int)
@@ -9,6 +11,7 @@ signal shot_taken(count: int)
 signal shot_finished(count: int)
 signal gameplay_mouse_lock_changed(locked: bool)
 signal cue_start_selection_changed(snapshot: Dictionary)
+signal debug_aim_mode_changed(snapshot: Dictionary)
 signal roguelite_round_cleared(snapshot: Dictionary)
 signal roguelite_run_failed(snapshot: Dictionary)
 signal roguelite_run_completed(snapshot: Dictionary)
@@ -50,6 +53,7 @@ const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const GAME_MODE_SCRIPT := preload("res://scripts/GameModeSystem.gd")
 const ROGUELITE_RUN_SCRIPT := preload("res://scripts/RogueliteRunSystem.gd")
 const ROGUELITE_REWARD_SCRIPT := preload("res://scripts/RogueliteRewardSystem.gd")
+const BALL_SWEEP_MATH := preload("res://scripts/BallSweepMath.gd")
 
 # Presentation layout. The underlying table dimensions stay the same; the whole play space is centered in a larger 1920x1080 canvas.
 const PRESENTATION_OFFSET_X := 360.0
@@ -122,6 +126,10 @@ const PHYSICS_SUBSTEPS := 4
 const BALL_COLLISION_GRID_CELL_SIZE := 56.0
 const PHYSICS_DEBUG_SPEED_THRESHOLD := 5.0
 const PHYSICS_DEBUG_MAX_BALLS := 10
+const MAX_CUE_TOI_EVENTS_PER_SUBSTEP := 2
+const CUE_TOI_MIN_REMAINING_TIME := 0.000001
+const CUE_TOI_FRACTION_EPSILON := 0.0001
+const CUE_TOI_TIE_EPSILON := 0.000001
 const CUE_BALL_CANNON_WAKE_DEFAULT_IMPACT_MULTIPLIER := 1.35
 const CUE_BALL_CANNON_WAKE_DEFAULT_RETENTION := 0.22
 #endregion
@@ -142,6 +150,7 @@ const CUE_BALL_CANNON_WAKE_DEFAULT_RETENTION := 0.22
 @onready var sunken_spoils_system: SunkenSpoilsSystem = $SunkenSpoilsSystem
 @onready var passage_system: PassageSystem = $PassageSystem
 @onready var oath_system: OathSystem = $OathSystem
+@onready var shot_rewind_system: ShotRewindSystem = $ShotRewindSystem
 @onready var table_obstacle_system: TableObstacleSystem = $TableObstacleSystem
 @onready var ball_audio_system: BallAudioSystem = $BallAudioSystem
 @onready var aim_preview: AimPreview = $AimPreview
@@ -178,6 +187,11 @@ var is_dragging := false
 var gameplay_mouse_lock_active := false
 var cue_drag_restore_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_VISIBLE
 var aim_preview_dirty := true
+var aim_prediction_state_revision := 0
+var aim_prediction_revision_changes := 0
+var aim_prediction_last_change_reason := "initial"
+var aim_prediction_change_reason_counts: Dictionary = {}
+var debug_aim_compatibility_system: DebugAimCompatibilitySystem
 var game_over := false
 var shot_active := false
 var shot_pocketed_object_balls := 0
@@ -187,6 +201,24 @@ var shot_multi_pocket_bonus_awarded := false
 var shot_bank_bonus_awarded := false
 var shot_bank_eligible_ball_ids: Dictionary = {}
 var shot_elapsed_time := 0.0
+var aim_contact_order_diagnostics: AimContactOrderDiagnostics = AimContactOrderDiagnostics.new()
+var cue_first_contact_toi_enabled := true
+var cue_toi_first_contact_pending := false
+var cue_toi_remaining_time_loop_active := false
+# Reused scratch data: the swept grid is repopulated as the normal resolver grid
+# after movement, so the correction does not maintain a second broadphase.
+var cue_toi_active_balls_this_substep: Array[Ball] = []
+var cue_toi_spatial_grid_this_substep: Dictionary = {}
+var cue_toi_handled_pairs_this_substep: Dictionary = {}
+var cue_toi_legacy_skip_counted_this_substep: Dictionary = {}
+var cue_toi_candidate_tests_this_shot := 0
+var cue_toi_solves_this_shot := 0
+var cue_toi_contacts_resolved_this_shot := 0
+var cue_toi_max_candidates_in_substep := 0
+var cue_toi_remaining_time_iterations := 0
+var cue_toi_event_cap_hits := 0
+var cue_toi_duplicate_legacy_resolutions_prevented := 0
+var cue_toi_processing_time_ms := 0.0
 var shots_taken_count := 0
 var balls_sunk_count := 0
 var run_ball_count_update_queued := false
@@ -247,6 +279,7 @@ func _ready() -> void:
 	if is_passage_mode():
 		passage_system.setup(self)
 	oath_system.setup(self)
+	shot_rewind_system.setup(self)
 	table_obstacle_system.setup(self)
 	ball_audio_system.setup(self)
 	_connect_score_drop_events()
@@ -259,6 +292,8 @@ func _ready() -> void:
 	cannon_ball_system.setup(self)
 	treasure_ball_system.setup(self)
 	embezzler_system.setup(self)
+	debug_aim_compatibility_system = DebugAimCompatibilitySystem.new()
+	debug_aim_compatibility_system.setup(self)
 	table_impact_shake_system.setup(self)
 	quartermaster_system.setup(self)
 	reserve_system.setup(self)
@@ -516,8 +551,13 @@ func _is_roguelite_scoreable_ball(ball: Ball) -> bool:
 
 
 func _reset_roguelite_table_for_current_round() -> void:
+	shot_rewind_system.invalidate_checkpoint("Reset unavailable: the table changed rounds.")
+	aim_preview.clear_for_authoritative_table_reset("roguelite_round_transition")
 	game_over = false
 	shot_active = false
+	cue_toi_first_contact_pending = false
+	_reset_cue_toi_shot_counters()
+	_reset_cue_toi_substep_context()
 	cue_control_reclaimed = false
 	cue_reclaim_eligible = false
 	cue_reclaim_blocker_reason = "No active shot"
@@ -543,6 +583,7 @@ func _reset_roguelite_table_for_current_round() -> void:
 	cue_ball = starting_balls.cue_ball
 	eight_ball = starting_balls.eight_ball
 	eight_start = starting_balls.eight_start
+	notify_aim_prediction_state_changed("round_transition_complete", "reset")
 	_queue_run_ball_count_update()
 	_emit_cue_start_selection_update()
 	status_text_changed.emit(_get_ready_status_text())
@@ -568,10 +609,10 @@ func _exit_tree() -> void:
 
 
 func _connect_run_ball_count_events() -> void:
-	if not balls.child_entered_tree.is_connected(_on_balls_child_tree_changed):
-		balls.child_entered_tree.connect(_on_balls_child_tree_changed)
-	if not balls.child_exiting_tree.is_connected(_on_balls_child_tree_changed):
-		balls.child_exiting_tree.connect(_on_balls_child_tree_changed)
+	if not balls.child_entered_tree.is_connected(_on_ball_child_entered):
+		balls.child_entered_tree.connect(_on_ball_child_entered)
+	if not balls.child_exiting_tree.is_connected(_on_ball_child_exiting):
+		balls.child_exiting_tree.connect(_on_ball_child_exiting)
 
 
 func get_run_ball_counts_snapshot() -> Dictionary:
@@ -591,8 +632,71 @@ func get_kraken_boon_snapshot() -> Dictionary:
 	return kraken_boon_system.get_boon_snapshot()
 
 
-func _on_balls_child_tree_changed(_node: Node) -> void:
+func _on_ball_child_entered(node: Node) -> void:
 	_queue_run_ball_count_update()
+	call_deferred("_notify_shot_rewind_table_state_changed")
+	var ball: Ball = node as Ball
+	if ball != null and not ball.prediction_state_changed.is_connected(_on_ball_prediction_state_changed):
+		ball.prediction_state_changed.connect(_on_ball_prediction_state_changed)
+	notify_aim_prediction_state_changed("ball_added", "roster_change")
+
+
+func _on_ball_child_exiting(_node: Node) -> void:
+	_queue_run_ball_count_update()
+	call_deferred("_notify_shot_rewind_table_state_changed")
+	notify_aim_prediction_state_changed("ball_removed", "remove_sink")
+
+
+func _on_ball_prediction_state_changed(_ball: Ball, reason: String) -> void:
+	var category: String = "state_change"
+	match reason:
+		"spawn_started":
+			category = "unsupported_state"
+		"spawn_completed", "spawn_settled":
+			category = "spawn_complete"
+		"became_inactive":
+			category = "remove_sink"
+		"identity_configured":
+			category = "roster_change"
+		"identity_transformed", "wayfinder_state_changed":
+			category = "transform"
+		"authoritative_reset":
+			category = "reset"
+	notify_aim_prediction_state_changed(reason, category)
+
+
+func notify_aim_prediction_state_changed(reason: String, category: String = "state_change") -> void:
+	aim_prediction_state_revision += 1
+	aim_prediction_revision_changes += 1
+	aim_prediction_last_change_reason = reason
+	aim_prediction_change_reason_counts[reason] = int(
+		aim_prediction_change_reason_counts.get(reason, 0)
+	) + 1
+	_mark_aim_preview_dirty()
+	if aim_preview != null and is_instance_valid(aim_preview):
+		aim_preview.notify_table_prediction_revision_changed(
+			aim_prediction_state_revision,
+			reason,
+			category
+		)
+
+
+func get_aim_prediction_state_revision() -> int:
+	return aim_prediction_state_revision
+
+
+func get_aim_prediction_revision_snapshot() -> Dictionary:
+	return {
+		"table_revision": aim_prediction_state_revision,
+		"prediction_revision_changes": aim_prediction_revision_changes,
+		"last_change_reason": aim_prediction_last_change_reason,
+		"reason_counts": aim_prediction_change_reason_counts.duplicate(true),
+	}
+
+
+func _notify_shot_rewind_table_state_changed() -> void:
+	if shot_rewind_system != null:
+		shot_rewind_system.notify_table_state_changed()
 
 
 func _queue_run_ball_count_update() -> void:
@@ -685,8 +789,19 @@ func _physics_process(delta: float) -> void:
 		treasure_ball_system.update_hiding(step_delta)
 		embezzler_system.update_repositioning(step_delta)
 		anchor_ball_system.update_curse_chain_slides(step_delta)
-		_move_balls(step_delta)
+		_reset_cue_toi_substep_context()
+		_begin_aim_contact_order_substep(step_index, step_delta)
+		var cue_toi_path_active: bool = _should_run_cue_first_contact_toi()
+		if cue_toi_path_active:
+			_finish_aim_contact_order_substep(true)
+			_move_balls_with_cue_first_contact_toi(step_delta)
+		else:
+			_move_balls(step_delta)
 		anchor_ball_system.enforce_curse_chain_constraints()
+		if cue_toi_path_active:
+			_populate_ball_collision_grid(cue_toi_spatial_grid_this_substep, cue_toi_active_balls_this_substep)
+		if not cue_toi_path_active:
+			_finish_aim_contact_order_substep(false)
 		var phase_start_usec: int = Time.get_ticks_usec()
 		_resolve_ball_collisions()
 		_resolve_obstacle_collisions()
@@ -871,6 +986,277 @@ func _move_balls(delta: float) -> void:
 			ball.move_ball(delta)
 
 
+func _reset_cue_toi_substep_context() -> void:
+	cue_toi_remaining_time_loop_active = false
+	cue_toi_active_balls_this_substep.clear()
+	cue_toi_spatial_grid_this_substep.clear()
+	cue_toi_handled_pairs_this_substep.clear()
+	cue_toi_legacy_skip_counted_this_substep.clear()
+
+
+func _should_run_cue_first_contact_toi() -> bool:
+	return (
+		cue_first_contact_toi_enabled
+		and shot_active
+		and cue_toi_first_contact_pending
+		and cue_ball != null
+		and is_instance_valid(cue_ball)
+		and not cue_ball.is_queued_for_deletion()
+		and cue_ball.is_gameplay_active()
+		and cue_ball.is_moving()
+		and cue_ball.velocity.length_squared() > 0.0
+	)
+
+
+func _move_balls_with_cue_first_contact_toi(step_delta: float) -> void:
+	var processing_start_usec: int = Time.get_ticks_usec()
+	cue_toi_remaining_time_loop_active = true
+	cue_toi_active_balls_this_substep = _get_active_balls()
+	if cue_toi_active_balls_this_substep.is_empty():
+		cue_toi_remaining_time_loop_active = false
+		return
+
+	var remaining_time: float = step_delta
+	var resolved_events: int = 0
+	var excluded_pairs: Dictionary = {}
+	while (
+		remaining_time > CUE_TOI_MIN_REMAINING_TIME
+		and resolved_events < MAX_CUE_TOI_EVENTS_PER_SUBSTEP
+		and cue_ball != null
+		and is_instance_valid(cue_ball)
+		and not cue_ball.is_queued_for_deletion()
+		and cue_ball.is_gameplay_active()
+		and cue_ball.is_moving()
+	):
+		_populate_cue_toi_swept_grid(
+			cue_toi_spatial_grid_this_substep,
+			cue_toi_active_balls_this_substep,
+			remaining_time
+		)
+		var cue_displacement: Vector2 = cue_ball.velocity * remaining_time
+		var candidates: Array[Ball] = _get_cue_toi_broadphase_candidates(
+			cue_toi_spatial_grid_this_substep,
+			cue_ball.global_position,
+			cue_displacement
+		)
+		cue_toi_max_candidates_in_substep = maxi(cue_toi_max_candidates_in_substep, candidates.size())
+		var earliest_hit: Dictionary = _get_earliest_cue_toi_hit(candidates, remaining_time, excluded_pairs)
+		if earliest_hit.is_empty():
+			break
+
+		var hit_fraction: float = float(earliest_hit.get("hit_fraction", 1.0))
+		var cross_type_fraction: float = _get_earliest_cue_cross_type_fraction(cue_displacement)
+		# Rail/jaw and pocket resolution remain in their existing authoritative
+		# phases. If either can occur first, defer this substep to the legacy path.
+		if (
+			cross_type_fraction >= 0.0
+			and cross_type_fraction <= hit_fraction + CUE_TOI_FRACTION_EPSILON
+		):
+			break
+
+		var travel_time: float = remaining_time * clampf(hit_fraction, 0.0, 1.0)
+		if travel_time > CUE_TOI_MIN_REMAINING_TIME:
+			_move_active_ball_list(cue_toi_active_balls_this_substep, travel_time)
+			remaining_time = maxf(remaining_time - travel_time, 0.0)
+
+		var target_ball: Ball = earliest_hit.get("ball") as Ball
+		if target_ball == null or not is_instance_valid(target_ball):
+			break
+		var pair_key: String = _get_ball_pair_key(cue_ball, target_ball)
+		excluded_pairs[pair_key] = true
+		var collision_normal: Vector2 = earliest_hit.get("collision_normal", Vector2.RIGHT)
+		if not _resolve_ball_pair_at_toi(cue_ball, target_ball, collision_normal):
+			break
+
+		cue_toi_handled_pairs_this_substep[pair_key] = true
+		cue_toi_first_contact_pending = false
+		cue_toi_contacts_resolved_this_shot += 1
+		resolved_events += 1
+		if remaining_time > CUE_TOI_MIN_REMAINING_TIME:
+			cue_toi_remaining_time_iterations += 1
+
+	if resolved_events >= MAX_CUE_TOI_EVENTS_PER_SUBSTEP and remaining_time > CUE_TOI_MIN_REMAINING_TIME:
+		cue_toi_event_cap_hits += 1
+	if remaining_time > CUE_TOI_MIN_REMAINING_TIME:
+		_move_active_ball_list(cue_toi_active_balls_this_substep, remaining_time)
+	cue_toi_remaining_time_loop_active = false
+	cue_toi_processing_time_ms += _elapsed_ms_since(processing_start_usec)
+
+
+func _move_active_ball_list(active_balls: Array[Ball], delta: float) -> void:
+	if delta <= 0.0:
+		return
+	for ball in active_balls:
+		if (
+			ball != null
+			and is_instance_valid(ball)
+			and not ball.is_queued_for_deletion()
+			and ball.is_gameplay_active()
+		):
+			ball.move_ball(delta)
+
+
+func _populate_cue_toi_swept_grid(
+	spatial_grid: Dictionary,
+	active_balls: Array[Ball],
+	step_delta: float
+) -> void:
+	spatial_grid.clear()
+	for ball in active_balls:
+		if (
+			ball == null
+			or not is_instance_valid(ball)
+			or ball.is_queued_for_deletion()
+			or not ball.is_gameplay_active()
+		):
+			continue
+		var start_position: Vector2 = ball.global_position
+		var end_position: Vector2 = start_position + ball.velocity * step_delta
+		var margin: float = ball.radius + BALL_COLLISION_SKIN
+		var minimum_corner := Vector2(
+			minf(start_position.x, end_position.x) - margin,
+			minf(start_position.y, end_position.y) - margin
+		)
+		var maximum_corner := Vector2(
+			maxf(start_position.x, end_position.x) + margin,
+			maxf(start_position.y, end_position.y) + margin
+		)
+		_add_ball_to_collision_grid_rect(spatial_grid, ball, minimum_corner, maximum_corner)
+
+
+func _add_ball_to_collision_grid_rect(
+	spatial_grid: Dictionary,
+	ball: Ball,
+	minimum_corner: Vector2,
+	maximum_corner: Vector2
+) -> void:
+	var minimum_cell: Vector2i = _get_ball_collision_grid_cell(minimum_corner)
+	var maximum_cell: Vector2i = _get_ball_collision_grid_cell(maximum_corner)
+	for cell_x in range(minimum_cell.x, maximum_cell.x + 1):
+		for cell_y in range(minimum_cell.y, maximum_cell.y + 1):
+			var cell := Vector2i(cell_x, cell_y)
+			if not spatial_grid.has(cell):
+				spatial_grid[cell] = []
+			spatial_grid[cell].append(ball)
+
+
+func _get_cue_toi_broadphase_candidates(
+	spatial_grid: Dictionary,
+	cue_start: Vector2,
+	cue_displacement: Vector2
+) -> Array[Ball]:
+	var candidates: Array[Ball] = []
+	var seen_ball_ids: Dictionary = {}
+	var cue_end: Vector2 = cue_start + cue_displacement
+	var margin: float = cue_ball.radius
+	var minimum_corner := Vector2(
+		minf(cue_start.x, cue_end.x) - margin,
+		minf(cue_start.y, cue_end.y) - margin
+	)
+	var maximum_corner := Vector2(
+		maxf(cue_start.x, cue_end.x) + margin,
+		maxf(cue_start.y, cue_end.y) + margin
+	)
+	var minimum_cell: Vector2i = _get_ball_collision_grid_cell(minimum_corner)
+	var maximum_cell: Vector2i = _get_ball_collision_grid_cell(maximum_corner)
+	for cell_x in range(minimum_cell.x, maximum_cell.x + 1):
+		for cell_y in range(minimum_cell.y, maximum_cell.y + 1):
+			var cell := Vector2i(cell_x, cell_y)
+			if not spatial_grid.has(cell):
+				continue
+			for candidate_value in spatial_grid[cell]:
+				var candidate: Ball = candidate_value as Ball
+				if (
+					candidate == null
+					or candidate == cue_ball
+					or not is_instance_valid(candidate)
+					or candidate.is_queued_for_deletion()
+					or not candidate.is_gameplay_active()
+				):
+					continue
+				var candidate_id: int = candidate.get_instance_id()
+				if seen_ball_ids.has(candidate_id):
+					continue
+				seen_ball_ids[candidate_id] = true
+				candidates.append(candidate)
+	return candidates
+
+
+func _get_earliest_cue_toi_hit(
+	candidates: Array[Ball],
+	remaining_time: float,
+	excluded_pairs: Dictionary
+) -> Dictionary:
+	var earliest_hit: Dictionary = {}
+	var earliest_fraction: float = INF
+	var earliest_ball_number: int = 2147483647
+	var earliest_ball_id: int = 2147483647
+	var cue_displacement: Vector2 = cue_ball.velocity * remaining_time
+	for target_ball in candidates:
+		if (
+			target_ball == null
+			or not is_instance_valid(target_ball)
+			or target_ball.is_queued_for_deletion()
+			or not target_ball.is_gameplay_active()
+		):
+			continue
+		var pair_key: String = _get_ball_pair_key(cue_ball, target_ball)
+		if excluded_pairs.has(pair_key):
+			continue
+		cue_toi_candidate_tests_this_shot += 1
+		var target_displacement: Vector2 = target_ball.velocity * remaining_time
+		var sweep_result: Dictionary = BALL_SWEEP_MATH.sweep_circles(
+			cue_ball.global_position,
+			cue_displacement,
+			target_ball.global_position,
+			target_displacement,
+			BALL_SWEEP_MATH.get_effective_collision_radius(
+				cue_ball.radius,
+				target_ball.radius,
+				BALL_COLLISION_SKIN
+			)
+		)
+		if not bool(sweep_result.get("hit", false)):
+			continue
+		var collision_normal: Vector2 = sweep_result.get("collision_normal", Vector2.ZERO)
+		var impact_speed: float = _get_ball_collision_impact_speed(cue_ball, target_ball, collision_normal)
+		if collision_normal == Vector2.ZERO or impact_speed <= 0.0:
+			continue
+		cue_toi_solves_this_shot += 1
+		var hit_fraction: float = float(sweep_result.get("hit_fraction", 1.0))
+		var target_number: int = target_ball.ball_number
+		var target_id: int = target_ball.get_instance_id()
+		var is_earlier: bool = hit_fraction < earliest_fraction - CUE_TOI_TIE_EPSILON
+		var is_tied: bool = absf(hit_fraction - earliest_fraction) <= CUE_TOI_TIE_EPSILON
+		if not is_earlier and not (is_tied and target_number < earliest_ball_number):
+			if not (is_tied and target_number == earliest_ball_number and target_id < earliest_ball_id):
+				continue
+		earliest_fraction = hit_fraction
+		earliest_ball_number = target_number
+		earliest_ball_id = target_id
+		earliest_hit = sweep_result.duplicate(true)
+		earliest_hit["ball"] = target_ball
+	return earliest_hit
+
+
+func _get_earliest_cue_cross_type_fraction(cue_displacement: Vector2) -> float:
+	var boundary_fraction: float = boundary_system.get_first_conservative_motion_hit_fraction(
+		cue_ball.global_position,
+		cue_displacement,
+		cue_ball.radius
+	)
+	var pocket_fraction: float = pocket_system.get_first_capture_fraction_for_motion(
+		cue_ball.global_position,
+		cue_displacement,
+		cue_ball.radius
+	)
+	if boundary_fraction < 0.0:
+		return pocket_fraction
+	if pocket_fraction < 0.0:
+		return boundary_fraction
+	return minf(boundary_fraction, pocket_fraction)
+
+
 func _apply_ball_friction(delta: float, track_cue_reclaim_motion: bool = false) -> void:
 	if track_cue_reclaim_motion:
 		_reset_cue_reclaim_motion_snapshot()
@@ -878,7 +1264,14 @@ func _apply_ball_friction(delta: float, track_cue_reclaim_motion: bool = false) 
 	for child in balls.get_children():
 		var ball := child as Ball
 		if ball != null and ball.is_gameplay_active():
+			var incoming_velocity: Vector2 = ball.velocity
 			ball.apply_friction(delta)
+			if (
+				aim_preview.is_debug_aim_line_enabled()
+				and incoming_velocity.length_squared() > 0.0
+				and ball.velocity == Vector2.ZERO
+			):
+				aim_preview.report_debug_ball_stopped(ball, incoming_velocity)
 			if track_cue_reclaim_motion:
 				_capture_cue_reclaim_motion(ball)
 
@@ -887,16 +1280,25 @@ func _apply_ball_friction(delta: float, track_cue_reclaim_motion: bool = false) 
 
 
 func _resolve_ball_collisions() -> void:
-	var active_balls: Array[Ball] = _get_active_balls()
+	var active_balls: Array[Ball] = (
+		cue_toi_active_balls_this_substep
+		if not cue_toi_active_balls_this_substep.is_empty()
+		else _get_active_balls()
+	)
 	if active_balls.is_empty():
 		return
 
-	var spatial_grid: Dictionary = _build_ball_collision_grid(active_balls)
-	var checked_pairs := {}
+	var spatial_grid: Dictionary = (
+		cue_toi_spatial_grid_this_substep
+		if not cue_toi_spatial_grid_this_substep.is_empty()
+		else _build_ball_collision_grid(active_balls)
+	)
+	var checked_pairs: Dictionary = cue_toi_handled_pairs_this_substep.duplicate()
 	for ball in active_balls:
 		if not ball.is_moving():
 			continue
 		_resolve_ball_against_neighbor_cells(ball, spatial_grid, checked_pairs)
+	_publish_aim_contact_order_snapshot()
 
 
 func _resolve_obstacle_collisions() -> void:
@@ -915,12 +1317,63 @@ func _get_active_balls() -> Array[Ball]:
 	return active_balls
 
 
+func _begin_aim_contact_order_substep(step_index: int, step_delta: float) -> void:
+	if (
+		not shot_active
+		or not aim_preview.is_debug_aim_line_enabled()
+		or aim_contact_order_diagnostics.capture_complete
+	):
+		return
+	aim_contact_order_diagnostics.begin_substep(
+		Engine.get_physics_frames(),
+		step_index,
+		PHYSICS_SUBSTEPS,
+		step_delta,
+		cue_ball,
+		_get_active_balls(),
+		BALL_COLLISION_SKIN,
+		BALL_COLLISION_GRID_CELL_SIZE
+	)
+
+
+func _finish_aim_contact_order_substep(use_projected_motion: bool = false) -> void:
+	if (
+		not shot_active
+		or not aim_preview.is_debug_aim_line_enabled()
+		or aim_contact_order_diagnostics.capture_complete
+	):
+		return
+	aim_contact_order_diagnostics.finish_substep(
+		cue_ball,
+		_get_active_balls(),
+		BALL_COLLISION_SKIN,
+		BALL_COLLISION_GRID_CELL_SIZE,
+		use_projected_motion
+	)
+
+
+func _publish_aim_contact_order_snapshot() -> void:
+	if not aim_contact_order_diagnostics.resolver_capture_open:
+		return
+	var contact_order_snapshot: Dictionary = aim_contact_order_diagnostics.complete_resolver_pass()
+	if not contact_order_snapshot.is_empty():
+		aim_preview.report_debug_contact_order_snapshot(contact_order_snapshot)
+
+
 #region Spatial Grid / Broad-Phase
 # Buckets active balls so BallPhysics only resolves nearby moving pairs.
 # Future extraction candidate: BallPhysics broad-phase helper.
 func _build_ball_collision_grid(active_balls: Array[Ball]) -> Dictionary:
-	var spatial_grid := {}
+	var spatial_grid: Dictionary = {}
+	_populate_ball_collision_grid(spatial_grid, active_balls)
+	return spatial_grid
+
+
+func _populate_ball_collision_grid(spatial_grid: Dictionary, active_balls: Array[Ball]) -> void:
+	spatial_grid.clear()
 	for ball in active_balls:
+		if ball == null or not is_instance_valid(ball) or not ball.is_gameplay_active():
+			continue
 		var cell: Vector2i = _get_ball_collision_grid_cell(ball.global_position)
 		if not spatial_grid.has(cell):
 			spatial_grid[cell] = []
@@ -928,7 +1381,6 @@ func _build_ball_collision_grid(active_balls: Array[Ball]) -> Dictionary:
 		perf_spatial_grid_max_cell_size = maxi(perf_spatial_grid_max_cell_size, spatial_grid[cell].size())
 
 	perf_spatial_grid_cells = spatial_grid.size()
-	return spatial_grid
 
 
 func _resolve_ball_against_neighbor_cells(ball: Ball, spatial_grid: Dictionary, checked_pairs: Dictionary) -> void:
@@ -938,17 +1390,39 @@ func _resolve_ball_against_neighbor_cells(ball: Ball, spatial_grid: Dictionary, 
 			var neighbor_cell := center_cell + Vector2i(x_offset, y_offset)
 			if not spatial_grid.has(neighbor_cell):
 				continue
-			_resolve_ball_against_cell(ball, spatial_grid[neighbor_cell], checked_pairs)
+			_resolve_ball_against_cell(ball, spatial_grid[neighbor_cell], checked_pairs, center_cell, neighbor_cell)
 
 
-func _resolve_ball_against_cell(ball: Ball, cell_balls: Array, checked_pairs: Dictionary) -> void:
+func _resolve_ball_against_cell(
+	ball: Ball,
+	cell_balls: Array,
+	checked_pairs: Dictionary,
+	source_cell: Vector2i,
+	neighbor_cell: Vector2i
+) -> void:
 	for other_ball in cell_balls:
 		var target_ball := other_ball as Ball
 		if target_ball == null or target_ball == ball:
 			continue
 
 		var pair_key: String = _get_ball_pair_key(ball, target_ball)
-		if checked_pairs.has(pair_key):
+		var is_duplicate_pair: bool = checked_pairs.has(pair_key)
+		if aim_contact_order_diagnostics.resolver_capture_open:
+			aim_contact_order_diagnostics.record_pair_encounter(
+				ball,
+				target_ball,
+				pair_key,
+				source_cell,
+				neighbor_cell,
+				is_duplicate_pair
+			)
+		if is_duplicate_pair:
+			if (
+				cue_toi_handled_pairs_this_substep.has(pair_key)
+				and not cue_toi_legacy_skip_counted_this_substep.has(pair_key)
+			):
+				cue_toi_legacy_skip_counted_this_substep[pair_key] = true
+				cue_toi_duplicate_legacy_resolutions_prevented += 1
 			continue
 
 		checked_pairs[pair_key] = true
@@ -974,35 +1448,116 @@ func _get_ball_pair_key(ball_a: Ball, ball_b: Ball) -> String:
 #endregion
 
 
-func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
+func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> bool:
 	if not ball_a.is_gameplay_active() or not ball_b.is_gameplay_active():
-		return
+		return false
 
 	perf_ball_pair_checks += 1
 	var offset: Vector2 = ball_b.global_position - ball_a.global_position
 	var distance: float = offset.length()
 	var real_combined_radius: float = ball_a.radius + ball_b.radius
-	var effective_combined_radius: float = real_combined_radius + BALL_COLLISION_SKIN
+	var effective_combined_radius: float = BALL_SWEEP_MATH.get_effective_collision_radius(
+		ball_a.radius,
+		ball_b.radius,
+		BALL_COLLISION_SKIN
+	)
+	if aim_contact_order_diagnostics.resolver_capture_open:
+		aim_contact_order_diagnostics.record_pair_test(
+			ball_a,
+			ball_b,
+			_get_ball_pair_key(ball_a, ball_b),
+			distance,
+			effective_combined_radius,
+			distance < effective_combined_radius
+		)
 	if distance >= effective_combined_radius:
-		return
+		return false
 
 	var normal: Vector2 = Vector2.RIGHT if distance == 0.0 else offset / distance
 	var real_overlap: float = max(real_combined_radius - distance, 0.0)
 	if real_overlap > 0.0:
 		_separate_overlapping_balls(ball_a, ball_b, normal, real_overlap)
+	return _resolve_ball_contact_response(ball_a, ball_b, normal, "legacy")
+
+
+func _resolve_ball_pair_at_toi(ball_a: Ball, ball_b: Ball, contact_normal: Vector2) -> bool:
+	if (
+		ball_a == null
+		or ball_b == null
+		or not is_instance_valid(ball_a)
+		or not is_instance_valid(ball_b)
+		or ball_a.is_queued_for_deletion()
+		or ball_b.is_queued_for_deletion()
+		or not ball_a.is_gameplay_active()
+		or not ball_b.is_gameplay_active()
+	):
+		return false
+	perf_ball_pair_checks += 1
+	var offset: Vector2 = ball_b.global_position - ball_a.global_position
+	var distance: float = offset.length()
+	var normal: Vector2 = contact_normal.normalized()
+	if normal == Vector2.ZERO:
+		normal = Vector2.RIGHT if distance == 0.0 else offset / distance
+	var real_combined_radius: float = ball_a.radius + ball_b.radius
+	var real_overlap: float = maxf(real_combined_radius - distance, 0.0)
+	if real_overlap > 0.0:
+		_separate_overlapping_balls(ball_a, ball_b, normal, real_overlap)
+	if aim_contact_order_diagnostics.resolver_capture_open:
+		aim_contact_order_diagnostics.record_pair_test(
+			ball_a,
+			ball_b,
+			_get_ball_pair_key(ball_a, ball_b),
+			distance,
+			BALL_SWEEP_MATH.get_effective_collision_radius(
+				ball_a.radius,
+				ball_b.radius,
+				BALL_COLLISION_SKIN
+			),
+			true
+		)
+	return _resolve_ball_contact_response(ball_a, ball_b, normal, "corrected_toi")
+
+
+func _resolve_ball_contact_response(
+	ball_a: Ball,
+	ball_b: Ball,
+	normal: Vector2,
+	resolution_source: String
+) -> bool:
 
 	var pre_collision_velocity_a: Vector2 = ball_a.velocity
 	var pre_collision_velocity_b: Vector2 = ball_b.velocity
 	var collision_impact_speed: float = _get_ball_collision_impact_speed(ball_a, ball_b, normal)
 	if collision_impact_speed > 0.0:
 		ball_audio_system.handle_ball_collision(ball_a, ball_b, collision_impact_speed)
-	if _apply_ball_collision_response(ball_a, ball_b, normal, collision_impact_speed):
+	var collision_response_applied: bool = _apply_ball_collision_response(ball_a, ball_b, normal, collision_impact_speed)
+	if aim_contact_order_diagnostics.resolver_capture_open:
+		aim_contact_order_diagnostics.record_pair_resolution(
+			ball_a,
+			ball_b,
+			_get_ball_pair_key(ball_a, ball_b),
+			collision_response_applied,
+			normal,
+			collision_impact_speed,
+			resolution_source
+		)
+	if collision_response_applied:
 		perf_ball_collisions_resolved += 1
+		if ball_a == cue_ball or ball_b == cue_ball:
+			cue_toi_first_contact_pending = false
 		_note_cue_object_contact(ball_a, ball_b, normal, collision_impact_speed, pre_collision_velocity_a, pre_collision_velocity_b)
 		_note_chain_contact(ball_a, ball_b, pre_collision_velocity_a, pre_collision_velocity_b)
 		shot_event_system.record_collision_motion(ball_a, ball_b, pre_collision_velocity_a, pre_collision_velocity_b)
 	if collision_impact_speed > 0.0 and aim_preview.is_debug_aim_line_enabled():
-		aim_preview.report_debug_collision_event(ball_a, ball_b, normal, collision_impact_speed)
+		aim_preview.report_debug_collision_event(
+			ball_a,
+			ball_b,
+			normal,
+			collision_impact_speed,
+			pre_collision_velocity_a,
+			pre_collision_velocity_b,
+			resolution_source
+		)
 	_note_actual_cue_ball_hit(
 		ball_a,
 		ball_b,
@@ -1014,6 +1569,7 @@ func _resolve_ball_pair(ball_a: Ball, ball_b: Ball) -> void:
 	wayfinder_system.handle_collision(ball_a, ball_b)
 	powder_keg_system.handle_collision(ball_a, ball_b)
 	anchor_ball_system.handle_collision(ball_a, ball_b)
+	return collision_response_applied
 
 
 func _separate_overlapping_balls(ball_a: Ball, ball_b: Ball, normal: Vector2, overlap: float) -> void:
@@ -1026,17 +1582,20 @@ func _separate_overlapping_balls(ball_a: Ball, ball_b: Ball, normal: Vector2, ov
 
 
 func _get_ball_collision_impact_speed(ball_a: Ball, ball_b: Ball, normal: Vector2) -> float:
-	var relative_velocity: Vector2 = ball_a.velocity - ball_b.velocity
-	return relative_velocity.dot(normal)
+	return BALL_COLLISION_MATH.get_impact_speed(ball_a.velocity, ball_b.velocity, normal)
 
 
 func _apply_ball_collision_response(ball_a: Ball, ball_b: Ball, normal: Vector2, speed_along_normal: float) -> bool:
 	if speed_along_normal <= 0.0:
 		return false
 
-	var impulse_strength: float = (1.0 + BALL_COLLISION_RESTITUTION) * speed_along_normal * 0.5
-	impulse_strength *= BALL_VELOCITY_TRANSFER
-	var impulse: Vector2 = normal * impulse_strength
+	var impulse: Vector2 = BALL_COLLISION_MATH.get_normal_impulse(
+		ball_a.velocity,
+		ball_b.velocity,
+		normal,
+		BALL_COLLISION_RESTITUTION,
+		BALL_VELOCITY_TRANSFER
+	)
 	if anchor_ball_system.try_apply_curse_seed_collision_response(ball_a, ball_b, normal, impulse):
 		return true
 	if cannon_ball_system.try_apply_collision_response(ball_a, ball_b, normal, impulse):
@@ -1178,7 +1737,13 @@ func _resolve_rail_collisions() -> void:
 			_note_cue_rail_touch(ball)
 			shot_event_system.record_rail_contact(ball, hit_event.position)
 			if aim_preview.is_debug_aim_line_enabled():
-				aim_preview.report_debug_rail_event(ball, hit_event.normal, ball.velocity.length())
+				aim_preview.report_debug_rail_event(
+					ball,
+					hit_event.position,
+					hit_event.normal,
+					hit_event.incoming_velocity,
+					hit_event.outgoing_velocity
+				)
 			aim_preview.record_actual_bank_debug(
 				ball,
 				hit_event.position,
@@ -1196,6 +1761,12 @@ func _handle_pocket_checks() -> bool:
 	if pocketed_ball == null:
 		return false
 
+	if aim_preview.is_debug_aim_line_enabled():
+		aim_preview.report_debug_pocket_event(
+			pocketed_ball,
+			pocket_system.get_last_captured_pocket_index(),
+			pocket_system.get_last_captured_pocket_position()
+		)
 	_handle_pocketed_ball(pocketed_ball)
 	return true
 
@@ -1303,6 +1874,7 @@ func _lock_initial_cue_start(start_index: int) -> bool:
 
 	cue_start_selection_locked = true
 	cue_start_highlighted_index = start_index
+	notify_aim_prediction_state_changed("cue_start_position_changed", "reset")
 	cue_controller.stop_recoil()
 	_clear_aim_preview_now()
 	_emit_cue_start_selection_update()
@@ -1386,6 +1958,7 @@ func _release_shot(_mouse_position: Vector2) -> void:
 		queue_redraw()
 		return
 
+	shot_rewind_system.capture_pre_shot_checkpoint()
 	var effective_shot_power := get_effective_shot_power()
 	if release_direction != Vector2.ZERO:
 		aim_preview.start_path_comparison(cue_ball.global_position, drag_vector * effective_shot_power)
@@ -1608,8 +2181,7 @@ func _on_kraken_boons_changed(_snapshot: Dictionary) -> void:
 		kraken_boon_effect_snapshot = (effects_value as Dictionary).duplicate(true)
 	else:
 		kraken_boon_effect_snapshot.clear()
-	if is_dragging:
-		_mark_aim_preview_dirty()
+	notify_aim_prediction_state_changed("boon_effects_changed", "state_change")
 
 
 func _print_shot_power_debug(drag_vector: Vector2, release_position: Vector2) -> void:
@@ -1892,6 +2464,7 @@ func _note_actual_cue_pocketed(ball: Ball) -> void:
 func _start_shot_tracking() -> void:
 	_deactivate_initial_cue_start_selection()
 	shot_active = true
+	_reset_cue_toi_for_committed_shot()
 	shots_taken_count += 1
 	shot_taken.emit(shots_taken_count)
 	shot_elapsed_time = 0.0
@@ -1907,10 +2480,29 @@ func _start_shot_tracking() -> void:
 	shot_multi_pocket_bonus_awarded = false
 	shot_bank_bonus_awarded = false
 	shot_bank_eligible_ball_ids.clear()
+	aim_contact_order_diagnostics.reset_for_committed_shot()
 	shot_event_system.start_shot(cue_ball.global_position)
 	pocket_streak_system.start_shot()
 	table_event_system.start_shot()
 	embezzler_system.handle_shot_started()
+	shot_rewind_system.notify_table_state_changed()
+
+
+func _reset_cue_toi_for_committed_shot() -> void:
+	cue_toi_first_contact_pending = true
+	_reset_cue_toi_shot_counters()
+	_reset_cue_toi_substep_context()
+
+
+func _reset_cue_toi_shot_counters() -> void:
+	cue_toi_candidate_tests_this_shot = 0
+	cue_toi_solves_this_shot = 0
+	cue_toi_contacts_resolved_this_shot = 0
+	cue_toi_max_candidates_in_substep = 0
+	cue_toi_remaining_time_iterations = 0
+	cue_toi_event_cap_hits = 0
+	cue_toi_duplicate_legacy_resolutions_prevented = 0
+	cue_toi_processing_time_ms = 0.0
 
 
 func _note_cue_rail_touch(ball: Ball) -> void:
@@ -2102,6 +2694,8 @@ func _try_finish_shot() -> void:
 
 	var should_advance_anchor_chains: bool = not cue_control_reclaimed
 	shot_active = false
+	cue_toi_first_contact_pending = false
+	_reset_cue_toi_substep_context()
 	cue_control_reclaimed = false
 	cue_reclaim_eligible = false
 	cue_reclaim_blocker_reason = "No active shot"
@@ -2115,12 +2709,213 @@ func _try_finish_shot() -> void:
 		_handle_cue_control_regained_after_shot()
 	if is_passage_mode():
 		sunken_spoils_system.handle_shot_resolved()
+	shot_rewind_system.notify_table_state_changed()
 
 
 func _handle_cue_control_regained_after_shot() -> void:
 	anchor_ball_system.advance_curse_chains_on_cue_control_regained()
 	embezzler_system.handle_cue_control_regained()
 	table_event_system.handle_cue_control_regained()
+
+
+func get_shot_rewind_capture_blocker() -> String:
+	if game_over:
+		return "Reset unavailable: a run or round transition is active."
+	if shot_active:
+		return "Reset unavailable: another shot is resolving."
+	if ball_placement_system.is_placement_active():
+		return "Reset unavailable: ball placement is active."
+	if table_event_system.is_event_menu_open():
+		return "Reset unavailable: Intervention menu is open."
+	if spawn_system.has_pending_spawns() or spawn_system.has_pending_landing_callbacks():
+		return "Reset unavailable: spawned balls are still settling."
+	if table_event_system.has_staged_event_work():
+		return "Reset unavailable: a staged Intervention is active."
+	if not _all_balls_stopped():
+		return "Reset unavailable: balls are still moving."
+	return get_shot_rewind_unsupported_state_blocker()
+
+
+func get_shot_rewind_unsupported_state_blocker() -> String:
+	if spawn_system.has_pending_spawns() or spawn_system.has_pending_landing_callbacks():
+		return "Reset unavailable: spawned balls are still settling."
+	if table_event_system.has_staged_event_work():
+		return "Reset unavailable: a staged Intervention is active."
+	if int(oath_system.get_oath_snapshot().get("active_oath_count", 0)) > 0:
+		return "Reset unavailable: active Oaths are not yet rewind-safe."
+	if int(kraken_boon_system.get_boon_snapshot().get("active_boon_count", 0)) > 0:
+		return "Reset unavailable: active Kraken Boons are not yet rewind-safe."
+	for child in balls.get_children():
+		var ball: Ball = child as Ball
+		if ball == null or ball.is_queued_for_deletion():
+			continue
+		if not ball.is_gameplay_active():
+			return "Reset unavailable: a ball is in a transient state."
+		var anomaly_name: String = _get_rewind_unsupported_ball_state(ball)
+		if not anomaly_name.is_empty():
+			return "Reset unavailable: active %s state is not yet rewind-safe." % anomaly_name
+	return ""
+
+
+func get_shot_rewind_transition_blocker() -> String:
+	if shot_rewind_system == null:
+		return "Reset unavailable: rewind system is missing."
+	return shot_rewind_system.get_ui_transition_blocker()
+
+
+func are_all_balls_stopped_for_rewind() -> bool:
+	return _all_balls_stopped()
+
+
+func capture_shot_rewind_ball_states() -> Array[Dictionary]:
+	var states: Array[Dictionary] = []
+	for child in balls.get_children():
+		var ball: Ball = child as Ball
+		if ball == null or not is_instance_valid(ball):
+			continue
+		states.append({
+			"role": "cue" if ball == cue_ball else ("eight" if ball == eight_ball else "object"),
+			"ball_type": ball.ball_type,
+			"ball_number": ball.ball_number,
+			"ball_color": ball.ball_color,
+			"radius": ball.radius,
+			"global_position": ball.global_position,
+			"velocity": ball.velocity,
+			"show_ball_numbers": ball.show_ball_numbers,
+			"is_wayfinder": ball.is_wayfinder,
+			"wayfinder_active": ball.wayfinder_active,
+			"wayfinder_current_active": wayfinder_system.is_temporary_current_carrier(ball),
+			"is_powder_keg": ball.is_powder_keg,
+			"is_anchor_ball": ball.is_anchor_ball,
+			"is_anchor_curse_seed": ball.is_anchor_curse_seed,
+			"is_cannon_ball": ball.is_cannon_ball,
+			"is_treasure_ball": ball.is_treasure_ball,
+			"is_embezzler_ball": ball.is_embezzler_ball,
+		})
+	return states
+
+
+func get_shot_rewind_state() -> Dictionary:
+	return {
+		"game_over": game_over,
+		"shots_taken_count": shots_taken_count,
+		"balls_sunk_count": balls_sunk_count,
+		"eight_start": eight_start,
+		"cue_start_selection_active": cue_start_selection_active,
+		"cue_start_selection_locked": cue_start_selection_locked,
+		"cue_start_highlighted_index": cue_start_highlighted_index,
+		"shot_pocketed_object_balls": shot_pocketed_object_balls,
+		"shot_cue_touched_rail": shot_cue_touched_rail,
+		"shot_had_bank_pocket": shot_had_bank_pocket,
+		"shot_multi_pocket_bonus_awarded": shot_multi_pocket_bonus_awarded,
+		"shot_bank_bonus_awarded": shot_bank_bonus_awarded,
+		"shot_bank_eligible_ball_ids": shot_bank_eligible_ball_ids.duplicate(true),
+		"cue_toi_first_contact_pending": cue_toi_first_contact_pending,
+	}
+
+
+func prepare_for_shot_rewind() -> void:
+	game_over = false
+	shot_active = false
+	cue_toi_first_contact_pending = false
+	_reset_cue_toi_shot_counters()
+	_reset_cue_toi_substep_context()
+	_end_cue_drag()
+	cue_controller.stop_recoil()
+	aim_preview.clear_for_authoritative_table_reset("shot_rewind")
+	shot_event_system.clear_shot_events()
+	pocket_streak_system.reset_shot()
+	pocket_streak_presenter.clear_for_rewind()
+	_clear_rewind_callout_presentation()
+
+
+func restore_shot_rewind_balls(ball_states_value: Variant) -> void:
+	var ball_states: Array = ball_states_value if ball_states_value is Array else []
+	for child in balls.get_children():
+		var existing_ball: Ball = child as Ball
+		if existing_ball == null:
+			continue
+		balls.remove_child(existing_ball)
+		existing_ball.free()
+
+	cue_ball = null
+	eight_ball = null
+	for state_value in ball_states:
+		if not state_value is Dictionary:
+			continue
+		var state: Dictionary = state_value
+		var restored_ball: Ball = spawn_system.restore_ball_from_rewind_state(state)
+		if restored_ball == null:
+			continue
+		match str(state.get("role", "object")):
+			"cue":
+				cue_ball = restored_ball
+			"eight":
+				eight_ball = restored_ball
+	notify_aim_prediction_state_changed("shot_rewind_restore_complete", "reset")
+
+
+func restore_shot_rewind_state(state: Dictionary) -> void:
+	game_over = bool(state.get("game_over", false))
+	shot_active = false
+	cue_toi_first_contact_pending = bool(state.get("cue_toi_first_contact_pending", false))
+	_reset_cue_toi_shot_counters()
+	_reset_cue_toi_substep_context()
+	shots_taken_count = maxi(int(state.get("shots_taken_count", 0)), 0)
+	balls_sunk_count = maxi(int(state.get("balls_sunk_count", 0)), 0)
+	eight_start = state.get("eight_start", Vector2.ZERO)
+	cue_start_selection_active = bool(state.get("cue_start_selection_active", false))
+	cue_start_selection_locked = bool(state.get("cue_start_selection_locked", true))
+	cue_start_highlighted_index = int(state.get("cue_start_highlighted_index", 1))
+	shot_pocketed_object_balls = int(state.get("shot_pocketed_object_balls", 0))
+	shot_cue_touched_rail = bool(state.get("shot_cue_touched_rail", false))
+	shot_had_bank_pocket = bool(state.get("shot_had_bank_pocket", false))
+	shot_multi_pocket_bonus_awarded = bool(state.get("shot_multi_pocket_bonus_awarded", false))
+	shot_bank_bonus_awarded = bool(state.get("shot_bank_bonus_awarded", false))
+	shot_bank_eligible_ball_ids = state.get("shot_bank_eligible_ball_ids", {}).duplicate(true)
+	shot_elapsed_time = 0.0
+	cue_control_reclaimed = false
+	cue_reclaim_eligible = false
+	cue_reclaim_blocker_reason = "No active shot"
+	cue_reclaim_cached_signature = ""
+	cue_reclaim_cached_eligible = false
+	cue_reclaim_cached_blocker_reason = "No active shot"
+	_mark_aim_preview_dirty()
+	_queue_run_ball_count_update()
+	_emit_cue_start_selection_update()
+	status_text_changed.emit(_get_ready_status_text())
+	queue_redraw()
+
+
+func _get_rewind_unsupported_ball_state(ball: Ball) -> String:
+	if wayfinder_system.is_temporary_current_carrier(ball):
+		return "Wayfinder Current"
+	if ball.is_powder_keg:
+		return "Powder Keg"
+	if ball.is_wayfinder or ball.wayfinder_active:
+		return "Wayfinder"
+	if ball.is_anchor_ball or ball.is_anchor_curse_seed:
+		return "Anchor"
+	if ball.is_cannon_ball:
+		return "Cannon Ball"
+	if ball.is_treasure_ball:
+		return "Treasure Ball"
+	if ball.is_embezzler_ball:
+		return "Embezzler"
+	return ""
+
+
+func _clear_rewind_callout_presentation() -> void:
+	pending_callout_messages.clear()
+	callout_spawn_cooldown = 0.0
+	for callout in active_result_callouts.duplicate():
+		if callout.drift_tween != null and callout.drift_tween.is_running():
+			callout.drift_tween.kill()
+		if callout.slot_tween != null and callout.slot_tween.is_running():
+			callout.slot_tween.kill()
+		if is_instance_valid(callout.label):
+			callout.label.queue_free()
+	active_result_callouts.clear()
 #endregion
 
 
@@ -2680,6 +3475,23 @@ func _get_aim_performance_snapshot(aim_snapshot: Dictionary) -> Dictionary:
 		"aim_hit_ball_rail_hits_before_impact": aim_snapshot["hit_ball_rail_hits_before_impact"],
 		"aim_hit_ball_cue_impact_segment_index": aim_snapshot["hit_ball_cue_impact_segment_index"],
 		"aim_compare": aim_snapshot.get("aim_compare", {}),
+		"aim_cloned_simulation": aim_snapshot.get("cloned_simulation", {}),
+		"aim_cloned_prediction_availability": aim_snapshot.get("cloned_prediction_availability", {}),
+		"aim_cloned_invalidation": aim_snapshot.get("cloned_invalidation", {}),
+		"aim_cloned_event_comparison": aim_snapshot.get("cloned_event_comparison", {}),
+		"aim_cloned_profiler": aim_snapshot.get("cloned_profiler", {}),
+		"debug_aim_mode": get_debug_aim_mode_snapshot(),
+		"cue_toi_correction_enabled": cue_first_contact_toi_enabled,
+		"cue_toi_first_contact_active": _should_run_cue_first_contact_toi(),
+		"cue_toi_first_contact_pending": cue_toi_first_contact_pending,
+		"cue_toi_candidate_tests_this_shot": cue_toi_candidate_tests_this_shot,
+		"cue_toi_solves_this_shot": cue_toi_solves_this_shot,
+		"cue_toi_contacts_resolved": cue_toi_contacts_resolved_this_shot,
+		"cue_toi_max_candidates_in_substep": cue_toi_max_candidates_in_substep,
+		"cue_toi_remaining_time_iterations": cue_toi_remaining_time_iterations,
+		"cue_toi_event_cap_hits": cue_toi_event_cap_hits,
+		"cue_toi_duplicate_legacy_resolutions_prevented": cue_toi_duplicate_legacy_resolutions_prevented,
+		"cue_toi_processing_time_ms": cue_toi_processing_time_ms,
 	}
 
 
@@ -2752,11 +3564,91 @@ func is_shot_path_debug_enabled() -> bool:
 
 
 func set_debug_aim_line_enabled(enabled: bool) -> void:
+	var was_enabled: bool = is_debug_aim_mode_enabled()
+	var snapshot: Dictionary = {}
+	if enabled and not was_enabled and shot_rewind_system != null:
+		shot_rewind_system.handle_debug_aim_mode_enabled()
+	if debug_aim_compatibility_system != null:
+		snapshot = debug_aim_compatibility_system.set_enabled(enabled)
 	aim_preview.set_debug_aim_line_enabled(enabled)
+	if was_enabled != enabled:
+		notify_aim_prediction_state_changed(
+			"debug_aim_mode_enabled" if enabled else "debug_aim_mode_disabled",
+			"transform"
+		)
+	else:
+		_mark_aim_preview_dirty()
+	debug_aim_mode_changed.emit(snapshot)
 
 
 func is_debug_aim_line_enabled() -> bool:
 	return aim_preview.is_debug_aim_line_enabled()
+
+
+func is_debug_aim_mode_enabled() -> bool:
+	return (
+		debug_aim_compatibility_system != null
+		and debug_aim_compatibility_system.is_enabled()
+	)
+
+
+func get_debug_aim_mode_snapshot() -> Dictionary:
+	if debug_aim_compatibility_system == null:
+		return {"enabled": false}
+	return debug_aim_compatibility_system.get_snapshot()
+
+
+func notify_debug_aim_spawn_normalized() -> void:
+	if debug_aim_compatibility_system == null:
+		return
+	debug_aim_compatibility_system.notify_spawn_normalized()
+	debug_aim_mode_changed.emit(debug_aim_compatibility_system.get_snapshot())
+	notify_aim_prediction_state_changed("debug_aim_spawn_normalized", "roster_change")
+
+
+func set_debug_cloned_aim_configuration(configuration: Dictionary) -> void:
+	aim_preview.set_cloned_trajectory_configuration(configuration)
+	_mark_aim_preview_dirty()
+
+
+func get_debug_cloned_aim_configuration() -> Dictionary:
+	return aim_preview.get_cloned_trajectory_configuration()
+
+
+func reset_debug_aim_profiler_stats() -> void:
+	aim_preview.reset_cloned_trajectory_profiler_stats()
+
+
+func reset_debug_aim_benchmark_stats() -> void:
+	aim_preview.reset_cloned_trajectory_benchmark_stats()
+
+
+func start_debug_aim_benchmark(
+	label: String,
+	preset_label: String,
+	contamination_snapshot: Dictionary = {}
+) -> void:
+	aim_preview.start_cloned_trajectory_benchmark(
+		label,
+		preset_label,
+		contamination_snapshot
+	)
+
+
+func stop_debug_aim_benchmark() -> void:
+	aim_preview.stop_cloned_trajectory_benchmark()
+
+
+func copy_debug_aim_benchmark_report() -> bool:
+	return aim_preview.copy_cloned_trajectory_benchmark_report()
+
+
+func set_debug_cue_first_contact_toi_enabled(enabled: bool) -> void:
+	cue_first_contact_toi_enabled = enabled
+
+
+func is_debug_cue_first_contact_toi_enabled() -> bool:
+	return cue_first_contact_toi_enabled
 
 
 func get_debug_spawn_hotkey_data() -> Dictionary:
@@ -3123,12 +4015,17 @@ func _try_award_bank_bonus() -> void:
 #region Game State Helpers
 # Reset and game-end helpers remain here until PocketSystem/GameState are split.
 func _reset_ball(ball: Ball, origin: Vector2, message: String) -> void:
+	if ball == cue_ball:
+		cue_toi_first_contact_pending = false
+		_reset_cue_toi_substep_context()
 	spawn_system.reset_ball(ball, origin)
 	status_text_changed.emit(message)
 
 
 func _finish_game(message: String) -> void:
 	game_over = true
+	cue_toi_first_contact_pending = false
+	_reset_cue_toi_substep_context()
 	_end_cue_drag()
 
 	for child in balls.get_children():

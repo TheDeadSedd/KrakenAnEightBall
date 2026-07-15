@@ -43,6 +43,17 @@ func reset_shot() -> void:
 	last_streak_bonus_awarded = 0
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"total_streaks_triggered": total_streaks_triggered,
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	total_streaks_triggered = maxi(int(state.get("total_streaks_triggered", 0)), 0)
+	reset_shot()
+
+
 func record_object_ball_sink(sink_context: Dictionary, scored_amount: int) -> Dictionary:
 	var ball_id: int = int(sink_context.get("ball_id", 0))
 	if ball_id == 0 or recorded_ball_ids.has(ball_id):

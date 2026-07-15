@@ -8,6 +8,12 @@ class_name AimPreview
 # Debug-only comparison tools.
 const DEBUG_AIM_PATH_COMPARISON_DEFAULT := false
 const DEBUG_BANK_PREDICTION := false
+const BALL_SWEEP_MATH := preload("res://scripts/BallSweepMath.gd")
+const BALL_COLLISION_MATH := preload("res://scripts/BallCollisionMath.gd")
+const BALL_MOTION_MATH := preload("res://scripts/BallMotionMath.gd")
+const AIM_TRAJECTORY_PREDICTOR_SCRIPT := preload("res://scripts/AimTrajectoryPredictor.gd")
+const AIM_TRAJECTORY_PROFILER_SCRIPT := preload("res://scripts/AimTrajectoryProfiler.gd")
+const AIM_BENCHMARK_SESSION_SCRIPT := preload("res://scripts/AimBenchmarkSession.gd")
 
 # Cue-ball guide simulation and rendering.
 const AIM_GUIDE_LENGTH := 180.0
@@ -16,7 +22,7 @@ const AIM_PREDICTION_MAX_DISTANCE := 900.0
 const AIM_SIMULATION_FRAME_DELTA := 1.0 / 60.0
 const AIM_PREDICTION_STEP_SUBSTEPS := 2
 const AIM_SIMULATION_MAX_BOUNCES := 1
-const AIM_BALL_HIT_GRAZE_MARGIN := 1.25
+const DEBUG_LEGACY_AIM_BALL_HIT_GRAZE_MARGIN := 1.25
 const AIM_LINE_WIDTH := 3.0
 const AIM_LINE_GLOW_WIDTH := 9.0
 const AIM_LINE_MIN_ALPHA := 0.24
@@ -45,6 +51,14 @@ const DEBUG_AIM_TRACE_MAX_TOTAL_POINTS := 1500
 const DEBUG_AIM_TRACE_BALL_POINT_SPACING := 1.0
 const DEBUG_AIM_COLLISION_LOG_MAX_ENTRIES := 12
 const DEBUG_AIM_FIRST_HIT_CANDIDATE_MAX_ENTRIES := 32
+const DEBUG_CLONED_PATH_COLORS := [
+	Color(1.0, 0.78, 0.32, 0.86),
+	Color(0.65, 1.0, 0.48, 0.82),
+	Color(0.96, 0.46, 0.88, 0.82),
+	Color(0.55, 0.66, 1.0, 0.82),
+	Color(1.0, 0.52, 0.34, 0.82),
+	Color(0.40, 1.0, 0.86, 0.82),
+]
 
 # Struck-ball guide simulation and rendering.
 const AIM_TARGET_LINE_WIDTH := 2.6
@@ -89,6 +103,9 @@ class AimPrediction:
 	var target_direction := Vector2.ZERO
 	var impact_incoming_direction := Vector2.ZERO
 	var predicted_target_velocity := Vector2.ZERO
+	var target_center_at_impact := Vector2.ZERO
+	var effective_collision_radius := 0.0
+	var collision_skin := 0.0
 	var rail_hit_count_before_target: int = 0
 	var cue_target_impact_segment_index: int = -1
 	var target_path_points: Array[Vector2] = []
@@ -98,6 +115,10 @@ class AimPrediction:
 	var target_path_length: float = 0.0
 	var target_first_hit_ball: Ball = null
 	var target_first_hit_position := Vector2.ZERO
+	var target_first_hit_target_center := Vector2.ZERO
+	var target_first_hit_normal := Vector2.ZERO
+	var target_first_hit_effective_collision_radius := 0.0
+	var target_first_hit_collision_skin := 0.0
 	var target_incoming_velocity_at_stop := Vector2.ZERO
 	var path_points: Array[Vector2] = []
 	var rail_position := Vector2.ZERO
@@ -115,6 +136,10 @@ class AimBallHit:
 	var ball: Ball = null
 	var distance := INF
 	var position := Vector2.ZERO
+	var target_position := Vector2.ZERO
+	var collision_normal := Vector2.ZERO
+	var effective_collision_radius := 0.0
+	var collision_skin := 0.0
 
 class AimPocketHit:
 	var pocket_index := -1
@@ -129,6 +154,10 @@ class AimTargetPath:
 	var path_length: float = 0.0
 	var first_hit_ball: Ball = null
 	var first_hit_position := Vector2.ZERO
+	var first_hit_target_center := Vector2.ZERO
+	var first_hit_normal := Vector2.ZERO
+	var first_hit_effective_collision_radius := 0.0
+	var first_hit_collision_skin := 0.0
 	var incoming_velocity_at_stop := Vector2.ZERO
 
 class AimChainLink:
@@ -138,6 +167,11 @@ class AimChainLink:
 	var first_stop_reason := "inactive"
 	var path_length := 0.0
 	var next_ball: Ball = null
+	var first_hit_position := Vector2.ZERO
+	var first_hit_target_center := Vector2.ZERO
+	var first_hit_normal := Vector2.ZERO
+	var first_hit_effective_collision_radius := 0.0
+	var first_hit_collision_skin := 0.0
 	var incoming_velocity_at_stop := Vector2.ZERO
 	var predicted_next_velocity := Vector2.ZERO
 
@@ -149,6 +183,7 @@ class DebugAimShotOverlay:
 	var actual_launch_velocity := Vector2.ZERO
 	var predicted_cue_path: Array[Vector2] = []
 	var predicted_cue_contact_position := Vector2.ZERO
+	var predicted_target_contact_position := Vector2.ZERO
 	var has_predicted_cue_contact := false
 	var predicted_child_path: Array[Vector2] = []
 	var predicted_child_marker_position := Vector2.ZERO
@@ -160,6 +195,10 @@ class DebugAimShotOverlay:
 	var predicted_impact_incoming_direction := Vector2.ZERO
 	var predicted_target_outgoing_velocity := Vector2.ZERO
 	var predicted_distance_to_first_hit := -1.0
+	var predicted_center_distance := -1.0
+	var prediction_effective_collision_radius := -1.0
+	var prediction_collision_skin := 0.0
+	var physics_collision_skin := 0.0
 	var predicted_cut_angle_degrees := 0.0
 	var cue_radius := 10.0
 	var target_radius := 10.0
@@ -184,6 +223,10 @@ class DebugAimShotOverlay:
 	var first_hit_candidate_log: Array[Dictionary] = []
 	var first_hit_selected_ball_id := -1
 	var first_hit_selected_ball_number := -1
+	var contact_order_snapshot: Dictionary = {}
+	var cloned_prediction_result: Dictionary = {}
+	var actual_events: Array[Dictionary] = []
+	var actual_event_start_usec: int = 0
 
 class BallMotionState:
 	var position := Vector2.ZERO
@@ -254,17 +297,127 @@ var draw_segments_last_draw := 0
 var draw_calls_last_draw := 0
 var _draw_segments_in_progress := 0
 var _draw_calls_in_progress := 0
+var _draw_predicted_balls_in_progress := 0
+var _draw_visible_paths_in_progress := 0
+var _draw_ghost_balls_in_progress := 0
+var _draw_labels_in_progress := 0
+var _draw_event_markers_in_progress := 0
 var _aim_ball_spatial_grid: Dictionary = {}
 var _aim_spatial_cell_size := 56.0
 var _aim_spatial_max_ball_radius := 0.0
 var _debug_first_hit_candidate_log: Array[Dictionary] = []
 var _debug_first_hit_selected_ball_id := -1
 var _debug_first_hit_selected_ball_number := -1
+var trajectory_predictor: AimTrajectoryPredictor
+var trajectory_profiler: AimTrajectoryProfiler
+var benchmark_session: AimBenchmarkSession
+var cloned_trajectory_configuration: Dictionary = {}
+var current_cloned_prediction: Dictionary = {}
+var _last_cloned_rebuild_origin := Vector2.ZERO
+var _last_cloned_rebuild_velocity := Vector2.ZERO
+var _has_last_cloned_rebuild_input := false
+var _cloned_configuration_changed_since_rebuild := false
+var cloned_prediction_availability: Dictionary = {}
+var _observed_table_prediction_revision := -1
+var _last_successful_cloned_rebuild_revision := -1
+var _cloned_refresh_pending := false
+var _last_cloned_invalidation_reason := "none"
+var _cloned_invalidation_count := 0
+var _cloned_invalidation_reason_counts: Dictionary = {}
+var _cloned_roster_change_invalidations := 0
+var _cloned_spawn_complete_invalidations := 0
+var _cloned_remove_sink_invalidations := 0
+var _cloned_transform_invalidations := 0
+var _cloned_unsupported_state_invalidations := 0
+var _cloned_successful_rebuilds_after_invalidation := 0
+var _cloned_failed_rebuilds_after_invalidation := 0
+var _last_failed_invalidation_revision := -1
 
 
 #region Setup / Public API
 func setup(table_ref) -> void:
 	table = table_ref
+	trajectory_predictor = AIM_TRAJECTORY_PREDICTOR_SCRIPT.new()
+	trajectory_profiler = AIM_TRAJECTORY_PROFILER_SCRIPT.new()
+	benchmark_session = AIM_BENCHMARK_SESSION_SCRIPT.new()
+	cloned_trajectory_configuration = AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_default_configuration(
+		int(table.PHYSICS_SUBSTEPS)
+	)
+	trajectory_profiler.set_enabled(bool(cloned_trajectory_configuration.get("profile_enabled", false)))
+	_observed_table_prediction_revision = int(table.get_aim_prediction_state_revision())
+	cloned_prediction_availability = _make_default_cloned_prediction_availability()
+
+
+func notify_table_prediction_revision_changed(
+	revision: int,
+	reason: String,
+	category: String = "state_change"
+) -> void:
+	if revision == _observed_table_prediction_revision:
+		return
+
+	var had_prediction: bool = not current_cloned_prediction.is_empty()
+	_observed_table_prediction_revision = revision
+	_cloned_refresh_pending = true
+	_last_cloned_invalidation_reason = reason
+	_cloned_invalidation_count += 1
+	_cloned_invalidation_reason_counts[reason] = int(
+		_cloned_invalidation_reason_counts.get(reason, 0)
+	) + 1
+	match category:
+		"roster_change":
+			_cloned_roster_change_invalidations += 1
+		"spawn_complete":
+			_cloned_spawn_complete_invalidations += 1
+		"remove_sink":
+			_cloned_remove_sink_invalidations += 1
+		"transform":
+			_cloned_transform_invalidations += 1
+		"unsupported_state":
+			_cloned_unsupported_state_invalidations += 1
+
+	if had_prediction:
+		if trajectory_profiler != null:
+			trajectory_profiler.note_stale_result()
+		if benchmark_session != null:
+			benchmark_session.note_stale_result()
+	current_cloned_prediction.clear()
+	_has_last_cloned_rebuild_input = false
+	if trajectory_predictor != null:
+		trajectory_predictor.clear_cache()
+	cloned_prediction_availability = _make_default_cloned_prediction_availability()
+	cloned_prediction_availability["blocker_reason"] = "ball_roster_changed"
+	cloned_prediction_availability["blocker_details"] = reason
+	cloned_prediction_availability["table_revision"] = revision
+	cloned_prediction_availability["refresh_pending"] = true
+	_queue_aim_redraw()
+
+
+func clear_for_authoritative_table_reset(reason: String) -> void:
+	preview_active = false
+	current_prediction = null
+	current_cloned_prediction.clear()
+	long_sight_chain_links.clear()
+	bank_debug_markers.clear()
+	last_predicted_aim_path.clear()
+	last_predicted_rail_position = Vector2.ZERO
+	last_predicted_rail_normal = Vector2.ZERO
+	last_predicted_post_bank_direction = Vector2.ZERO
+	actual_cue_path.clear()
+	aim_path_debug_timer = 0.0
+	actual_cue_path_recording = false
+	debug_actual_trace_recording = false
+	debug_persisted_shot = null
+	_aim_ball_spatial_grid.clear()
+	_reset_debug_first_hit_candidate_log()
+	_rebuild_treasure_perception_snapshot(null)
+	_rebuild_embezzler_perception_snapshot(null)
+	_has_last_cloned_rebuild_input = false
+	_cloned_refresh_pending = true
+	_last_cloned_invalidation_reason = reason
+	if trajectory_predictor != null:
+		trajectory_predictor.clear_cache()
+	_queue_aim_redraw()
 
 
 func update_preview(
@@ -277,9 +430,11 @@ func update_preview(
 ) -> void:
 	active_effect_snapshot = effect_snapshot.duplicate(true)
 	if not active:
+		_refresh_cloned_availability_for_inactive_preview()
 		prediction_ms = 0.0
 		_aim_ball_spatial_grid.clear()
 		long_sight_chain_links.clear()
+		current_cloned_prediction.clear()
 		aim_spatial_cells = 0
 		aim_spatial_balls = 0
 		aim_spatial_treasure_balls = 0
@@ -292,7 +447,7 @@ func update_preview(
 			current_prediction = null
 			_rebuild_treasure_perception_snapshot(null)
 			_rebuild_embezzler_perception_snapshot(null)
-			queue_redraw()
+			_queue_aim_redraw()
 		return
 
 	preview_active = true
@@ -306,34 +461,45 @@ func update_preview(
 	_reset_debug_first_hit_candidate_log()
 	current_prediction = _get_first_aim_collision(origin, drag_vector * shot_power)
 	_finalize_debug_first_hit_candidate_selection(current_prediction)
-	_rebuild_long_sight_chain(current_prediction)
+	_rebuild_cloned_trajectory(origin, drag_vector * shot_power)
+	if not _is_cloned_long_sight_active():
+		_rebuild_long_sight_chain(current_prediction)
+	else:
+		long_sight_chain_links.clear()
 	_rebuild_treasure_perception_snapshot(current_prediction)
 	_rebuild_embezzler_perception_snapshot(current_prediction)
 	prediction_ms = _elapsed_ms_since(aim_start_usec)
 	prediction_frame_ms += prediction_ms
 	prediction_recalculations_this_frame += 1
-	queue_redraw()
+	_queue_aim_redraw()
 
 
 func update_debug(delta: float, is_dragging: bool) -> void:
 	_update_bank_debug_markers(delta)
 	_update_aim_path_comparison_debug(delta)
 	if _should_redraw_debug(is_dragging):
-		queue_redraw()
+		_queue_aim_redraw()
 
 
 func start_path_comparison(origin: Vector2, initial_velocity: Vector2) -> void:
 	if not debug_aim_path_comparison_enabled and not debug_aim_line_enabled:
+		return
+	if not _full_debug_result_evidence_enabled():
+		debug_persisted_shot = null
+		debug_actual_trace_recording = false
+		actual_cue_path_recording = false
 		return
 
 	_rebuild_aim_ball_spatial_grid()
 	_reset_debug_first_hit_candidate_log()
 	var prediction: AimPrediction = _get_first_aim_collision(origin, initial_velocity)
 	_finalize_debug_first_hit_candidate_selection(prediction)
+	_simulate_cloned_trajectory(origin, initial_velocity, true, "shot_commit")
 	if debug_aim_line_enabled:
 		debug_persisted_shot = _make_debug_shot_overlay(prediction, origin, initial_velocity)
 		debug_persisted_shot.actual_cue_path.clear()
 		debug_persisted_shot.actual_cue_path.append(origin)
+		debug_persisted_shot.actual_event_start_usec = Time.get_ticks_usec()
 		debug_actual_trace_recording = true
 
 	if debug_aim_path_comparison_enabled:
@@ -345,7 +511,7 @@ func start_path_comparison(origin: Vector2, initial_velocity: Vector2) -> void:
 		actual_cue_path_recording = true
 		aim_path_debug_timer = AIM_PATH_DEBUG_LIFETIME
 		_print_predicted_bank_debug(prediction)
-	queue_redraw()
+	_queue_aim_redraw()
 
 
 func record_actual_bank_debug(
@@ -365,7 +531,7 @@ func record_actual_bank_debug(
 	marker.normal = normal
 	marker.remaining_time = BANK_DEBUG_MARKER_LIFETIME
 	bank_debug_markers.append(marker)
-	queue_redraw()
+	_queue_aim_redraw()
 	_print_actual_bank_debug(hit_position, marker.incoming_direction, marker.outgoing_direction, normal)
 
 
@@ -418,7 +584,7 @@ func report_debug_actual_first_contact(
 	debug_persisted_shot.first_contact_time_msec = Time.get_ticks_msec()
 	debug_persisted_shot.first_contact_physics_frame = Engine.get_physics_frames()
 	_append_debug_actual_path_point(cue_center, true)
-	queue_redraw()
+	_queue_aim_redraw()
 
 
 func report_debug_actual_launch(launch_position: Vector2, launch_velocity: Vector2) -> void:
@@ -429,14 +595,17 @@ func report_debug_actual_launch(launch_position: Vector2, launch_velocity: Vecto
 	debug_persisted_shot.actual_launch_velocity = launch_velocity
 	_append_debug_actual_path_point(launch_position, true)
 	_record_debug_all_ball_paths()
-	queue_redraw()
+	_queue_aim_redraw()
 
 
 func report_debug_collision_event(
 	ball_a: Ball,
 	ball_b: Ball,
 	normal: Vector2,
-	impact_speed: float
+	impact_speed: float,
+	incoming_velocity_a: Vector2 = Vector2.ZERO,
+	incoming_velocity_b: Vector2 = Vector2.ZERO,
+	resolution_source: String = "legacy"
 ) -> void:
 	if not debug_aim_line_enabled or debug_persisted_shot == null:
 		return
@@ -449,24 +618,147 @@ func report_debug_collision_event(
 		impact_speed,
 	]
 	_append_debug_collision_log(line)
+	var source_ball: Ball = _choose_actual_event_source(
+		ball_a,
+		ball_b,
+		incoming_velocity_a,
+		incoming_velocity_b
+	)
+	var target_ball: Ball = ball_b if source_ball == ball_a else ball_a
+	var source_normal: Vector2 = normal if source_ball == ball_a else -normal
+	_append_debug_actual_event({
+		"event_type": AimTrajectoryPredictor.EVENT_BALL_CONTACT,
+		"source_ball_id": source_ball.get_instance_id(),
+		"source_ball_number": source_ball.ball_number,
+		"source_ball_label": _get_debug_ball_label(source_ball),
+		"target_ball_id": target_ball.get_instance_id(),
+		"target_ball_number": target_ball.ball_number,
+		"target_ball_label": _get_debug_ball_label(target_ball),
+		"source_center": source_ball.global_position,
+		"target_center": target_ball.global_position,
+		"contact_point": source_ball.global_position + source_normal * source_ball.radius,
+		"collision_normal": source_normal,
+		"incoming_source_velocity": incoming_velocity_a if source_ball == ball_a else incoming_velocity_b,
+		"incoming_target_velocity": incoming_velocity_b if source_ball == ball_a else incoming_velocity_a,
+		"outgoing_source_velocity": source_ball.velocity,
+		"outgoing_target_velocity": target_ball.velocity,
+		"impact_speed": impact_speed,
+		"resolution_source": resolution_source,
+	})
 
 
-func report_debug_rail_event(ball: Ball, normal: Vector2, speed: float) -> void:
+func report_debug_contact_order_snapshot(contact_order_snapshot: Dictionary) -> void:
+	if not debug_aim_line_enabled or debug_persisted_shot == null:
+		return
+	debug_persisted_shot.contact_order_snapshot = contact_order_snapshot.duplicate(true)
+
+
+func report_debug_rail_event(
+	ball: Ball,
+	hit_position: Vector2,
+	normal: Vector2,
+	incoming_velocity: Vector2,
+	outgoing_velocity: Vector2
+) -> void:
 	if not debug_aim_line_enabled or debug_persisted_shot == null:
 		return
 	var line: String = "%s -> Rail | normal %.1f deg | speed %.0f" % [
 		_get_debug_ball_label(ball),
 		_get_vector_angle_degrees(normal),
-		speed,
+		incoming_velocity.length(),
 	]
 	_append_debug_collision_log(line)
+	_append_debug_actual_event({
+		"event_type": AimTrajectoryPredictor.EVENT_RAIL_CONTACT,
+		"source_ball_id": ball.get_instance_id(),
+		"source_ball_number": ball.ball_number,
+		"source_ball_label": _get_debug_ball_label(ball),
+		"target_ball_id": -1,
+		"target_ball_number": -1,
+		"source_center": ball.global_position,
+		"target_center": hit_position,
+		"contact_point": hit_position,
+		"collision_normal": normal,
+		"incoming_source_velocity": incoming_velocity,
+		"outgoing_source_velocity": outgoing_velocity,
+	})
+
+
+func report_debug_pocket_event(ball: Ball, pocket_index: int, pocket_position: Vector2) -> void:
+	if not debug_aim_line_enabled or debug_persisted_shot == null or ball == null:
+		return
+	if ball != table.cue_ball:
+		_append_debug_ball_trace_point(ball)
+	_append_debug_actual_event({
+		"event_type": AimTrajectoryPredictor.EVENT_POCKET,
+		"source_ball_id": ball.get_instance_id(),
+		"source_ball_number": ball.ball_number,
+		"source_ball_label": _get_debug_ball_label(ball),
+		"target_ball_id": -1,
+		"target_ball_number": -1,
+		"source_center": ball.global_position,
+		"target_center": pocket_position,
+		"contact_point": ball.global_position,
+		"collision_normal": (ball.global_position - pocket_position).normalized(),
+		"incoming_source_velocity": ball.velocity,
+		"outgoing_source_velocity": Vector2.ZERO,
+		"pocket_index": pocket_index,
+	})
+
+
+func report_debug_ball_stopped(ball: Ball, incoming_velocity: Vector2) -> void:
+	if not debug_aim_line_enabled or debug_persisted_shot == null or ball == null:
+		return
+	if ball != table.cue_ball:
+		_append_debug_ball_trace_point(ball)
+	_append_debug_actual_event({
+		"event_type": AimTrajectoryPredictor.EVENT_STOPPED,
+		"source_ball_id": ball.get_instance_id(),
+		"source_ball_number": ball.ball_number,
+		"source_ball_label": _get_debug_ball_label(ball),
+		"target_ball_id": -1,
+		"target_ball_number": -1,
+		"source_center": ball.global_position,
+		"target_center": Vector2.ZERO,
+		"contact_point": ball.global_position,
+		"collision_normal": Vector2.ZERO,
+		"incoming_source_velocity": incoming_velocity,
+		"outgoing_source_velocity": Vector2.ZERO,
+	})
+
+
+func _choose_actual_event_source(
+	ball_a: Ball,
+	ball_b: Ball,
+	incoming_velocity_a: Vector2,
+	incoming_velocity_b: Vector2
+) -> Ball:
+	if (ball_a == table.cue_ball) != (ball_b == table.cue_ball):
+		return ball_a if ball_a == table.cue_ball else ball_b
+	var speed_a: float = incoming_velocity_a.length_squared()
+	var speed_b: float = incoming_velocity_b.length_squared()
+	if not is_equal_approx(speed_a, speed_b):
+		return ball_a if speed_a > speed_b else ball_b
+	return ball_a if ball_a.get_index() <= ball_b.get_index() else ball_b
+
+
+func _append_debug_actual_event(event: Dictionary) -> void:
+	if debug_persisted_shot == null or not debug_actual_trace_recording:
+		return
+	event["event_index"] = debug_persisted_shot.actual_events.size()
+	event["actual_time"] = (
+		float(Time.get_ticks_usec() - debug_persisted_shot.actual_event_start_usec) / 1000000.0
+		if debug_persisted_shot.actual_event_start_usec > 0
+		else 0.0
+	)
+	event["physics_frame"] = Engine.get_physics_frames()
+	debug_persisted_shot.actual_events.append(event)
 
 
 func note_actual_cue_pocketed(ball: Ball) -> void:
 	if debug_aim_line_enabled and ball == table.cue_ball and debug_actual_trace_recording:
 		_append_debug_actual_path_point(table.cue_ball.global_position, true)
-		debug_actual_trace_recording = false
-		queue_redraw()
+		_queue_aim_redraw()
 
 	if not debug_aim_path_comparison_enabled or ball != table.cue_ball or not actual_cue_path_recording:
 		return
@@ -508,7 +800,7 @@ func stop_debug_aim_actual_trace() -> void:
 	if debug_persisted_shot != null and is_instance_valid(table.cue_ball):
 		_append_debug_actual_path_point(table.cue_ball.global_position, true)
 	debug_actual_trace_recording = false
-	queue_redraw()
+	_queue_aim_redraw()
 
 
 func set_shot_path_debug_enabled(enabled: bool) -> void:
@@ -516,7 +808,7 @@ func set_shot_path_debug_enabled(enabled: bool) -> void:
 	if not enabled:
 		stop_actual_path_recording()
 		aim_path_debug_timer = 0.0
-		queue_redraw()
+		_queue_aim_redraw()
 
 
 func is_shot_path_debug_enabled() -> bool:
@@ -531,7 +823,761 @@ func set_debug_aim_line_enabled(enabled: bool) -> void:
 		debug_persisted_shot = null
 		debug_actual_trace_recording = false
 		_reset_debug_first_hit_candidate_log()
-	queue_redraw()
+	_queue_aim_redraw()
+
+
+func set_cloned_trajectory_configuration(configuration: Dictionary) -> void:
+	var profiling_was_enabled: bool = bool(cloned_trajectory_configuration.get("profile_enabled", false))
+	cloned_trajectory_configuration = AIM_TRAJECTORY_PREDICTOR_SCRIPT.normalize_configuration(
+		configuration,
+		int(table.PHYSICS_SUBSTEPS) if table != null else 4
+	)
+	_cloned_configuration_changed_since_rebuild = true
+	if not _full_debug_result_evidence_enabled():
+		debug_persisted_shot = null
+		debug_actual_trace_recording = false
+		actual_cue_path_recording = false
+		_reset_debug_first_hit_candidate_log()
+	var profiling_enabled: bool = bool(cloned_trajectory_configuration.get("profile_enabled", false))
+	if trajectory_profiler != null:
+		if profiling_enabled and not profiling_was_enabled:
+			trajectory_profiler.reset(
+				trajectory_predictor.get_cache_debug_snapshot() if trajectory_predictor != null else {}
+			)
+		trajectory_profiler.set_enabled(profiling_enabled)
+	_last_cloned_invalidation_reason = "configuration_changed"
+	_cloned_invalidation_count += 1
+	_cloned_invalidation_reason_counts["configuration_changed"] = int(
+		_cloned_invalidation_reason_counts.get("configuration_changed", 0)
+	) + 1
+	_cloned_refresh_pending = true
+	_last_failed_invalidation_revision = -1
+	current_cloned_prediction.clear()
+	_has_last_cloned_rebuild_input = false
+	if trajectory_predictor != null:
+		trajectory_predictor.clear_cache()
+	_queue_aim_redraw()
+
+
+func get_cloned_trajectory_configuration() -> Dictionary:
+	return cloned_trajectory_configuration.duplicate(true)
+
+
+func reset_cloned_trajectory_profiler_stats() -> void:
+	if trajectory_profiler == null:
+		return
+	trajectory_profiler.reset(
+		trajectory_predictor.get_cache_debug_snapshot() if trajectory_predictor != null else {}
+	)
+
+
+func reset_cloned_trajectory_benchmark_stats() -> void:
+	if benchmark_session != null:
+		benchmark_session.reset()
+
+
+func start_cloned_trajectory_benchmark(
+	label: String,
+	preset_label: String,
+	contamination_snapshot: Dictionary = {}
+) -> void:
+	if benchmark_session == null:
+		return
+	benchmark_session.start_capture(
+		label,
+		preset_label,
+		str(cloned_trajectory_configuration.get(
+			"result_detail_mode",
+			AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+		)),
+		contamination_snapshot
+	)
+	_cloned_configuration_changed_since_rebuild = false
+	if trajectory_predictor != null:
+		trajectory_predictor.clear_cache()
+
+
+func stop_cloned_trajectory_benchmark() -> void:
+	if benchmark_session != null:
+		benchmark_session.stop_capture()
+
+
+func copy_cloned_trajectory_benchmark_report() -> bool:
+	return benchmark_session != null and benchmark_session.copy_report_to_clipboard()
+
+
+func get_cloned_trajectory_benchmark_snapshot() -> Dictionary:
+	return benchmark_session.get_snapshot() if benchmark_session != null else {}
+
+
+func _rebuild_cloned_trajectory(origin: Vector2, launch_velocity: Vector2) -> void:
+	var cloned_enabled: bool = bool(cloned_trajectory_configuration.get("enabled", true))
+	var debug_requested: bool = debug_aim_line_enabled and cloned_enabled
+	var long_sight_requested: bool = (
+		_get_active_aim_chain_depth() > 0
+		and bool(cloned_trajectory_configuration.get("use_for_long_sight", true))
+		and cloned_enabled
+	)
+	if not debug_requested and not long_sight_requested:
+		current_cloned_prediction.clear()
+		cloned_prediction_availability = _make_default_cloned_prediction_availability()
+		cloned_prediction_availability["live_preview_requested"] = false
+		cloned_prediction_availability["cloned_simulation_enabled"] = cloned_enabled
+		cloned_prediction_availability["blocker_reason"] = (
+			"cue_not_ready" if cloned_enabled else "disabled"
+		)
+		return
+	var rebuild_reason: String = "debug_preview_drag" if debug_requested else "long_sight_preview_drag"
+	_simulate_cloned_trajectory(origin, launch_velocity, debug_requested, rebuild_reason)
+
+
+func _simulate_cloned_trajectory(
+	origin: Vector2,
+	launch_velocity: Vector2,
+	use_debug_limits: bool,
+	rebuild_reason: String = "unknown"
+) -> void:
+	if trajectory_predictor == null or table == null:
+		current_cloned_prediction.clear()
+		return
+	var configuration: Dictionary = cloned_trajectory_configuration.duplicate(true)
+	if not use_debug_limits:
+		configuration = AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_player_long_sight_configuration(
+			_get_active_aim_chain_depth(),
+			int(table.PHYSICS_SUBSTEPS)
+		)
+		configuration["enabled"] = true
+		configuration["profile_enabled"] = bool(
+			cloned_trajectory_configuration.get("profile_enabled", false)
+		)
+	var benchmark_recording: bool = benchmark_session != null and benchmark_session.is_recording()
+	if benchmark_recording:
+		configuration["profile_enabled"] = true
+	var profile_enabled: bool = bool(configuration.get("profile_enabled", false))
+	if trajectory_profiler != null:
+		trajectory_profiler.set_enabled(profile_enabled)
+	var full_rebuild_start_usec: int = Time.get_ticks_usec() if profile_enabled else 0
+	var input_snapshot_start_usec: int = Time.get_ticks_usec() if profile_enabled else 0
+	var input_snapshot: Dictionary = _build_cloned_trajectory_input(origin, launch_velocity)
+	var input_snapshot_usec: int = (
+		maxi(Time.get_ticks_usec() - input_snapshot_start_usec, 0)
+		if profile_enabled
+		else 0
+	)
+	var rebuild_classification: String = _classify_cloned_rebuild(
+		origin,
+		launch_velocity,
+		rebuild_reason
+	)
+	_cloned_configuration_changed_since_rebuild = false
+	_last_cloned_rebuild_origin = origin
+	_last_cloned_rebuild_velocity = launch_velocity
+	_has_last_cloned_rebuild_input = true
+	cloned_prediction_availability = _evaluate_cloned_prediction_availability(
+		input_snapshot,
+		launch_velocity,
+		true,
+		configuration
+	)
+	if not bool(cloned_prediction_availability.get("available", false)):
+		current_cloned_prediction = _make_unavailable_cloned_prediction_result(
+			configuration,
+			cloned_prediction_availability
+		)
+		_note_failed_cloned_rebuild_after_invalidation()
+		_queue_aim_redraw()
+		return
+	current_cloned_prediction = trajectory_predictor.simulate(
+		input_snapshot,
+		configuration
+	)
+	current_cloned_prediction["rebuild_reason"] = rebuild_reason
+	var cloned_balls_value: Variant = current_cloned_prediction.get("balls", [])
+	var cloned_ball_count: int = cloned_balls_value.size() if cloned_balls_value is Array else 0
+	cloned_prediction_availability["cloned_ball_count"] = cloned_ball_count
+	cloned_prediction_availability["cache_valid"] = true
+	cloned_prediction_availability["cached_revision"] = int(
+		current_cloned_prediction.get("table_revision", -1)
+	)
+	if bool(current_cloned_prediction.get("valid", false)):
+		_last_successful_cloned_rebuild_revision = int(
+			input_snapshot.get("table_prediction_revision", -1)
+		)
+		if _cloned_refresh_pending:
+			_cloned_successful_rebuilds_after_invalidation += 1
+		_cloned_refresh_pending = false
+		cloned_prediction_availability["refresh_pending"] = false
+		cloned_prediction_availability["last_successful_rebuild_revision"] = (
+			_last_successful_cloned_rebuild_revision
+		)
+	else:
+		_note_failed_cloned_rebuild_after_invalidation()
+	current_cloned_prediction["prediction_availability"] = cloned_prediction_availability.duplicate(true)
+	if bool(current_cloned_prediction.get("cache_hit", false)):
+		if benchmark_recording:
+			benchmark_session.note_cache_hit()
+		return
+	if not profile_enabled:
+		return
+
+	var phase_timings: Dictionary = current_cloned_prediction.get(
+		"profile_phase_timings_us",
+		{}
+	).duplicate(true)
+	phase_timings["input_snapshot"] = input_snapshot_usec
+
+	var comparison_snapshot: Dictionary = {}
+	if _should_build_cloned_event_comparison(configuration):
+		var comparison_start_usec: int = Time.get_ticks_usec()
+		comparison_snapshot = _get_cloned_event_comparison_snapshot()
+		phase_timings["predicted_actual_comparison"] = maxi(
+			Time.get_ticks_usec() - comparison_start_usec,
+			0
+		)
+	else:
+		phase_timings["predicted_actual_comparison"] = 0
+
+	var draw_preparation_start_usec: int = Time.get_ticks_usec()
+	var draw_workload: Dictionary = _get_cloned_draw_profile_workload(current_cloned_prediction)
+	phase_timings["draw_data_preparation"] = maxi(
+		Time.get_ticks_usec() - draw_preparation_start_usec,
+		0
+	)
+	phase_timings["total_full_rebuild"] = maxi(
+		Time.get_ticks_usec() - full_rebuild_start_usec,
+		0
+	)
+
+	var predicted_events: Array = current_cloned_prediction.get("events", [])
+	var compared_events: Array = comparison_snapshot.get("entries", [])
+	var sample: Dictionary = {
+		"completed_usec": Time.get_ticks_usec(),
+		"rebuild_reason": rebuild_reason,
+		"rebuild_classification": rebuild_classification,
+		"phase_timings_us": phase_timings,
+		"setup": _make_cloned_benchmark_setup_snapshot(input_snapshot, configuration, launch_velocity),
+		"simulated_physics_frames": int(current_cloned_prediction.get("simulated_physics_frames", 0)),
+		"simulated_substeps": int(current_cloned_prediction.get("simulated_substeps", 0)),
+		"total_iterations": int(current_cloned_prediction.get("total_iterations", 0)),
+		"geometry_probes": int(current_cloned_prediction.get("geometry_probes", 0)),
+		"control_iteration_budget": int(current_cloned_prediction.get("control_iteration_budget", 0)),
+		"geometry_probe_budget": int(current_cloned_prediction.get("geometry_probe_budget", 0)),
+		"iteration_breakdown": _duplicate_dictionary_field(current_cloned_prediction, "iteration_breakdown"),
+		"completed_iteration_breakdown": _duplicate_dictionary_field(
+			current_cloned_prediction,
+			"completed_iteration_breakdown"
+		),
+		"iteration_source_attempts": _duplicate_dictionary_field(
+			current_cloned_prediction,
+			"iteration_source_attempts"
+		),
+		"iteration_cap_detail": _duplicate_dictionary_field(
+			current_cloned_prediction,
+			"iteration_cap_detail"
+		),
+		"geometry_probe_cap_detail": _duplicate_dictionary_field(
+			current_cloned_prediction,
+			"geometry_probe_cap_detail"
+		),
+		"broadphase_rebuilds": int(current_cloned_prediction.get("broadphase_rebuilds", 0)),
+		"full_broadphase_rebuilds": int(current_cloned_prediction.get("full_broadphase_rebuilds", 0)),
+		"incremental_broadphase_updates": int(current_cloned_prediction.get("incremental_broadphase_updates", 0)),
+		"current_grid_rebuilds": int(current_cloned_prediction.get("current_grid_rebuilds", 0)),
+		"swept_grid_rebuilds": int(current_cloned_prediction.get("swept_grid_rebuilds", 0)),
+		"candidate_tests": int(current_cloned_prediction.get("candidate_tests", 0)),
+		"pair_checks": int(current_cloned_prediction.get("pair_checks", 0)),
+		"swept_toi_solves": int(current_cloned_prediction.get("swept_toi_solves", 0)),
+		"contacts_resolved": int(current_cloned_prediction.get("total_ball_contacts", 0)),
+		"total_ball_contacts": int(current_cloned_prediction.get("total_ball_contacts", 0)),
+		"total_cue_ball_contacts": int(current_cloned_prediction.get("total_cue_ball_contacts", 0)),
+		"total_rail_contacts": int(current_cloned_prediction.get("total_rail_contacts", 0)),
+		"total_pocket_captures": int(current_cloned_prediction.get("total_pocket_captures", 0)),
+		"total_stops": int(current_cloned_prediction.get("total_stops", 0)),
+		"balls_traced": int(current_cloned_prediction.get("total_traced_balls", 0)),
+		"trace_points": int(current_cloned_prediction.get("retained_trace_points", 0)),
+		"raw_trace_points": int(current_cloned_prediction.get("raw_trace_points_generated", 0)),
+		"retained_trace_points": int(current_cloned_prediction.get("retained_trace_points", 0)),
+		"simplified_trace_points": int(current_cloned_prediction.get("trace_points_removed_by_simplification", 0)),
+		"spacing_or_duplicate_trace_points": int(current_cloned_prediction.get("trace_points_removed_by_spacing_or_duplicates", 0)),
+		"collinear_simplified_trace_points": int(current_cloned_prediction.get("trace_points_removed_by_collinear_simplification", 0)),
+		"visible_path_segments": int(draw_workload.get("visible_path_segments", 0)),
+		"predicted_balls_drawn": int(draw_workload.get("predicted_balls_drawn", 0)),
+		"visible_paths": int(draw_workload.get("visible_paths", 0)),
+		"predicted_event_count": predicted_events.size(),
+		"compared_event_count": compared_events.size(),
+		"predicted_events_retained": int(current_cloned_prediction.get("predicted_events_retained", predicted_events.size())),
+		"debug_events_retained": int(current_cloned_prediction.get("debug_events_retained", 0)),
+		"compared_events": compared_events.size(),
+		"maximum_causal_depth": int(current_cloned_prediction.get("maximum_causal_depth", 0)),
+		"maximum_simultaneously_moving_balls": int(current_cloned_prediction.get("maximum_simultaneously_moving_balls", 0)),
+		"moving_balls_per_substep_average": float(current_cloned_prediction.get("moving_balls_per_substep_average", 0.0)),
+		"moving_balls_per_substep_maximum": int(current_cloned_prediction.get("moving_balls_per_substep_maximum", 0)),
+		"stationary_targets_per_substep_average": float(current_cloned_prediction.get("stationary_targets_per_substep_average", 0.0)),
+		"stationary_targets_per_substep_maximum": int(current_cloned_prediction.get("stationary_targets_per_substep_maximum", 0)),
+		"balls_newly_stopped": int(current_cloned_prediction.get("balls_newly_stopped", 0)),
+		"boundary_shapes_available": int(current_cloned_prediction.get("boundary_shapes_available", 0)),
+		"rail_shapes_available": int(current_cloned_prediction.get("rail_shapes_available", 0)),
+		"jaw_shapes_available": int(current_cloned_prediction.get("jaw_shapes_available", 0)),
+		"rail_candidate_queries": int(current_cloned_prediction.get("rail_candidate_queries", 0)),
+		"rail_shapes_tested": int(current_cloned_prediction.get("rail_shapes_tested", 0)),
+		"jaw_shapes_tested": int(current_cloned_prediction.get("jaw_shapes_tested", 0)),
+		"rail_swept_tests": int(current_cloned_prediction.get("rail_swept_tests", 0)),
+		"rail_candidates_rejected_by_aabb": int(current_cloned_prediction.get("rail_candidates_rejected_by_aabb", 0)),
+		"rail_events_accepted": int(current_cloned_prediction.get("rail_events_accepted", 0)),
+		"pocket_count_available": int(current_cloned_prediction.get("pocket_count_available", 0)),
+		"pocket_candidate_queries": int(current_cloned_prediction.get("pocket_candidate_queries", 0)),
+		"pockets_tested": int(current_cloned_prediction.get("pockets_tested", 0)),
+		"pocket_swept_tests": int(current_cloned_prediction.get("pocket_swept_tests", 0)),
+		"pocket_candidates_rejected_by_aabb": int(current_cloned_prediction.get("pocket_candidates_rejected_by_aabb", 0)),
+		"pocket_events_accepted": int(current_cloned_prediction.get("pocket_events_accepted", 0)),
+		"cloned_balls_checked_against_boundaries": int(current_cloned_prediction.get("cloned_balls_checked_against_boundaries", 0)),
+		"cloned_balls_checked_against_pockets": int(current_cloned_prediction.get("cloned_balls_checked_against_pockets", 0)),
+		"stopped_balls_skipped_from_movement": int(current_cloned_prediction.get("stopped_balls_skipped_from_movement", 0)),
+		"stopped_balls_skipped_from_rail_checks": int(current_cloned_prediction.get("stopped_balls_skipped_from_rail_checks", 0)),
+		"stopped_balls_skipped_from_pocket_checks": int(current_cloned_prediction.get("stopped_balls_skipped_from_pocket_checks", 0)),
+		"stopped_balls_included_in_broadphase": int(current_cloned_prediction.get("stopped_balls_included_in_broadphase", 0)),
+		"inactive_balls_skipped_from_loops": int(current_cloned_prediction.get("inactive_balls_skipped_from_loops", 0)),
+		"repeated_boundary_checks": int(current_cloned_prediction.get("repeated_boundary_checks", 0)),
+		"remaining_time_boundary_iterations": int(current_cloned_prediction.get("remaining_time_boundary_iterations", 0)),
+		"boundary_temporary_objects_created": int(current_cloned_prediction.get("boundary_temporary_objects_created", 0)),
+		"pocket_temporary_objects_created": int(current_cloned_prediction.get("pocket_temporary_objects_created", 0)),
+		"static_geometry_cache_hits": int(current_cloned_prediction.get("static_geometry_cache_hits", 0)),
+		"static_geometry_cache_rebuilds": int(current_cloned_prediction.get("static_geometry_cache_rebuilds", 0)),
+		"scratch_buffer_reuses": int(current_cloned_prediction.get("scratch_buffer_reuses", 0)),
+		"temporary_allocations": int(current_cloned_prediction.get("temporary_allocations", 0)),
+		"prediction_availability": cloned_prediction_availability.duplicate(true),
+		"invalidation": _get_cloned_invalidation_snapshot(),
+		"result_memory_estimate_bytes": int(current_cloned_prediction.get("result_memory_estimate_bytes", 0)),
+		"stop_reason": str(current_cloned_prediction.get("stop_reason", "unknown")),
+	}
+	if trajectory_profiler != null:
+		trajectory_profiler.record_completed_rebuild(sample)
+	if benchmark_recording:
+		benchmark_session.record_completed_rebuild(sample)
+
+
+func _build_cloned_trajectory_input(origin: Vector2, launch_velocity: Vector2) -> Dictionary:
+	var ball_snapshots: Array[Dictionary] = []
+	var source_index: int = 0
+	for child in table.balls.get_children():
+		var ball: Ball = child as Ball
+		if ball == null or not is_instance_valid(ball) or ball.is_queued_for_deletion():
+			continue
+		var transient_state: Dictionary = ball.get_prediction_transient_state()
+		ball_snapshots.append({
+			"source_id": ball.get_instance_id(),
+			"source_index": source_index,
+			"ball_number": ball.ball_number,
+			"label": _get_debug_ball_label(ball),
+			"position": ball.global_position,
+			"velocity": ball.velocity,
+			"launch_position": origin if ball == table.cue_ball else ball.global_position,
+			"launch_velocity": launch_velocity if ball == table.cue_ball else ball.velocity,
+			"radius": ball.radius,
+			"ball_type": ball.ball_type,
+			"is_cue_ball": ball == table.cue_ball,
+			"is_eight_ball": ball == table.eight_ball,
+			"gameplay_active": ball.is_gameplay_active(),
+			"motion_parameters": ball.get_prediction_motion_snapshot(),
+			"anomaly_kind": _get_prediction_anomaly_kind(ball),
+			"initial_unsupported_reason": _get_initial_prediction_unsupported_reason(
+				ball,
+				transient_state
+			),
+		})
+		source_index += 1
+	return {
+		"balls": ball_snapshots,
+		"table_prediction_revision": int(table.get_aim_prediction_state_revision()),
+		"physics_constants": {
+			"ball_collision_skin": float(table.BALL_COLLISION_SKIN),
+			"ball_collision_restitution": float(table.BALL_COLLISION_RESTITUTION),
+			"ball_velocity_transfer": float(table.BALL_VELOCITY_TRANSFER),
+			"rail_restitution": float(table.RAIL_RESTITUTION),
+			"collision_grid_cell_size": float(table.BALL_COLLISION_GRID_CELL_SIZE),
+		},
+		"boundary_geometry": table.boundary_system.get_prediction_geometry_snapshot(),
+		"pocket_geometry": table.pocket_system.get_prediction_geometry_snapshot(),
+		"boundary_geometry_revision": table.boundary_system.get_prediction_geometry_revision(),
+		"pocket_geometry_revision": table.pocket_system.get_prediction_geometry_revision(),
+		"boundary_system": table.boundary_system,
+		"pocket_system": table.pocket_system,
+		"effect_snapshot": active_effect_snapshot.duplicate(true),
+		"cue_first_contact_toi_enabled": bool(table.cue_first_contact_toi_enabled),
+		"default_substeps": int(table.PHYSICS_SUBSTEPS),
+	}
+
+
+func _make_default_cloned_prediction_availability() -> Dictionary:
+	return {
+		"available": false,
+		"live_preview_requested": false,
+		"cloned_simulation_enabled": bool(cloned_trajectory_configuration.get("enabled", true)),
+		"cache_valid": false,
+		"table_revision": _observed_table_prediction_revision,
+		"cached_revision": -1,
+		"active_ball_count": 0,
+		"cloned_ball_count": 0,
+		"transient_ball_count": 0,
+		"unsupported_ball_count": 0,
+		"moving_ball_count": 0,
+		"pending_spawn_count": 0,
+		"pending_landing_callbacks": false,
+		"blocker_reason": "unknown",
+		"blocker_details": "",
+		"refresh_pending": _cloned_refresh_pending,
+		"last_successful_rebuild_revision": _last_successful_cloned_rebuild_revision,
+	}
+
+
+func _refresh_cloned_availability_for_inactive_preview() -> void:
+	if table == null:
+		cloned_prediction_availability = _make_default_cloned_prediction_availability()
+		cloned_prediction_availability["blocker_reason"] = "no_cue_ball"
+		return
+	var origin: Vector2 = (
+		table.cue_ball.global_position
+		if table.cue_ball != null and is_instance_valid(table.cue_ball)
+		else Vector2.ZERO
+	)
+	var input_snapshot: Dictionary = _build_cloned_trajectory_input(origin, Vector2.ZERO)
+	cloned_prediction_availability = _evaluate_cloned_prediction_availability(
+		input_snapshot,
+		Vector2.ZERO,
+		false,
+		cloned_trajectory_configuration
+	)
+
+
+func _evaluate_cloned_prediction_availability(
+	input_snapshot: Dictionary,
+	launch_velocity: Vector2,
+	live_preview_requested: bool,
+	configuration: Dictionary
+) -> Dictionary:
+	var availability: Dictionary = _make_default_cloned_prediction_availability()
+	var table_revision: int = int(input_snapshot.get("table_prediction_revision", -1))
+	var cache_snapshot: Dictionary = (
+		trajectory_predictor.get_cache_debug_snapshot()
+		if trajectory_predictor != null
+		else {}
+	)
+	availability["live_preview_requested"] = live_preview_requested
+	availability["cloned_simulation_enabled"] = bool(configuration.get("enabled", true))
+	availability["table_revision"] = table_revision
+	availability["cached_revision"] = int(cache_snapshot.get("cached_revision", -1))
+	availability["cache_valid"] = (
+		bool(cache_snapshot.get("has_cache", false))
+		and int(cache_snapshot.get("cached_revision", -1)) == table_revision
+	)
+
+	var cue_found := false
+	var cue_active := false
+	var active_ball_count := 0
+	var transient_ball_count := 0
+	var unsupported_ball_count := 0
+	var moving_ball_count := 0
+	var transient_labels: Array[String] = []
+	var unsupported_labels: Array[String] = []
+	var ball_snapshots_value: Variant = input_snapshot.get("balls", [])
+	var ball_snapshots: Array = ball_snapshots_value if ball_snapshots_value is Array else []
+	for ball_value in ball_snapshots:
+		if not ball_value is Dictionary:
+			continue
+		var ball_snapshot: Dictionary = ball_value
+		var gameplay_active: bool = bool(ball_snapshot.get("gameplay_active", false))
+		var unsupported_reason: String = str(ball_snapshot.get("initial_unsupported_reason", ""))
+		var ball_label: String = str(ball_snapshot.get("label", "Ball ?"))
+		if bool(ball_snapshot.get("is_cue_ball", false)):
+			cue_found = true
+			cue_active = gameplay_active
+		if gameplay_active:
+			active_ball_count += 1
+			var motion_parameters: Dictionary = ball_snapshot.get("motion_parameters", {})
+			var velocity: Vector2 = ball_snapshot.get("launch_velocity", ball_snapshot.get("velocity", Vector2.ZERO))
+			if velocity.length() >= float(motion_parameters.get("stop_threshold", 4.0)):
+				moving_ball_count += 1
+		if unsupported_reason.begins_with("unsupported_spawn_"):
+			transient_ball_count += 1
+			transient_labels.append(ball_label)
+		elif not unsupported_reason.is_empty():
+			unsupported_ball_count += 1
+			unsupported_labels.append("%s: %s" % [ball_label, unsupported_reason])
+
+	availability["active_ball_count"] = active_ball_count
+	availability["transient_ball_count"] = transient_ball_count
+	availability["unsupported_ball_count"] = unsupported_ball_count
+	availability["moving_ball_count"] = moving_ball_count
+	var pending_spawn_count: int = (
+		int(table.spawn_system.get_pending_spawn_count())
+		if table.spawn_system != null
+		else 0
+	)
+	var pending_landing_callbacks: bool = (
+		bool(table.spawn_system.has_pending_landing_callbacks())
+		if table.spawn_system != null
+		else false
+	)
+	availability["pending_spawn_count"] = pending_spawn_count
+	availability["pending_landing_callbacks"] = pending_landing_callbacks
+	var boundary_geometry_value: Variant = input_snapshot.get("boundary_geometry", [])
+	var pocket_geometry_value: Variant = input_snapshot.get("pocket_geometry", [])
+	var has_boundary_geometry: bool = (
+		boundary_geometry_value is Array and not (boundary_geometry_value as Array).is_empty()
+	)
+	var has_pocket_geometry: bool = (
+		pocket_geometry_value is Array and not (pocket_geometry_value as Array).is_empty()
+	)
+
+	var blocker_reason := ""
+	var blocker_details := ""
+	if not bool(availability["cloned_simulation_enabled"]):
+		blocker_reason = "disabled"
+		blocker_details = "Cloned simulation is disabled."
+	elif not cue_found:
+		blocker_reason = "no_cue_ball"
+		blocker_details = "No cue ball is present in the prediction snapshot."
+	elif table.ball_placement_system != null and table.ball_placement_system.is_placement_active():
+		blocker_reason = "placement_active"
+		blocker_details = "Ball placement is active."
+	elif transient_ball_count > 0 or pending_spawn_count > 0 or pending_landing_callbacks:
+		blocker_reason = "transient_spawn_state"
+		var transient_parts: Array[String] = []
+		if transient_ball_count > 0:
+			transient_parts.append("%s spawned ball%s settling (%s)" % [
+				transient_ball_count,
+				"" if transient_ball_count == 1 else "s",
+				", ".join(transient_labels),
+			])
+		if pending_spawn_count > 0:
+			transient_parts.append("%s queued drop%s" % [
+				pending_spawn_count,
+				"" if pending_spawn_count == 1 else "s",
+			])
+		if pending_landing_callbacks:
+			transient_parts.append("landing callbacks pending")
+		blocker_details = "Waiting for " + "; ".join(transient_parts) + "."
+	elif unsupported_ball_count > 0:
+		blocker_reason = "unsupported_ball_state"
+		blocker_details = "; ".join(unsupported_labels)
+	elif not has_boundary_geometry:
+		blocker_reason = "invalid_boundary_geometry"
+		blocker_details = "No cloned boundary geometry is available."
+	elif not has_pocket_geometry:
+		blocker_reason = "invalid_pocket_geometry"
+		blocker_details = "No cloned pocket geometry is available."
+	elif not cue_active:
+		blocker_reason = "cue_not_ready"
+		blocker_details = "The cue ball is not gameplay-active."
+	elif moving_ball_count > (1 if live_preview_requested else 0):
+		blocker_reason = "table_motion_active"
+		blocker_details = "Waiting for table motion to settle."
+	elif not live_preview_requested:
+		blocker_reason = "cue_not_ready"
+		blocker_details = "Begin a valid cue drag to request cloned prediction."
+	elif launch_velocity.length_squared() <= 0.0:
+		blocker_reason = "zero_launch_velocity"
+		blocker_details = "The requested launch velocity is zero."
+
+	availability["available"] = blocker_reason.is_empty()
+	availability["blocker_reason"] = "none" if blocker_reason.is_empty() else blocker_reason
+	availability["blocker_details"] = blocker_details
+	availability["refresh_pending"] = _cloned_refresh_pending
+	availability["last_successful_rebuild_revision"] = _last_successful_cloned_rebuild_revision
+	return availability
+
+
+func _make_unavailable_cloned_prediction_result(
+	configuration: Dictionary,
+	availability: Dictionary
+) -> Dictionary:
+	return {
+		"valid": false,
+		"complete": false,
+		"truncated": false,
+		"stop_reason": str(availability.get("blocker_reason", "unknown")),
+		"cap_reached": "",
+		"table_revision": int(availability.get("table_revision", -1)),
+		"configuration": configuration.duplicate(true),
+		"unsupported_warnings": [],
+		"events": [],
+		"balls": [],
+		"prediction_availability": availability.duplicate(true),
+	}
+
+
+func _note_failed_cloned_rebuild_after_invalidation() -> void:
+	if not _cloned_refresh_pending:
+		return
+	if _last_failed_invalidation_revision == _observed_table_prediction_revision:
+		return
+	_last_failed_invalidation_revision = _observed_table_prediction_revision
+	_cloned_failed_rebuilds_after_invalidation += 1
+
+
+func _duplicate_dictionary_field(source: Dictionary, key: String) -> Dictionary:
+	var value: Variant = source.get(key, {})
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	return {}
+
+
+func _get_cloned_draw_profile_workload(result: Dictionary) -> Dictionary:
+	var configuration: Dictionary = result.get("configuration", {})
+	var draw_cue_continuation: bool = bool(configuration.get("draw_cue_continuation", true))
+	var draw_child_paths: bool = bool(configuration.get("draw_child_ball_paths", true))
+	var visible_path_segments: int = 0
+	var visible_paths: int = 0
+	var predicted_balls_drawn: int = 0
+	for ball_value in result.get("balls", []):
+		if not ball_value is Dictionary:
+			continue
+		var ball_result: Dictionary = ball_value
+		var is_cue: bool = bool(ball_result.get("is_cue_ball", false))
+		if is_cue and not draw_cue_continuation:
+			continue
+		if not is_cue and not draw_child_paths:
+			continue
+		var points: Array[Vector2] = _to_vector2_points(ball_result.get("path_points", []))
+		if points.size() >= 2:
+			visible_paths += 1
+			predicted_balls_drawn += 1
+		visible_path_segments += maxi(points.size() - 1, 0)
+	return {
+		"visible_path_segments": visible_path_segments,
+		"visible_paths": visible_paths,
+		"predicted_balls_drawn": predicted_balls_drawn,
+	}
+
+
+func _should_build_cloned_event_comparison(configuration: Dictionary) -> bool:
+	return (
+		str(configuration.get(
+			"result_detail_mode",
+			AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+		)) == AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+		and bool(configuration.get("compare_predicted_event_chain", true))
+	)
+
+
+func _classify_cloned_rebuild(
+	origin: Vector2,
+	launch_velocity: Vector2,
+	rebuild_reason: String
+) -> String:
+	if rebuild_reason == "shot_commit" or rebuild_reason.contains("forced"):
+		return "forced"
+	if _cloned_configuration_changed_since_rebuild:
+		return "forced_config"
+	var input_changed: bool = (
+		not _has_last_cloned_rebuild_input
+		or not origin.is_equal_approx(_last_cloned_rebuild_origin)
+		or not launch_velocity.is_equal_approx(_last_cloned_rebuild_velocity)
+	)
+	if table != null and bool(table.is_dragging) and input_changed:
+		return "active_drag"
+	return "settled"
+
+
+func _make_cloned_benchmark_setup_snapshot(
+	input_snapshot: Dictionary,
+	configuration: Dictionary,
+	launch_velocity: Vector2
+) -> Dictionary:
+	var ball_snapshots: Array = input_snapshot.get("balls", [])
+	var initially_moving_balls: int = 0
+	for ball_value in ball_snapshots:
+		if not ball_value is Dictionary:
+			continue
+		var ball_snapshot: Dictionary = ball_value
+		var velocity: Vector2 = ball_snapshot.get("launch_velocity", ball_snapshot.get("velocity", Vector2.ZERO))
+		var motion_parameters: Dictionary = ball_snapshot.get("motion_parameters", {})
+		if velocity.length() >= float(motion_parameters.get("stop_threshold", 4.0)):
+			initially_moving_balls += 1
+	var roguelite_round: int = 0
+	if (
+		table != null
+		and table.is_roguelite_mode()
+		and table.roguelite_run_system != null
+	):
+		roguelite_round = int(table.roguelite_run_system.get_snapshot().get("round_number", 0))
+	var result_mode: String = str(configuration.get(
+		"result_detail_mode",
+		AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+	))
+	var trace_spacing: float = (
+		float(configuration.get("trace_point_spacing", 2.0))
+		if result_mode == AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+		else float(configuration.get("player_trace_spacing", 10.0))
+	)
+	var cloned_ball_results: Array = current_cloned_prediction.get("balls", [])
+	return {
+		"mode_id": table.get_game_mode_id() if table != null else "unknown",
+		"table_revision": int(input_snapshot.get("table_prediction_revision", -1)),
+		"roguelite_round": roguelite_round,
+		"active_balls": ball_snapshots.size(),
+		"cloned_balls": cloned_ball_results.size(),
+		"initially_moving_balls": initially_moving_balls,
+		"cue_launch_speed": launch_velocity.length(),
+		"result_detail_mode": result_mode,
+		"max_child_generation_depth": int(configuration.get("max_child_generation_depth", 0)),
+		"max_simulated_seconds": float(configuration.get("max_simulated_seconds", 0.0)),
+		"simulation_frame_rate": int(configuration.get("simulation_frame_rate", 0)),
+		"simulation_substeps": int(configuration.get("simulation_substeps", 0)),
+		"trace_spacing": trace_spacing,
+	}
+
+
+func _get_prediction_anomaly_kind(ball: Ball) -> String:
+	if ball.is_powder_keg:
+		return "powder_keg"
+	if ball.is_anchor_ball or ball.is_anchor_curse_seed:
+		return "anchor"
+	if ball.is_cannon_ball:
+		return "cannon"
+	if ball.is_treasure_ball:
+		return "treasure"
+	if ball.is_embezzler_ball:
+		return "embezzler"
+	if ball.is_wayfinder:
+		return "wayfinder"
+	return ""
+
+
+func _get_initial_prediction_unsupported_reason(ball: Ball, transient_state: Dictionary) -> String:
+	if bool(transient_state.get("spawn_drop_active", false)):
+		return "unsupported_spawn_drop_motion"
+	if bool(transient_state.get("spawn_landing_damping_active", false)):
+		return "unsupported_spawn_landing_damping"
+	if ball.is_anchor_curse_seed:
+		return "unsupported_anchor_constraint"
+	if ball.is_wayfinder and (
+		ball.wayfinder_active
+		or (table.wayfinder_system != null and table.wayfinder_system.is_ball_guided(ball))
+	):
+		return "unsupported_wayfinder_guidance"
+	if (
+		ball.is_treasure_ball
+		and table.treasure_ball_system != null
+		and table.treasure_ball_system.is_prediction_self_motion_active(ball)
+	):
+		return "unsupported_treasure_self_motion"
+	if (
+		ball.is_embezzler_ball
+		and table.embezzler_system != null
+		and table.embezzler_system.is_prediction_self_motion_active(ball)
+	):
+		return "unsupported_embezzler_behavior"
+	return ""
+
+
+func _is_cloned_long_sight_active() -> bool:
+	return (
+		_get_active_aim_chain_depth() > 0
+		and bool(cloned_trajectory_configuration.get("enabled", true))
+		and bool(cloned_trajectory_configuration.get("use_for_long_sight", true))
+		and bool(current_cloned_prediction.get("valid", false))
+	)
 
 
 func is_debug_aim_line_enabled() -> bool:
@@ -555,9 +1601,11 @@ func _make_debug_shot_overlay(
 	overlay.predicted_launch_position = launch_position
 	overlay.predicted_launch_velocity = launch_velocity
 	overlay.cue_radius = _get_debug_cue_ball_radius()
+	overlay.physics_collision_skin = _get_physics_ball_collision_skin()
 	overlay.first_hit_candidate_log = _copy_debug_first_hit_candidate_log()
 	overlay.first_hit_selected_ball_id = _debug_first_hit_selected_ball_id
 	overlay.first_hit_selected_ball_number = _debug_first_hit_selected_ball_number
+	overlay.cloned_prediction_result = current_cloned_prediction.duplicate(true)
 	if prediction == null:
 		return overlay
 
@@ -565,7 +1613,11 @@ func _make_debug_shot_overlay(
 	overlay.has_predicted_cue_contact = prediction.collision_type == "ball"
 	if overlay.has_predicted_cue_contact:
 		overlay.predicted_cue_contact_position = prediction.position
+		overlay.predicted_target_contact_position = prediction.target_center_at_impact
 		overlay.predicted_distance_to_first_hit = _get_polyline_distance_to_point(prediction.path_points, prediction.position)
+		overlay.predicted_center_distance = prediction.position.distance_to(prediction.target_center_at_impact)
+		overlay.prediction_effective_collision_radius = prediction.effective_collision_radius
+		overlay.prediction_collision_skin = prediction.collision_skin
 		overlay.predicted_impact_normal = prediction.target_direction
 		overlay.predicted_impact_incoming_direction = prediction.impact_incoming_direction
 		overlay.predicted_target_outgoing_velocity = prediction.predicted_target_velocity
@@ -598,6 +1650,8 @@ func _copy_vector2_points(points: Array[Vector2]) -> Array[Vector2]:
 
 func _copy_debug_first_hit_candidate_log() -> Array[Dictionary]:
 	var copied_entries: Array[Dictionary] = []
+	if not _full_debug_result_evidence_enabled():
+		return copied_entries
 	for entry_value in _debug_first_hit_candidate_log:
 		var entry: Dictionary = entry_value
 		copied_entries.append(entry.duplicate(true))
@@ -611,7 +1665,7 @@ func _reset_debug_first_hit_candidate_log() -> void:
 
 
 func _finalize_debug_first_hit_candidate_selection(prediction: AimPrediction) -> void:
-	if not debug_aim_line_enabled:
+	if not debug_aim_line_enabled or not _full_debug_result_evidence_enabled():
 		return
 	if prediction != null and prediction.ball != null and is_instance_valid(prediction.ball):
 		_debug_first_hit_selected_ball_id = prediction.ball.get_instance_id()
@@ -634,22 +1688,16 @@ func _record_debug_actual_path_step() -> void:
 	):
 		return
 
-	if not is_instance_valid(table.cue_ball) or not table.cue_ball.is_gameplay_active():
-		debug_actual_trace_recording = false
-		queue_redraw()
-		return
-
-	_append_debug_actual_path_point(table.cue_ball.global_position)
+	if is_instance_valid(table.cue_ball) and table.cue_ball.is_gameplay_active():
+		_append_debug_actual_path_point(table.cue_ball.global_position)
 	_record_debug_all_ball_paths()
-	if debug_persisted_shot.actual_cue_path.size() >= DEBUG_AIM_TRACE_MAX_POINTS:
-		debug_actual_trace_recording = false
-	queue_redraw()
+	_queue_aim_redraw()
 
 
 func _append_debug_actual_path_point(position: Vector2, force_append: bool = false) -> void:
 	if debug_persisted_shot == null:
 		return
-	if debug_persisted_shot.actual_cue_path.size() >= DEBUG_AIM_TRACE_MAX_POINTS:
+	if debug_persisted_shot.actual_cue_path.size() >= _get_debug_actual_points_per_ball_limit():
 		return
 	if debug_persisted_shot.actual_cue_path.is_empty():
 		debug_persisted_shot.actual_cue_path.append(position)
@@ -695,9 +1743,9 @@ func _append_debug_ball_trace_point(ball: Ball) -> void:
 		debug_persisted_shot.actual_ball_traces[trace_key] = trace
 
 	var points: Array = trace.get("points", [])
-	if points.size() >= DEBUG_AIM_TRACE_MAX_POINTS_PER_BALL:
+	if points.size() >= _get_debug_actual_points_per_ball_limit():
 		return
-	if _get_debug_total_trace_points() >= DEBUG_AIM_TRACE_MAX_TOTAL_POINTS:
+	if _get_debug_total_trace_points() >= _get_debug_actual_total_points_limit():
 		return
 	if points.is_empty():
 		points.append(ball.global_position)
@@ -708,6 +1756,20 @@ func _append_debug_ball_trace_point(ball: Ball) -> void:
 			if last_point.distance_to(ball.global_position) >= DEBUG_AIM_TRACE_BALL_POINT_SPACING:
 				points.append(ball.global_position)
 	trace["points"] = points
+
+
+func _get_debug_actual_points_per_ball_limit() -> int:
+	return maxi(
+		int(cloned_trajectory_configuration.get("max_points_per_ball", DEBUG_AIM_TRACE_MAX_POINTS_PER_BALL)),
+		DEBUG_AIM_TRACE_MAX_POINTS_PER_BALL
+	)
+
+
+func _get_debug_actual_total_points_limit() -> int:
+	return maxi(
+		int(cloned_trajectory_configuration.get("max_total_trace_points", DEBUG_AIM_TRACE_MAX_TOTAL_POINTS)),
+		DEBUG_AIM_TRACE_MAX_TOTAL_POINTS
+	)
 
 
 func _append_debug_collision_log(line: String) -> void:
@@ -761,6 +1823,7 @@ func _get_debug_aim_compare_snapshot() -> Dictionary:
 	var launch_snapshot: Dictionary = _get_debug_launch_snapshot(overlay)
 	var contact_snapshot: Dictionary = _get_debug_contact_snapshot(overlay)
 	var response_snapshot: Dictionary = _get_debug_response_snapshot(overlay)
+	var contact_order_snapshot: Dictionary = _get_debug_contact_order_snapshot(overlay, contact_snapshot)
 	return {
 		"source": active_source,
 		"debug_aim_line_enabled": debug_aim_line_enabled,
@@ -770,7 +1833,117 @@ func _get_debug_aim_compare_snapshot() -> Dictionary:
 		"contact": contact_snapshot,
 		"response": response_snapshot,
 		"trace": trace_summary,
+		"contact_order": contact_order_snapshot,
 		"verdict": _get_debug_mismatch_verdict(launch_snapshot, contact_snapshot, response_snapshot),
+	}
+
+
+func _get_active_cloned_prediction_result() -> Dictionary:
+	if debug_aim_line_enabled and preview_active and not current_cloned_prediction.is_empty():
+		return current_cloned_prediction
+	if debug_persisted_shot != null:
+		return debug_persisted_shot.cloned_prediction_result
+	return current_cloned_prediction
+
+
+func _get_cloned_event_comparison_snapshot() -> Dictionary:
+	var prediction_result: Dictionary = _get_active_cloned_prediction_result()
+	var predicted_events: Array = prediction_result.get("events", [])
+	var actual_events: Array = []
+	if debug_persisted_shot != null:
+		actual_events = debug_persisted_shot.actual_events
+	var result_configuration: Dictionary = prediction_result.get(
+		"configuration",
+		cloned_trajectory_configuration
+	)
+	var comparison_enabled: bool = _should_build_cloned_event_comparison(result_configuration)
+	if not comparison_enabled:
+		return {
+			"enabled": false,
+			"matched_event_count": 0,
+			"predicted_event_count": predicted_events.size(),
+			"actual_event_count": actual_events.size(),
+			"first_divergent_event_index": -1,
+			"divergence_reason": "comparison_disabled",
+			"entries": [],
+			"predicted_events": [],
+			"actual_events": [],
+		}
+	var entries: Array[Dictionary] = []
+	var shared_count: int = mini(predicted_events.size(), actual_events.size())
+	var matched_count: int = 0
+	var first_divergent_index: int = -1
+	var first_divergence_reason: String = ""
+	for event_index in range(shared_count):
+		var predicted: Dictionary = predicted_events[event_index] as Dictionary
+		var actual: Dictionary = actual_events[event_index] as Dictionary
+		var comparison: Dictionary = _compare_cloned_event_pair(predicted, actual, event_index)
+		entries.append(comparison)
+		if bool(comparison.get("matches", false)) and first_divergent_index < 0:
+			matched_count += 1
+		elif first_divergent_index < 0:
+			first_divergent_index = event_index
+			first_divergence_reason = str(comparison.get("result", "event_mismatch"))
+
+	var actual_chain_complete: bool = debug_persisted_shot != null and not debug_actual_trace_recording
+	if first_divergent_index < 0 and actual_chain_complete and predicted_events.size() != actual_events.size():
+		first_divergent_index = shared_count
+		if predicted_events.size() < actual_events.size():
+			first_divergence_reason = "prediction_stopped_before_actual"
+		else:
+			first_divergence_reason = "actual_stopped_before_prediction"
+	return {
+		"enabled": true,
+		"matched_event_count": matched_count,
+		"predicted_event_count": predicted_events.size(),
+		"actual_event_count": actual_events.size(),
+		"first_divergent_event_index": first_divergent_index,
+		"divergence_reason": first_divergence_reason,
+		"actual_chain_complete": actual_chain_complete,
+		"prediction_stop_reason": str(prediction_result.get("stop_reason", "none")),
+		"entries": entries,
+		"predicted_events": predicted_events.duplicate(true),
+		"actual_events": actual_events.duplicate(true),
+	}
+
+
+func _compare_cloned_event_pair(predicted: Dictionary, actual: Dictionary, event_index: int) -> Dictionary:
+	var predicted_type: String = str(predicted.get("event_type", "unknown"))
+	var actual_type: String = str(actual.get("event_type", "unknown"))
+	var source_matches: bool = int(predicted.get("source_ball_id", -1)) == int(actual.get("source_ball_id", -1))
+	var target_matches: bool = int(predicted.get("target_ball_id", -1)) == int(actual.get("target_ball_id", -1))
+	var type_matches: bool = predicted_type == actual_type
+	var result: String = "match"
+	if not type_matches:
+		result = "event_type_mismatch"
+	elif not source_matches:
+		result = "source_ball_mismatch"
+	elif not target_matches:
+		result = "target_ball_mismatch"
+	elif predicted_type == AimTrajectoryPredictor.EVENT_POCKET and int(predicted.get("pocket_index", -1)) != int(actual.get("pocket_index", -1)):
+		result = "pocket_mismatch"
+	var predicted_normal: Vector2 = predicted.get("collision_normal", Vector2.ZERO)
+	var actual_normal: Vector2 = actual.get("collision_normal", Vector2.ZERO)
+	var predicted_outgoing: Vector2 = predicted.get("outgoing_source_velocity", Vector2.ZERO)
+	var actual_outgoing: Vector2 = actual.get("outgoing_source_velocity", Vector2.ZERO)
+	var predicted_contact: Vector2 = predicted.get("contact_point", Vector2.ZERO)
+	var actual_contact: Vector2 = actual.get("contact_point", Vector2.ZERO)
+	return {
+		"event_index": event_index,
+		"matches": result == "match",
+		"result": result,
+		"predicted_type": predicted_type,
+		"actual_type": actual_type,
+		"predicted_source_label": str(predicted.get("source_ball_label", "Ball ?")),
+		"actual_source_label": str(actual.get("source_ball_label", "Ball ?")),
+		"predicted_target_label": str(predicted.get("target_ball_label", "")),
+		"actual_target_label": str(actual.get("target_ball_label", "")),
+		"source_matches": source_matches,
+		"target_matches": target_matches,
+		"contact_position_delta": predicted_contact.distance_to(actual_contact),
+		"normal_angle_delta": _get_unsigned_angle_delta_degrees(predicted_normal, actual_normal),
+		"outgoing_angle_delta": _get_unsigned_angle_delta_degrees(predicted_outgoing, actual_outgoing),
+		"timing_delta": float(actual.get("actual_time", 0.0)) - float(predicted.get("simulated_time", 0.0)),
 	}
 
 
@@ -814,6 +1987,8 @@ func _get_debug_contact_snapshot(overlay: DebugAimShotOverlay) -> Dictionary:
 	var actual_contact_point: Vector2 = overlay.actual_first_contact_position if overlay != null else Vector2.ZERO
 	var predicted_center: Vector2 = overlay.predicted_cue_contact_position if overlay != null else Vector2.ZERO
 	var actual_center: Vector2 = overlay.actual_first_cue_center if overlay != null else Vector2.ZERO
+	var predicted_target_center: Vector2 = overlay.predicted_target_contact_position if overlay != null else Vector2.ZERO
+	var actual_target_center: Vector2 = overlay.actual_first_object_center if overlay != null else Vector2.ZERO
 	var predicted_normal: Vector2 = overlay.predicted_impact_normal if overlay != null else Vector2.ZERO
 	var actual_normal: Vector2 = overlay.actual_impact_normal if overlay != null else Vector2.ZERO
 	return {
@@ -826,6 +2001,15 @@ func _get_debug_contact_snapshot(overlay: DebugAimShotOverlay) -> Dictionary:
 		"predicted_cue_center": predicted_center,
 		"actual_cue_center": actual_center,
 		"cue_center_delta": predicted_center.distance_to(actual_center) if overlay != null and overlay.has_predicted_cue_contact and overlay.has_actual_first_contact else -1.0,
+		"predicted_target_center": predicted_target_center,
+		"actual_target_center": actual_target_center,
+		"target_center_delta": predicted_target_center.distance_to(actual_target_center) if overlay != null and overlay.has_predicted_cue_contact and overlay.has_actual_first_contact else -1.0,
+		"predicted_center_distance": overlay.predicted_center_distance if overlay != null else -1.0,
+		"actual_center_distance": overlay.actual_center_distance if overlay != null else -1.0,
+		"prediction_effective_collision_radius": overlay.prediction_effective_collision_radius if overlay != null else -1.0,
+		"physics_effective_collision_radius": _get_debug_physics_effective_collision_radius(overlay),
+		"prediction_collision_skin": overlay.prediction_collision_skin if overlay != null else 0.0,
+		"physics_collision_skin": overlay.physics_collision_skin if overlay != null else 0.0,
 		"predicted_contact_point": predicted_contact_point,
 		"actual_contact_point": actual_contact_point,
 		"contact_point_delta": predicted_contact_point.distance_to(actual_contact_point) if overlay != null and overlay.has_predicted_cue_contact and overlay.has_actual_first_contact else -1.0,
@@ -843,7 +2027,9 @@ func _get_debug_contact_snapshot(overlay: DebugAimShotOverlay) -> Dictionary:
 func _get_debug_response_snapshot(overlay: DebugAimShotOverlay) -> Dictionary:
 	var predicted_velocity: Vector2 = overlay.predicted_target_outgoing_velocity if overlay != null else Vector2.ZERO
 	var actual_velocity: Vector2 = overlay.actual_target_outgoing_velocity if overlay != null else Vector2.ZERO
-	var expected_center_distance: float = (overlay.cue_radius + overlay.target_radius) if overlay != null else -1.0
+	var predicted_center_distance: float = overlay.predicted_center_distance if overlay != null else -1.0
+	var prediction_effective_radius: float = overlay.prediction_effective_collision_radius if overlay != null else -1.0
+	var physics_effective_radius: float = _get_debug_physics_effective_collision_radius(overlay)
 	var actual_center_distance: float = overlay.actual_center_distance if overlay != null else -1.0
 	return {
 		"has_predicted": overlay != null and overlay.has_predicted_cue_contact,
@@ -857,12 +2043,31 @@ func _get_debug_response_snapshot(overlay: DebugAimShotOverlay) -> Dictionary:
 		"predicted_distance_to_first_hit": overlay.predicted_distance_to_first_hit if overlay != null else -1.0,
 		"actual_distance_to_first_hit": overlay.actual_distance_to_first_hit if overlay != null else -1.0,
 		"distance_delta": (overlay.actual_distance_to_first_hit - overlay.predicted_distance_to_first_hit) if overlay != null and overlay.actual_distance_to_first_hit >= 0.0 and overlay.predicted_distance_to_first_hit >= 0.0 else 0.0,
-		"expected_center_distance": expected_center_distance,
+		# Kept for existing debug consumers; this is now the skin-inclusive radius.
+		"expected_center_distance": prediction_effective_radius,
+		"predicted_center_distance": predicted_center_distance,
 		"actual_center_distance": actual_center_distance,
-		"overlap_gap": actual_center_distance - expected_center_distance if actual_center_distance >= 0.0 and expected_center_distance >= 0.0 else 0.0,
+		"center_distance_delta": actual_center_distance - predicted_center_distance if actual_center_distance >= 0.0 and predicted_center_distance >= 0.0 else 0.0,
+		"prediction_effective_collision_radius": prediction_effective_radius,
+		"physics_effective_collision_radius": physics_effective_radius,
+		"effective_radius_delta": physics_effective_radius - prediction_effective_radius if physics_effective_radius >= 0.0 and prediction_effective_radius >= 0.0 else 0.0,
+		"prediction_collision_skin": overlay.prediction_collision_skin if overlay != null else 0.0,
+		"physics_collision_skin": overlay.physics_collision_skin if overlay != null else 0.0,
+		"prediction_geometry_gap": predicted_center_distance - prediction_effective_radius if predicted_center_distance >= 0.0 and prediction_effective_radius >= 0.0 else 0.0,
+		"overlap_gap": actual_center_distance - physics_effective_radius if actual_center_distance >= 0.0 and physics_effective_radius >= 0.0 else 0.0,
 		"cue_radius": overlay.cue_radius if overlay != null else 0.0,
 		"target_radius": overlay.target_radius if overlay != null else 0.0,
 	}
+
+
+func _get_debug_physics_effective_collision_radius(overlay: DebugAimShotOverlay) -> float:
+	if overlay == null:
+		return -1.0
+	return BALL_SWEEP_MATH.get_effective_collision_radius(
+		overlay.cue_radius,
+		overlay.target_radius,
+		overlay.physics_collision_skin
+	)
 
 
 func _get_debug_trace_summary(overlay: DebugAimShotOverlay) -> Dictionary:
@@ -910,6 +2115,47 @@ func _get_debug_trace_summary(overlay: DebugAimShotOverlay) -> Dictionary:
 	}
 
 
+func _get_debug_contact_order_snapshot(overlay: DebugAimShotOverlay, contact_snapshot: Dictionary) -> Dictionary:
+	if overlay == null or overlay.contact_order_snapshot.is_empty():
+		return {
+			"captured": false,
+			"verdict": "Insufficient data",
+		}
+	var result: Dictionary = overlay.contact_order_snapshot.duplicate(true)
+	result["preview_first_ball_id"] = int(contact_snapshot.get("predicted_hit_ball_id", -1))
+	result["preview_first_ball_number"] = int(contact_snapshot.get("predicted_hit_ball_number", -1))
+	result["reported_actual_ball_id"] = int(contact_snapshot.get("actual_hit_ball_id", -1))
+	result["reported_actual_ball_number"] = int(contact_snapshot.get("actual_hit_ball_number", -1))
+	result["verdict"] = _get_debug_contact_order_verdict(result)
+	return result
+
+
+func _get_debug_contact_order_verdict(contact_order: Dictionary) -> String:
+	if not bool(contact_order.get("captured", false)):
+		return "Insufficient data"
+	var preview_id: int = int(contact_order.get("preview_first_ball_id", -1))
+	var swept_id: int = int(contact_order.get("swept_earliest_ball_id", -1))
+	var resolver_id: int = int(contact_order.get("resolver_first_ball_id", -1))
+	var actual_id: int = int(contact_order.get("reported_actual_ball_id", -1))
+	if swept_id < 0:
+		return "No swept hit recorded"
+	if resolver_id >= 0 and resolver_id != swept_id:
+		return "Resolver order differs from TOI"
+	if preview_id >= 0 and preview_id != swept_id:
+		return "Preview selected wrong geometric candidate"
+	if actual_id >= 0 and resolver_id >= 0 and actual_id != resolver_id:
+		return "Reported contact differs from resolver"
+	if bool(contact_order.get("near_simultaneous", false)):
+		return "Near-simultaneous multi-contact"
+	if preview_id == swept_id and resolver_id == swept_id:
+		return "Preview, TOI, and resolver agree"
+	if resolver_id == swept_id:
+		return "Resolver and TOI agree"
+	if preview_id == swept_id:
+		return "Preview and TOI agree"
+	return "Insufficient data"
+
+
 func _get_debug_mismatch_verdict(
 	launch_snapshot: Dictionary,
 	contact_snapshot: Dictionary,
@@ -925,6 +2171,12 @@ func _get_debug_mismatch_verdict(
 		return "no actual contact recorded"
 	if int(contact_snapshot.get("predicted_hit_ball_id", -1)) != int(contact_snapshot.get("actual_hit_ball_id", -1)):
 		return "predicted wrong first ball"
+	if absf(float(response_snapshot.get("effective_radius_delta", 0.0))) > 0.01:
+		return "prediction/physics radius mismatch"
+	if absf(float(response_snapshot.get("prediction_geometry_gap", 0.0))) > 0.05:
+		return "prediction contact geometry mismatch"
+	if absf(float(response_snapshot.get("center_distance_delta", 0.0))) > 0.25:
+		return "predicted/actual contact distance mismatch"
 	if float(contact_snapshot.get("cue_center_delta", -1.0)) > 2.0:
 		return "launch matches, contact late"
 	if absf(float(contact_snapshot.get("normal_angle_delta", 0.0))) > 2.0:
@@ -986,6 +2238,52 @@ func reset_frame_stats() -> void:
 	embezzler_perception_checks_this_frame = 0
 
 
+func _get_cloned_profiler_snapshot() -> Dictionary:
+	if trajectory_profiler == null:
+		return {
+			"benchmark": get_cloned_trajectory_benchmark_snapshot(),
+			"invalidation": _get_cloned_invalidation_snapshot(),
+		}
+	var cache_snapshot: Dictionary = (
+		trajectory_predictor.get_cache_debug_snapshot()
+		if trajectory_predictor != null
+		else {}
+	)
+	var profiler_snapshot: Dictionary = trajectory_profiler.get_snapshot(cache_snapshot)
+	profiler_snapshot["aim_preview_draw_cpu_us"] = maxi(int(round(draw_ms_last_draw * 1000.0)), 0)
+	profiler_snapshot["benchmark"] = get_cloned_trajectory_benchmark_snapshot()
+	profiler_snapshot["invalidation"] = _get_cloned_invalidation_snapshot()
+	return profiler_snapshot
+
+
+func _get_cloned_invalidation_snapshot() -> Dictionary:
+	var table_revision_snapshot: Dictionary = (
+		table.get_aim_prediction_revision_snapshot()
+		if table != null
+		else {}
+	)
+	return {
+		"table_revision": int(table_revision_snapshot.get(
+			"table_revision",
+			_observed_table_prediction_revision
+		)),
+		"prediction_revision_changes": int(table_revision_snapshot.get(
+			"prediction_revision_changes",
+			0
+		)),
+		"cache_invalidations": _cloned_invalidation_count,
+		"invalidation_reasons": _cloned_invalidation_reason_counts.duplicate(true),
+		"last_invalidation_reason": _last_cloned_invalidation_reason,
+		"roster_change_invalidations": _cloned_roster_change_invalidations,
+		"spawn_complete_invalidations": _cloned_spawn_complete_invalidations,
+		"remove_sink_invalidations": _cloned_remove_sink_invalidations,
+		"transform_invalidations": _cloned_transform_invalidations,
+		"unsupported_state_invalidations": _cloned_unsupported_state_invalidations,
+		"successful_rebuilds_after_invalidation": _cloned_successful_rebuilds_after_invalidation,
+		"failed_rebuilds_after_invalidation": _cloned_failed_rebuilds_after_invalidation,
+	}
+
+
 func get_debug_snapshot() -> Dictionary:
 	var snapshot: Dictionary = {
 		"debug_aim_line_enabled": debug_aim_line_enabled,
@@ -994,6 +2292,11 @@ func get_debug_snapshot() -> Dictionary:
 		"debug_aim_actual_points": debug_persisted_shot.actual_cue_path.size() if debug_persisted_shot != null else 0,
 		"debug_aim_has_actual_first_contact": debug_persisted_shot.has_actual_first_contact if debug_persisted_shot != null else false,
 		"aim_compare": _get_debug_aim_compare_snapshot(),
+		"cloned_simulation": _get_active_cloned_prediction_result().duplicate(true),
+		"cloned_prediction_availability": cloned_prediction_availability.duplicate(true),
+		"cloned_invalidation": _get_cloned_invalidation_snapshot(),
+		"cloned_event_comparison": _get_cloned_event_comparison_snapshot(),
+		"cloned_profiler": _get_cloned_profiler_snapshot(),
 		"prediction_ms": prediction_ms,
 		"prediction_frame_ms": prediction_frame_ms,
 		"prediction_recalculations": prediction_recalculations_this_frame,
@@ -1109,6 +2412,11 @@ func _draw() -> void:
 	var draw_start_usec: int = Time.get_ticks_usec()
 	_draw_segments_in_progress = 0
 	_draw_calls_in_progress = 0
+	_draw_predicted_balls_in_progress = 0
+	_draw_visible_paths_in_progress = 0
+	_draw_ghost_balls_in_progress = 0
+	_draw_labels_in_progress = 0
+	_draw_event_markers_in_progress = 0
 	_draw_bank_debug_markers()
 	_draw_aim_path_comparison_debug()
 	if not preview_active:
@@ -1151,7 +2459,10 @@ func _draw_prediction(prediction: AimPrediction) -> void:
 		return
 
 	_draw_target_prediction_line(prediction)
-	_draw_long_sight_chain()
+	if _is_cloned_long_sight_active():
+		_draw_cloned_long_sight_paths()
+	else:
+		_draw_long_sight_chain()
 
 
 func _draw_basic_guide_line() -> void:
@@ -1163,8 +2474,12 @@ func _draw_basic_guide_line() -> void:
 
 
 func _draw_debug_aim_line(prediction: AimPrediction) -> void:
+	if bool(current_cloned_prediction.get("valid", false)):
+		_draw_cloned_debug_prediction(current_cloned_prediction)
+		return
 	if prediction == null or prediction.path_points.size() < 2:
 		_draw_debug_basic_guide_line()
+		_draw_cloned_unavailable_message()
 		return
 
 	_draw_debug_prediction_data(
@@ -1175,6 +2490,40 @@ func _draw_debug_aim_line(prediction: AimPrediction) -> void:
 		prediction.target_path_points.size() > 0,
 		_get_debug_child_marker_position(prediction),
 		_get_debug_prediction_child_radius(prediction)
+	)
+	_draw_cloned_unavailable_message()
+
+
+func _draw_cloned_unavailable_message() -> void:
+	if bool(cloned_prediction_availability.get("available", false)):
+		return
+	var reason: String = str(cloned_prediction_availability.get("blocker_reason", "unknown"))
+	if reason == "disabled" or reason == "cue_not_ready":
+		return
+	var details: String = str(cloned_prediction_availability.get("blocker_details", ""))
+	if details.length() > 58:
+		details = details.left(55) + "..."
+	var panel_position: Vector2 = preview_origin + Vector2(24.0, 28.0)
+	var panel_size := Vector2(356.0, 46.0)
+	draw_rect(Rect2(panel_position, panel_size), Color(0.02, 0.025, 0.035, 0.88), true)
+	draw_rect(Rect2(panel_position, panel_size), Color(0.78, 0.62, 0.28, 0.78), false, 1.0)
+	draw_string(
+		ThemeDB.fallback_font,
+		panel_position + Vector2(8.0, 17.0),
+		"Cloned prediction unavailable: %s" % reason.replace("_", " "),
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1.0,
+		11,
+		Color(0.96, 0.84, 0.52)
+	)
+	draw_string(
+		ThemeDB.fallback_font,
+		panel_position + Vector2(8.0, 35.0),
+		details,
+		HORIZONTAL_ALIGNMENT_LEFT,
+		-1.0,
+		10,
+		Color(0.86, 0.88, 0.91)
 	)
 
 
@@ -1194,16 +2543,150 @@ func _draw_debug_basic_guide_line() -> void:
 func _draw_debug_persisted_overlay() -> void:
 	if debug_persisted_shot == null:
 		return
-	_draw_debug_prediction_data(
-		debug_persisted_shot.predicted_cue_path,
-		debug_persisted_shot.has_predicted_cue_contact,
-		debug_persisted_shot.predicted_cue_contact_position,
-		debug_persisted_shot.predicted_child_path,
-		debug_persisted_shot.has_predicted_child_marker,
-		debug_persisted_shot.predicted_child_marker_position,
-		debug_persisted_shot.predicted_child_radius
-	)
+	if bool(debug_persisted_shot.cloned_prediction_result.get("valid", false)):
+		_draw_cloned_debug_prediction(debug_persisted_shot.cloned_prediction_result)
+	else:
+		_draw_debug_prediction_data(
+			debug_persisted_shot.predicted_cue_path,
+			debug_persisted_shot.has_predicted_cue_contact,
+			debug_persisted_shot.predicted_cue_contact_position,
+			debug_persisted_shot.predicted_child_path,
+			debug_persisted_shot.has_predicted_child_marker,
+			debug_persisted_shot.predicted_child_marker_position,
+			debug_persisted_shot.predicted_child_radius
+		)
 	_draw_debug_actual_trace(debug_persisted_shot)
+
+
+func _draw_cloned_debug_prediction(result: Dictionary) -> void:
+	var configuration: Dictionary = result.get("configuration", {})
+	var draw_cue_continuation: bool = bool(configuration.get("draw_cue_continuation", true))
+	var draw_child_paths: bool = bool(configuration.get("draw_child_ball_paths", true))
+	for ball_value in result.get("balls", []):
+		if not ball_value is Dictionary:
+			continue
+		var ball_result: Dictionary = ball_value
+		var is_cue: bool = bool(ball_result.get("is_cue_ball", false))
+		if not is_cue and not draw_child_paths:
+			continue
+		if is_cue and not draw_cue_continuation:
+			continue
+		var points: Array[Vector2] = _to_vector2_points(ball_result.get("path_points", []))
+		if points.size() < 2:
+			continue
+		_draw_predicted_balls_in_progress += 1
+		_draw_visible_paths_in_progress += 1
+		var color: Color = DEBUG_AIM_LINE_COLOR if is_cue else _get_cloned_ball_color(
+			int(ball_result.get("source_ball_id", -1))
+		)
+		_draw_debug_polyline(points, color, DEBUG_AIM_LINE_WIDTH)
+		if bool(configuration.get("draw_ball_labels", true)):
+			_draw_cloned_text(points[points.size() - 1] + Vector2(6.0, -5.0), str(ball_result.get("source_ball_label", "Ball")), color)
+
+	for event_value in result.get("events", []):
+		if not event_value is Dictionary:
+			continue
+		var event: Dictionary = event_value
+		_draw_cloned_debug_event(event, configuration)
+
+	if (
+		bool(result.get("truncated", false))
+		and str(configuration.get("result_detail_mode", "full_debug"))
+		== AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+	):
+		_draw_cloned_cap_marker(result)
+
+
+func _draw_cloned_debug_event(event: Dictionary, configuration: Dictionary) -> void:
+	var drew_event_marker := false
+	var event_type: String = str(event.get("event_type", ""))
+	var position: Vector2 = event.get("contact_point", Vector2.ZERO)
+	var supported: bool = bool(event.get("supported", true))
+	var marker_color: Color = Color(1.0, 0.22, 0.68, 0.98) if not supported else DEBUG_AIM_MARKER_COLOR
+	if bool(configuration.get("draw_ghost_balls", true)) and event_type == AimTrajectoryPredictor.EVENT_BALL_CONTACT:
+		drew_event_marker = true
+		_draw_debug_ghost_ball(
+			event.get("source_center", position),
+			float(event.get("source_radius", _get_debug_cue_ball_radius())),
+			_get_cloned_ball_color(int(event.get("source_ball_id", -1)))
+		)
+		_draw_debug_ghost_ball(
+			event.get("target_center", position),
+			float(event.get("target_radius", _get_debug_cue_ball_radius())),
+			_get_cloned_ball_color(int(event.get("target_ball_id", -1)))
+		)
+	elif bool(configuration.get("draw_ghost_balls", true)):
+		drew_event_marker = true
+		_draw_debug_ghost_ball(
+			event.get("source_center", position),
+			float(event.get("source_radius", _get_debug_cue_ball_radius())),
+			_get_cloned_ball_color(int(event.get("source_ball_id", -1)))
+		)
+	if bool(configuration.get("draw_stop_pocket_markers", true)):
+		if event_type == AimTrajectoryPredictor.EVENT_POCKET:
+			drew_event_marker = true
+			_draw_calls_in_progress += 1
+			draw_circle(position, 5.0, Color(0.36, 1.0, 0.76, 0.82), false, 1.5)
+		elif event_type == AimTrajectoryPredictor.EVENT_STOPPED:
+			drew_event_marker = true
+			_draw_calls_in_progress += 2
+			draw_line(position - Vector2(4.0, 4.0), position + Vector2(4.0, 4.0), marker_color, 1.0)
+			draw_line(position + Vector2(-4.0, 4.0), position + Vector2(4.0, -4.0), marker_color, 1.0)
+	if bool(configuration.get("draw_event_numbers", true)):
+		drew_event_marker = true
+		var prefix: String = "C" if int(event.get("source_ball_id", -1)) == table.cue_ball.get_instance_id() else "E"
+		_draw_cloned_text(position + Vector2(5.0, -7.0), "%s%s" % [prefix, int(event.get("event_index", 0)) + 1], marker_color)
+	if (
+		not supported
+		and str(configuration.get("result_detail_mode", "full_debug"))
+		== AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+	):
+		drew_event_marker = true
+		_draw_cloned_text(position + Vector2(5.0, 10.0), str(event.get("unsupported_reason", "unsupported")), marker_color)
+	if drew_event_marker:
+		_draw_event_markers_in_progress += 1
+
+
+func _draw_cloned_cap_marker(result: Dictionary) -> void:
+	var cue_result: Dictionary = _get_cloned_cue_result(result)
+	if cue_result.is_empty():
+		return
+	var position: Vector2 = cue_result.get("ending_position", Vector2.ZERO)
+	var color: Color = Color(1.0, 0.18, 0.66, 0.95)
+	_draw_calls_in_progress += 2
+	draw_line(position - Vector2(6.0, 6.0), position + Vector2(6.0, 6.0), color, 1.5)
+	draw_line(position + Vector2(-6.0, 6.0), position + Vector2(6.0, -6.0), color, 1.5)
+	_draw_cloned_text(position + Vector2(8.0, 12.0), str(result.get("stop_reason", "cap")), color)
+
+
+func _draw_cloned_text(position: Vector2, text: String, color: Color) -> void:
+	_draw_calls_in_progress += 1
+	_draw_labels_in_progress += 1
+	draw_string(ThemeDB.fallback_font, position, text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 11, color)
+
+
+func _to_vector2_points(points_value: Variant) -> Array[Vector2]:
+	var points: Array[Vector2] = []
+	if not points_value is Array:
+		return points
+	for point_value in points_value:
+		if point_value is Vector2:
+			points.append(point_value)
+	return points
+
+
+func _get_cloned_ball_color(source_id: int) -> Color:
+	if table != null and table.cue_ball != null and source_id == table.cue_ball.get_instance_id():
+		return DEBUG_AIM_LINE_COLOR
+	var color_index: int = posmod(source_id, DEBUG_CLONED_PATH_COLORS.size())
+	return DEBUG_CLONED_PATH_COLORS[color_index]
+
+
+func _get_cloned_cue_result(result: Dictionary) -> Dictionary:
+	for ball_value in result.get("balls", []):
+		if ball_value is Dictionary and bool(ball_value.get("is_cue_ball", false)):
+			return ball_value
+	return {}
 
 
 func _draw_debug_prediction_data(
@@ -1290,6 +2773,7 @@ func _draw_debug_ghost_ball(center: Vector2, radius: float, color: Color) -> voi
 	if radius <= 0.0:
 		return
 	_draw_calls_in_progress += 1
+	_draw_ghost_balls_in_progress += 1
 	draw_arc(center, radius, 0.0, PI * 2.0, 48, color, DEBUG_AIM_GHOST_LINE_WIDTH, false)
 
 
@@ -1465,6 +2949,84 @@ func _draw_long_sight_chain() -> void:
 		)
 
 
+func _draw_cloned_long_sight_paths() -> void:
+	# Generation depth is causal: the first struck ball is depth 1, a ball it
+	# strikes is depth 2, and so on. Cue continuation is revealed after C1.
+	var visible_depth: int = _get_active_aim_chain_depth()
+	if visible_depth <= 0:
+		return
+	var cue_id: int = table.cue_ball.get_instance_id()
+	var first_cue_contact: Vector2 = _get_first_cloned_cue_contact(current_cloned_prediction)
+	for ball_value in current_cloned_prediction.get("balls", []):
+		if not ball_value is Dictionary:
+			continue
+		var ball_result: Dictionary = ball_value
+		if int(ball_result.get("causal_root_ball_id", -1)) != cue_id:
+			continue
+		var generation_depth: int = int(ball_result.get("generation_depth", 0))
+		if generation_depth > visible_depth:
+			continue
+		var points: Array[Vector2] = _to_vector2_points(ball_result.get("path_points", []))
+		if bool(ball_result.get("is_cue_ball", false)):
+			points = _slice_cloned_path_from_contact(points, first_cue_contact)
+		if points.size() < 2:
+			continue
+		_draw_predicted_balls_in_progress += 1
+		_draw_visible_paths_in_progress += 1
+		var alpha_multiplier: float = maxf(0.24, 0.72 - float(generation_depth) * 0.09)
+		var segment_count: int = points.size() - 1
+		for segment_index in range(segment_count):
+			_draw_guidance_line_segment(
+				points[segment_index],
+				points[segment_index + 1],
+				AIM_CHAIN_CORE_COLOR,
+				AIM_CHAIN_GLOW_COLOR,
+				_get_path_fade_ratio(segment_index, segment_count),
+				alpha_multiplier,
+				AIM_CHAIN_LINE_WIDTH,
+				AIM_CHAIN_LINE_GLOW_WIDTH,
+				AIM_CHAIN_LINE_GLOW_ALPHA
+			)
+		_draw_long_sight_endpoint_marker(
+			points[points.size() - 1],
+			bool(ball_result.get("pocketed", false)),
+			alpha_multiplier
+		)
+
+
+func _get_first_cloned_cue_contact(result: Dictionary) -> Vector2:
+	if table == null or table.cue_ball == null:
+		return Vector2.ZERO
+	var cue_id: int = table.cue_ball.get_instance_id()
+	for event_value in result.get("events", []):
+		if not event_value is Dictionary:
+			continue
+		var event: Dictionary = event_value
+		if (
+			str(event.get("event_type", "")) == AimTrajectoryPredictor.EVENT_BALL_CONTACT
+			and int(event.get("source_ball_id", -1)) == cue_id
+		):
+			return event.get("source_center", Vector2.ZERO)
+	return Vector2.ZERO
+
+
+func _slice_cloned_path_from_contact(points: Array[Vector2], contact: Vector2) -> Array[Vector2]:
+	if points.size() < 2 or contact == Vector2.ZERO:
+		return []
+	var nearest_index: int = 0
+	var nearest_distance_squared: float = INF
+	for point_index in range(points.size()):
+		var distance_squared: float = points[point_index].distance_squared_to(contact)
+		if distance_squared < nearest_distance_squared:
+			nearest_distance_squared = distance_squared
+			nearest_index = point_index
+	var sliced: Array[Vector2] = []
+	sliced.append(contact)
+	for point_index in range(nearest_index + 1, points.size()):
+		sliced.append(points[point_index])
+	return sliced
+
+
 func _draw_long_sight_endpoint_marker(position: Vector2, ends_in_pocket: bool, alpha_multiplier: float) -> void:
 	var marker_color := AIM_TARGET_POCKET_MARKER_COLOR if ends_in_pocket else AIM_CHAIN_CORE_COLOR
 	var glow_color := Color(AIM_CHAIN_GLOW_COLOR.r, AIM_CHAIN_GLOW_COLOR.g, AIM_CHAIN_GLOW_COLOR.b, 0.11 * alpha_multiplier)
@@ -1613,11 +3175,10 @@ func _get_first_aim_collision(origin: Vector2, initial_velocity: Vector2) -> Aim
 			segment_index
 		)
 		if ball_hit.ball != null:
-			return _make_ball_prediction_from_position(
+			return _make_ball_prediction_from_hit(
 				prediction,
 				simulated_velocity,
-				ball_hit.ball,
-				ball_hit.position,
+				ball_hit,
 				bounce_count,
 				segment_index
 			)
@@ -1675,6 +3236,10 @@ func _make_target_path_from_prediction(prediction: AimPrediction) -> AimTargetPa
 	target_path.path_length = prediction.target_path_length
 	target_path.first_hit_ball = prediction.target_first_hit_ball
 	target_path.first_hit_position = prediction.target_first_hit_position
+	target_path.first_hit_target_center = prediction.target_first_hit_target_center
+	target_path.first_hit_normal = prediction.target_first_hit_normal
+	target_path.first_hit_effective_collision_radius = prediction.target_first_hit_effective_collision_radius
+	target_path.first_hit_collision_skin = prediction.target_first_hit_collision_skin
 	target_path.incoming_velocity_at_stop = prediction.target_incoming_velocity_at_stop
 	return target_path
 
@@ -1686,8 +3251,11 @@ func _make_target_path_from_link(link: AimChainLink) -> AimTargetPath:
 	target_path.first_stop_reason = link.first_stop_reason
 	target_path.path_length = link.path_length
 	target_path.first_hit_ball = link.next_ball
-	if link.path_points.size() > 0:
-		target_path.first_hit_position = link.path_points[link.path_points.size() - 1]
+	target_path.first_hit_position = link.first_hit_position
+	target_path.first_hit_target_center = link.first_hit_target_center
+	target_path.first_hit_normal = link.first_hit_normal
+	target_path.first_hit_effective_collision_radius = link.first_hit_effective_collision_radius
+	target_path.first_hit_collision_skin = link.first_hit_collision_skin
 	target_path.incoming_velocity_at_stop = link.incoming_velocity_at_stop
 	return target_path
 
@@ -1704,11 +3272,15 @@ func _make_long_sight_chain_link(previous_moving_ball: Ball, previous_path: AimT
 	if incoming_velocity.length_squared() <= 0.001:
 		return null
 
-	var target_direction: Vector2 = next_ball.global_position - hit_position
-	if target_direction.length_squared() > 0.001:
-		target_direction = target_direction.normalized()
-	else:
+	var target_direction: Vector2 = previous_path.first_hit_normal
+	if target_direction.length_squared() <= 0.001:
+		target_direction = previous_path.first_hit_target_center - hit_position
+	if target_direction.length_squared() <= 0.001:
+		target_direction = next_ball.global_position - hit_position
+	if target_direction.length_squared() <= 0.001:
 		target_direction = incoming_velocity.normalized()
+	else:
+		target_direction = target_direction.normalized()
 
 	var predicted_next_velocity: Vector2 = _get_predicted_target_velocity(incoming_velocity, next_ball, target_direction)
 	if predicted_next_velocity.length_squared() <= 0.001:
@@ -1725,6 +3297,11 @@ func _make_long_sight_chain_link(previous_moving_ball: Ball, previous_path: AimT
 	link.first_stop_reason = next_path.first_stop_reason
 	link.path_length = next_path.path_length
 	link.next_ball = next_path.first_hit_ball
+	link.first_hit_position = next_path.first_hit_position
+	link.first_hit_target_center = next_path.first_hit_target_center
+	link.first_hit_normal = next_path.first_hit_normal
+	link.first_hit_effective_collision_radius = next_path.first_hit_effective_collision_radius
+	link.first_hit_collision_skin = next_path.first_hit_collision_skin
 	link.incoming_velocity_at_stop = next_path.incoming_velocity_at_stop
 	link.predicted_next_velocity = predicted_next_velocity
 	return link
@@ -1822,13 +3399,17 @@ func _simulate_aim_target_step(target_ball: Ball, moved_position: Vector2, veloc
 
 
 func _apply_prediction_friction(ball: Ball, velocity: Vector2, delta: float) -> Vector2:
-	var speed: float = velocity.length()
-	if speed <= 0.0:
-		return Vector2.ZERO
-
-	var effective_friction: float = ball._get_effective_friction(speed)
-	var updated_velocity: Vector2 = velocity.move_toward(Vector2.ZERO, effective_friction * delta)
-	return Vector2.ZERO if updated_velocity.length() < ball.stop_threshold else updated_velocity
+	return BALL_MOTION_MATH.apply_friction(velocity, delta, {
+		"rolling_friction": ball.rolling_friction,
+		"stop_threshold": ball.stop_threshold,
+		"medium_speed_drag_start": ball.medium_speed_drag_start,
+		"high_speed_drag_multiplier": ball.high_speed_drag_multiplier,
+		"medium_speed_drag_multiplier": ball.medium_speed_drag_multiplier,
+		"low_speed_drag_start": ball.low_speed_drag_start,
+		"low_speed_drag_multiplier": ball.low_speed_drag_multiplier,
+		"crawl_speed_drag_start": ball.crawl_speed_drag_start,
+		"crawl_speed_drag_multiplier": ball.crawl_speed_drag_multiplier,
+	})
 
 
 func _get_first_aim_ball_hit_on_segment(
@@ -2355,24 +3936,30 @@ func _get_first_ball_hit_on_segment(
 
 		ball_collision_checks_this_frame += 1
 		var combined_radius: float = _get_prediction_ball_hit_radius(moving_ball_radius, target_ball.radius)
-		var hit_fraction: float = _get_segment_circle_hit_fraction(
+		var sweep_result: Dictionary = BALL_SWEEP_MATH.sweep_circles(
 			segment_start,
 			segment,
 			target_ball.global_position,
+			Vector2.ZERO,
 			combined_radius
 		)
-		if hit_fraction < 0.0:
+		if not bool(sweep_result.get("hit", false)):
 			if track_debug_first_hit_candidates:
 				_update_debug_first_hit_candidate_result(target_ball, "miss_preview_radius", false)
 			continue
 
+		var hit_fraction: float = float(sweep_result.get("hit_fraction", -1.0))
 		var hit_distance: float = hit_fraction * segment_length
 		if track_debug_first_hit_candidates:
 			_update_debug_first_hit_candidate_result(target_ball, "accepted", true)
 		if hit_distance < nearest_hit.distance:
 			nearest_hit.ball = target_ball
 			nearest_hit.distance = hit_distance
-			nearest_hit.position = segment_start + segment * hit_fraction
+			nearest_hit.position = sweep_result.get("moving_center_at_impact", segment_start + segment * hit_fraction)
+			nearest_hit.target_position = sweep_result.get("target_center_at_impact", target_ball.global_position)
+			nearest_hit.collision_normal = sweep_result.get("collision_normal", Vector2.ZERO)
+			nearest_hit.effective_collision_radius = combined_radius
+			nearest_hit.collision_skin = _get_physics_ball_collision_skin()
 
 	return nearest_hit
 
@@ -2389,7 +3976,7 @@ func _append_debug_first_hit_candidate_entry(
 	is_filtered: bool,
 	initial_reason: String
 ) -> void:
-	if not debug_aim_line_enabled:
+	if not debug_aim_line_enabled or not _full_debug_result_evidence_enabled():
 		return
 	if target_ball == null or not is_instance_valid(target_ball):
 		return
@@ -2460,7 +4047,12 @@ func _append_debug_first_hit_candidate_entry(
 
 
 func _update_debug_first_hit_candidate_result(target_ball: Ball, reason: String, accepted: bool) -> void:
-	if not debug_aim_line_enabled or target_ball == null or not is_instance_valid(target_ball):
+	if (
+		not debug_aim_line_enabled
+		or not _full_debug_result_evidence_enabled()
+		or target_ball == null
+		or not is_instance_valid(target_ball)
+	):
 		return
 	var ball_id: int = target_ball.get_instance_id()
 	for entry_index in range(_debug_first_hit_candidate_log.size() - 1, -1, -1):
@@ -2474,12 +4066,31 @@ func _update_debug_first_hit_candidate_result(target_ball: Ball, reason: String,
 
 
 func _get_real_ball_hit_radius(moving_ball_radius: float, target_ball_radius: float) -> float:
-	return moving_ball_radius + target_ball_radius + table.BALL_COLLISION_SKIN
+	return BALL_SWEEP_MATH.get_effective_collision_radius(
+		moving_ball_radius,
+		target_ball_radius,
+		_get_physics_ball_collision_skin()
+	)
+
+
+func _full_debug_result_evidence_enabled() -> bool:
+	return str(cloned_trajectory_configuration.get(
+		"result_detail_mode",
+		AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
+	)) == AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
 
 
 func _get_legacy_graze_ball_hit_radius(moving_ball_radius: float, target_ball_radius: float) -> float:
-	var legacy_preview_skin: float = max(table.BALL_COLLISION_SKIN - AIM_BALL_HIT_GRAZE_MARGIN, 0.0)
-	return moving_ball_radius + target_ball_radius + legacy_preview_skin
+	# Debug A/B only. Authoritative prediction never uses this reduced radius.
+	var legacy_preview_skin: float = maxf(
+		_get_physics_ball_collision_skin() - DEBUG_LEGACY_AIM_BALL_HIT_GRAZE_MARGIN,
+		0.0
+	)
+	return BALL_SWEEP_MATH.get_effective_collision_radius(
+		moving_ball_radius,
+		target_ball_radius,
+		legacy_preview_skin
+	)
 
 
 func _get_prediction_ball_hit_radius(moving_ball_radius: float, target_ball_radius: float) -> float:
@@ -2489,49 +4100,45 @@ func _get_prediction_ball_hit_radius(moving_ball_radius: float, target_ball_radi
 	return _get_real_ball_hit_radius(moving_ball_radius, target_ball_radius)
 
 
+func _get_physics_ball_collision_skin() -> float:
+	if table == null:
+		return 0.0
+	return maxf(float(table.BALL_COLLISION_SKIN), 0.0)
+
+
 func _get_segment_circle_hit_fraction(
 	segment_start: Vector2,
 	segment: Vector2,
 	circle_center: Vector2,
 	circle_radius: float
 ) -> float:
-	var start_to_center: Vector2 = segment_start - circle_center
-	var a: float = segment.length_squared()
-	var b: float = 2.0 * start_to_center.dot(segment)
-	var c: float = start_to_center.length_squared() - circle_radius * circle_radius
-
-	if c <= 0.0:
-		return 0.0
-
-	var discriminant: float = b * b - 4.0 * a * c
-	if discriminant < 0.0 or a <= 0.001:
-		return -1.0
-
-	var sqrt_discriminant: float = sqrt(discriminant)
-	var first_fraction: float = (-b - sqrt_discriminant) / (2.0 * a)
-	if first_fraction >= 0.0 and first_fraction <= 1.0:
-		return first_fraction
-
-	var second_fraction: float = (-b + sqrt_discriminant) / (2.0 * a)
-	if second_fraction >= 0.0 and second_fraction <= 1.0:
-		return second_fraction
-
-	return -1.0
+	var sweep_result: Dictionary = BALL_SWEEP_MATH.sweep_circles(
+		segment_start,
+		segment,
+		circle_center,
+		Vector2.ZERO,
+		circle_radius
+	)
+	return float(sweep_result.get("hit_fraction", -1.0)) if bool(sweep_result.get("hit", false)) else -1.0
 
 
-func _make_ball_prediction_from_position(
+func _make_ball_prediction_from_hit(
 	prediction: AimPrediction,
 	incoming_velocity: Vector2,
-	target_ball: Ball,
-	cue_center_at_impact: Vector2,
+	ball_hit: AimBallHit,
 	rail_hit_count_before_target: int,
 	cue_target_impact_segment_index: int
 ) -> AimPrediction:
-	var target_direction: Vector2 = target_ball.global_position - cue_center_at_impact
-	if target_direction.length() > 0.0:
-		target_direction = target_direction.normalized()
-	else:
+	var target_ball: Ball = ball_hit.ball
+	var cue_center_at_impact: Vector2 = ball_hit.position
+	var target_center_at_impact: Vector2 = ball_hit.target_position
+	var target_direction: Vector2 = ball_hit.collision_normal
+	if target_direction.length_squared() <= 0.001:
+		target_direction = target_center_at_impact - cue_center_at_impact
+	if target_direction.length_squared() <= 0.001:
 		target_direction = incoming_velocity.normalized()
+	else:
+		target_direction = target_direction.normalized()
 
 	var predicted_target_velocity: Vector2 = _get_predicted_target_velocity(incoming_velocity, target_ball, target_direction)
 
@@ -2541,6 +4148,9 @@ func _make_ball_prediction_from_position(
 	prediction.target_direction = target_direction
 	prediction.impact_incoming_direction = incoming_velocity.normalized()
 	prediction.predicted_target_velocity = predicted_target_velocity
+	prediction.target_center_at_impact = target_center_at_impact
+	prediction.effective_collision_radius = ball_hit.effective_collision_radius
+	prediction.collision_skin = ball_hit.collision_skin
 	prediction.rail_hit_count_before_target = rail_hit_count_before_target
 	prediction.cue_target_impact_segment_index = cue_target_impact_segment_index
 	var target_prediction: AimTargetPath = _get_predicted_target_path(target_ball, predicted_target_velocity)
@@ -2551,6 +4161,10 @@ func _make_ball_prediction_from_position(
 	prediction.target_path_length = target_prediction.path_length
 	prediction.target_first_hit_ball = target_prediction.first_hit_ball
 	prediction.target_first_hit_position = target_prediction.first_hit_position
+	prediction.target_first_hit_target_center = target_prediction.first_hit_target_center
+	prediction.target_first_hit_normal = target_prediction.first_hit_normal
+	prediction.target_first_hit_effective_collision_radius = target_prediction.first_hit_effective_collision_radius
+	prediction.target_first_hit_collision_skin = target_prediction.first_hit_collision_skin
 	prediction.target_incoming_velocity_at_stop = target_prediction.incoming_velocity_at_stop
 	prediction.path_points.append(cue_center_at_impact)
 	return prediction
@@ -2560,15 +4174,22 @@ func _get_predicted_target_velocity(incoming_velocity: Vector2, target_ball: Bal
 	if target_direction.length_squared() <= 0.001:
 		return Vector2.ZERO
 
-	var relative_velocity: Vector2 = incoming_velocity - target_ball.velocity
-	var speed_along_normal: float = relative_velocity.dot(target_direction)
+	var speed_along_normal: float = BALL_COLLISION_MATH.get_impact_speed(
+		incoming_velocity,
+		target_ball.velocity,
+		target_direction
+	)
 	if speed_along_normal <= 0.0:
 		return Vector2.ZERO
 
-	var impulse_strength: float = (1.0 + table.BALL_COLLISION_RESTITUTION) * speed_along_normal * 0.5
-	impulse_strength *= table.BALL_VELOCITY_TRANSFER
-	impulse_strength *= _get_cue_ball_wake_preview_impact_multiplier(target_ball)
-	return target_ball.velocity + target_direction * impulse_strength
+	var impulse: Vector2 = BALL_COLLISION_MATH.get_normal_impulse(
+		incoming_velocity,
+		target_ball.velocity,
+		target_direction,
+		table.BALL_COLLISION_RESTITUTION,
+		table.BALL_VELOCITY_TRANSFER
+	)
+	return target_ball.velocity + impulse * _get_cue_ball_wake_preview_impact_multiplier(target_ball)
 
 
 func _get_cue_ball_wake_preview_impact_multiplier(target_ball: Ball) -> float:
@@ -2655,6 +4276,10 @@ func _get_predicted_target_path(
 			if stop_type == "ball":
 				target_prediction.first_hit_ball = ball_hit.ball
 				target_prediction.first_hit_position = ball_hit.position
+				target_prediction.first_hit_target_center = ball_hit.target_position
+				target_prediction.first_hit_normal = ball_hit.collision_normal
+				target_prediction.first_hit_effective_collision_radius = ball_hit.effective_collision_radius
+				target_prediction.first_hit_collision_skin = ball_hit.collision_skin
 				target_prediction.incoming_velocity_at_stop = simulated_velocity
 			target_prediction.path_length = travel_distance + previous_position.distance_to(stop_position)
 			return target_prediction
@@ -2748,10 +4373,28 @@ func _bank_debug_visuals_enabled() -> bool:
 
 
 #region Color / Timing / Debug Print Helpers
+func _queue_aim_redraw() -> void:
+	if benchmark_session != null:
+		benchmark_session.note_redraw_request()
+	queue_redraw()
+
+
 func _store_draw_stats(draw_start_usec: int) -> void:
-	draw_ms_last_draw = _elapsed_ms_since(draw_start_usec)
+	var draw_cpu_us: int = maxi(Time.get_ticks_usec() - draw_start_usec, 0)
+	draw_ms_last_draw = float(draw_cpu_us) / 1000.0
 	draw_segments_last_draw = _draw_segments_in_progress
 	draw_calls_last_draw = _draw_calls_in_progress
+	if benchmark_session != null and benchmark_session.is_recording():
+		benchmark_session.record_draw_sample({
+			"cpu_us": draw_cpu_us,
+			"predicted_balls_drawn": _draw_predicted_balls_in_progress,
+			"visible_paths": _draw_visible_paths_in_progress,
+			"visible_path_segments": _draw_segments_in_progress,
+			"ghost_balls_drawn": _draw_ghost_balls_in_progress,
+			"labels_drawn": _draw_labels_in_progress,
+			"event_markers_drawn": _draw_event_markers_in_progress,
+			"draw_calls": _draw_calls_in_progress,
+		})
 
 
 func _get_aim_power_color(power_ratio: float) -> Color:

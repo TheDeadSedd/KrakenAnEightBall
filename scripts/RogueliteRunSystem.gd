@@ -277,6 +277,43 @@ func get_snapshot() -> Dictionary:
 	}
 
 
+func get_rewind_state() -> Dictionary:
+	return {
+		"current_round_index": current_round_index,
+		"round_number": round_number,
+		"round_target": round_target,
+		"round_score": round_score,
+		"shots_left": shots_left,
+		"hull": hull,
+		"object_ball_count": object_ball_count,
+		"round_active": round_active,
+		"round_won_state": round_won_state,
+		"run_failed_state": run_failed_state,
+		"run_completed_state": run_completed_state,
+		"failure_reason": failure_reason,
+		"total_quota_score_earned": total_quota_score_earned,
+		"highest_single_round_score": highest_single_round_score,
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	current_round_index = maxi(int(state.get("current_round_index", 0)), 0)
+	round_number = maxi(int(state.get("round_number", 1)), 1)
+	round_target = maxi(int(state.get("round_target", 0)), 0)
+	round_score = maxi(int(state.get("round_score", 0)), 0)
+	shots_left = maxi(int(state.get("shots_left", 0)), 0)
+	hull = maxi(int(state.get("hull", STARTING_HULL)), 0)
+	object_ball_count = maxi(int(state.get("object_ball_count", 0)), 0)
+	round_active = bool(state.get("round_active", true))
+	round_won_state = bool(state.get("round_won_state", false))
+	run_failed_state = bool(state.get("run_failed_state", false))
+	run_completed_state = bool(state.get("run_completed_state", false))
+	failure_reason = str(state.get("failure_reason", FAILURE_REASON_UNKNOWN))
+	total_quota_score_earned = maxi(int(state.get("total_quota_score_earned", 0)), 0)
+	highest_single_round_score = maxi(int(state.get("highest_single_round_score", 0)), 0)
+	_emit_state()
+
+
 func get_terminal_summary_snapshot(result_override: String = "") -> Dictionary:
 	var result: String = result_override
 	if result.is_empty():

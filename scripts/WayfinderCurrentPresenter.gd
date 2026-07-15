@@ -25,6 +25,13 @@ var active_pulses: Array[CurrentPulse] = []
 var active_flashes: Array[TransferFlash] = []
 
 
+func clear_effects() -> void:
+	active_pulses.clear()
+	active_flashes.clear()
+	set_process(false)
+	queue_redraw()
+
+
 func show_initial_pulse(world_position: Vector2, current_radius: float) -> void:
 	var pulse: CurrentPulse = CurrentPulse.new()
 	pulse.center = to_local(world_position) if is_inside_tree() else world_position

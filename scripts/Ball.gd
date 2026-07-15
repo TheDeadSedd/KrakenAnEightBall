@@ -1,7 +1,10 @@
 extends Node2D
 class_name Ball
 
+const BALL_MOTION_MATH := preload("res://scripts/BallMotionMath.gd")
+
 signal sunk(ball: Ball)
+signal prediction_state_changed(ball: Ball, reason: String)
 
 class TrailPoint:
 	var position := Vector2.ZERO
@@ -411,6 +414,7 @@ func setup(
 	_update_number_color()
 	_update_label_layout()
 	queue_redraw()
+	prediction_state_changed.emit(self, "identity_configured")
 
 
 func become_anchor_curse_seed() -> void:
@@ -436,6 +440,7 @@ func become_anchor_curse_seed() -> void:
 	_update_number_color()
 	_update_label_layout()
 	queue_redraw()
+	prediction_state_changed.emit(self, "identity_transformed")
 
 
 func clear_anchor_curse_seed() -> void:
@@ -451,11 +456,58 @@ func clear_anchor_curse_seed() -> void:
 	_update_number_color()
 	_update_label_layout()
 	queue_redraw()
+	prediction_state_changed.emit(self, "identity_transformed")
+
+
+func normalize_anomaly_identity_for_debug_aim() -> bool:
+	var had_anomaly_identity: bool = (
+		is_wayfinder
+		or wayfinder_active
+		or is_powder_keg
+		or is_anchor_ball
+		or is_anchor_curse_seed
+		or is_cannon_ball
+		or is_treasure_ball
+		or is_embezzler_ball
+		or _wayfinder_current_visual_active
+	)
+	if not had_anomaly_identity:
+		return false
+
+	# Debug Aim Mode intentionally destroys anomaly identity while preserving the
+	# ordinary ball's authoritative position, velocity, number, and color.
+	is_wayfinder = false
+	wayfinder_active = false
+	is_powder_keg = false
+	is_anchor_ball = false
+	is_anchor_curse_seed = false
+	is_cannon_ball = false
+	is_treasure_ball = false
+	is_embezzler_ball = false
+	_clear_anchor_influence_visual()
+	set_anchor_field_visual_enabled(false)
+	set_cannon_presence_visual(0.0, Vector2.RIGHT)
+	_cannon_presence_visual_strength = 0.0
+	_cannon_presence_flash_strength = 0.0
+	_cannon_presence_flash_remaining = 0.0
+	_clear_treasure_leg_visual()
+	_clear_embezzler_willingness_visual()
+	set_wayfinder_current_visual_active(false)
+	_update_label()
+	_update_number_color()
+	_update_label_layout()
+	queue_redraw()
+	prediction_state_changed.emit(self, "identity_transformed")
+	return true
 
 
 func apply_friction(delta: float) -> void:
 	if not gameplay_enabled:
 		return
+
+	# Landing damping is duration-based. Advance it even when the settle impulse
+	# has already stopped, otherwise prediction can remain transient forever.
+	var landing_damping_multiplier: float = _get_spawn_landing_damping_multiplier(delta)
 
 	if is_anchor_curse_seed:
 		velocity = Vector2.ZERO
@@ -467,7 +519,7 @@ func apply_friction(delta: float) -> void:
 
 	# Layered drag keeps fast shots lively while helping slow balls settle.
 	var effective_friction: float = _get_effective_friction(speed)
-	effective_friction *= _get_spawn_landing_damping_multiplier(delta)
+	effective_friction *= landing_damping_multiplier
 	velocity = velocity.move_toward(Vector2.ZERO, effective_friction * delta)
 	if velocity.length() < stop_threshold:
 		velocity = Vector2.ZERO
@@ -475,33 +527,70 @@ func apply_friction(delta: float) -> void:
 			deactivate_wayfinder("stopped")
 
 
+func get_prediction_motion_snapshot() -> Dictionary:
+	# Read-only values required to reproduce ordinary rolling drag in a clone.
+	return {
+		"rolling_friction": rolling_friction,
+		"stop_threshold": stop_threshold,
+		"medium_speed_drag_start": medium_speed_drag_start,
+		"high_speed_drag_multiplier": high_speed_drag_multiplier,
+		"medium_speed_drag_multiplier": medium_speed_drag_multiplier,
+		"low_speed_drag_start": low_speed_drag_start,
+		"low_speed_drag_multiplier": low_speed_drag_multiplier,
+		"crawl_speed_drag_start": crawl_speed_drag_start,
+		"crawl_speed_drag_multiplier": crawl_speed_drag_multiplier,
+	}
+
+
+func get_prediction_transient_state() -> Dictionary:
+	return {
+		"spawn_drop_active": _spawn_drop_active,
+		"spawn_landing_damping_active": _spawn_landing_damping_remaining > 0.0,
+	}
+
+
 func _get_effective_friction(speed: float) -> float:
-	return rolling_friction * _get_speed_drag_multiplier(speed)
+	return BALL_MOTION_MATH.get_effective_friction(
+		speed,
+		rolling_friction,
+		stop_threshold,
+		medium_speed_drag_start,
+		high_speed_drag_multiplier,
+		medium_speed_drag_multiplier,
+		low_speed_drag_start,
+		low_speed_drag_multiplier,
+		crawl_speed_drag_start,
+		crawl_speed_drag_multiplier
+	)
 
 
 func _get_speed_drag_multiplier(speed: float) -> float:
-	# Speed bands keep breaks lively while helping slow balls settle cleanly.
-	if speed >= medium_speed_drag_start:
-		return high_speed_drag_multiplier
-
-	if speed >= low_speed_drag_start:
-		var ratio: float = _inverse_lerp(medium_speed_drag_start, low_speed_drag_start, speed)
-		return lerp(1.0, medium_speed_drag_multiplier, ratio)
-
-	if speed >= crawl_speed_drag_start:
-		var ratio: float = _inverse_lerp(low_speed_drag_start, crawl_speed_drag_start, speed)
-		return lerp(medium_speed_drag_multiplier, low_speed_drag_multiplier, ratio)
-
-	var ratio: float = _inverse_lerp(crawl_speed_drag_start, stop_threshold, speed)
-	return lerp(low_speed_drag_multiplier, crawl_speed_drag_multiplier, ratio)
+	return BALL_MOTION_MATH.get_speed_drag_multiplier(
+		speed,
+		stop_threshold,
+		medium_speed_drag_start,
+		high_speed_drag_multiplier,
+		medium_speed_drag_multiplier,
+		low_speed_drag_start,
+		low_speed_drag_multiplier,
+		crawl_speed_drag_start,
+		crawl_speed_drag_multiplier
+	)
 
 
 func _get_spawn_landing_damping_multiplier(delta: float) -> float:
 	if _spawn_landing_damping_remaining <= 0.0:
 		return 1.0
 
+	if spawn_landing_damping_duration <= 0.0:
+		_spawn_landing_damping_remaining = 0.0
+		prediction_state_changed.emit(self, "spawn_settled")
+		return 1.0
+
 	var ratio: float = _spawn_landing_damping_remaining / spawn_landing_damping_duration
-	_spawn_landing_damping_remaining = max(_spawn_landing_damping_remaining - delta, 0.0)
+	_spawn_landing_damping_remaining = maxf(_spawn_landing_damping_remaining - delta, 0.0)
+	if _spawn_landing_damping_remaining <= 0.0:
+		prediction_state_changed.emit(self, "spawn_settled")
 	return lerp(1.0, spawn_landing_damping_multiplier, ratio)
 
 
@@ -556,6 +645,7 @@ func sink() -> void:
 	_clear_anchor_influence_visual()
 	_clear_treasure_leg_visual()
 	_clear_embezzler_willingness_visual()
+	prediction_state_changed.emit(self, "became_inactive")
 	sunk.emit(self)
 
 
@@ -578,6 +668,7 @@ func respawn_at(new_position: Vector2) -> void:
 	_clear_treasure_leg_visual()
 	_clear_embezzler_willingness_visual()
 	_reset_trail()
+	prediction_state_changed.emit(self, "authoritative_reset")
 
 
 func begin_spawn_drop(final_position: Vector2) -> void:
@@ -608,6 +699,7 @@ func _begin_spawn_drop(final_position: Vector2, settle_velocity: Vector2) -> voi
 	_clear_anchor_influence_visual()
 	_clear_treasure_leg_visual()
 	_clear_embezzler_willingness_visual()
+	prediction_state_changed.emit(self, "spawn_started")
 
 
 func _update_spawn_drop(delta: float) -> void:
@@ -697,6 +789,7 @@ func _finish_spawn_drop() -> void:
 	_spawn_landing_damping_remaining = spawn_landing_damping_duration
 	_update_label_layout()
 	_reset_trail()
+	prediction_state_changed.emit(self, "spawn_completed")
 
 
 func _smooth_ratio(ratio: float) -> float:
@@ -1019,7 +1112,8 @@ func activate_wayfinder(debug_context: String = "") -> void:
 	if not is_wayfinder:
 		return
 
-	if not wayfinder_active:
+	var state_changed: bool = not wayfinder_active
+	if state_changed:
 		var debug_message := "activated"
 		if not debug_context.is_empty():
 			debug_message += " | %s" % debug_context
@@ -1027,18 +1121,23 @@ func activate_wayfinder(debug_context: String = "") -> void:
 
 	wayfinder_active = true
 	queue_redraw()
+	if state_changed:
+		prediction_state_changed.emit(self, "wayfinder_state_changed")
 
 
 func deactivate_wayfinder(reason: String = "") -> void:
 	if not is_wayfinder:
 		return
 
-	if wayfinder_active:
+	var state_changed: bool = wayfinder_active
+	if state_changed:
 		var debug_reason := reason if not reason.is_empty() else "manual"
 		_print_wayfinder_debug("deactivated (%s)" % debug_reason)
 
 	wayfinder_active = false
 	queue_redraw()
+	if state_changed:
+		prediction_state_changed.emit(self, "wayfinder_state_changed")
 
 
 func _reset_wayfinder_state() -> void:

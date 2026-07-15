@@ -174,19 +174,56 @@ var curse_spread_blocked_skipped := 0
 var max_active_curse_seeds := 0
 var curse_collapse_pulses: Array[Dictionary] = []
 var curse_spread_pulses: Array[Dictionary] = []
+var debug_aim_mode_suppressed := false
 
 
 func setup(table_ref) -> void:
 	table = table_ref
 
 
+func set_debug_aim_mode_suppressed(suppressed: bool) -> void:
+	debug_aim_mode_suppressed = suppressed
+	if not suppressed:
+		return
+	for state_value in curse_seed_states.values():
+		var state: CurseSeedState = state_value as CurseSeedState
+		if state == null:
+			continue
+		state.links.clear()
+		state.warning_active = false
+		state.warning_timer_remaining = 0.0
+		state.warning_paused = true
+		state.spread_ready = false
+	curse_seed_states.clear()
+	post_collision_pull_cooldowns.clear()
+	stationary_wake_cooldowns.clear()
+	stationary_wake_positions.clear()
+	curse_collapse_pulses.clear()
+	curse_spread_pulses.clear()
+	_clear_retired_anchor_pull_debug_state()
+	if table != null:
+		for child in table.balls.get_children():
+			var ball: Ball = child as Ball
+			if ball != null:
+				ball.clear_anchor_influence_marker()
+		table.queue_redraw()
+
+
+func get_debug_aim_active_tracker_count() -> int:
+	return curse_seed_states.size()
+
+
 func try_create_curse_seed_from_eight_ball_penalty(sink_position: Vector2) -> Dictionary:
+	if debug_aim_mode_suppressed:
+		return {"created": false, "reason": "debug_aim_mode"}
 	curse_seed_penalty_attempts += 1
 	var selection: Dictionary = _select_curse_seed_candidate(sink_position)
 	return _create_curse_seed_from_selection(selection, true)
 
 
 func try_create_debug_curse_seed() -> Dictionary:
+	if debug_aim_mode_suppressed:
+		return {"created": false, "reason": "debug_aim_mode"}
 	var selection_origin: Vector2 = _get_debug_curse_seed_selection_origin()
 	var selection: Dictionary = _select_curse_seed_candidate(selection_origin)
 	return _create_curse_seed_from_selection(selection, false)
@@ -252,6 +289,8 @@ func is_curse_seed_ball(ball: Ball) -> bool:
 
 
 func try_separate_curse_seed_overlap(ball_a: Ball, ball_b: Ball, normal: Vector2, overlap: float) -> bool:
+	if debug_aim_mode_suppressed:
+		return false
 	var a_is_seed: bool = is_curse_seed_ball(ball_a)
 	var b_is_seed: bool = is_curse_seed_ball(ball_b)
 	if not a_is_seed and not b_is_seed:
@@ -276,6 +315,8 @@ func try_apply_curse_seed_collision_response(
 	_normal: Vector2,
 	impulse: Vector2
 ) -> bool:
+	if debug_aim_mode_suppressed:
+		return false
 	var a_is_seed: bool = is_curse_seed_ball(ball_a)
 	var b_is_seed: bool = is_curse_seed_ball(ball_b)
 	if not a_is_seed and not b_is_seed:
@@ -300,10 +341,14 @@ func try_apply_curse_seed_collision_response(
 
 
 func try_collapse_curse_seed_from_powder(seed_ball: Ball) -> bool:
+	if debug_aim_mode_suppressed:
+		return false
 	return _collapse_curse_seed_ball(seed_ball, "powder")
 
 
 func advance_curse_chains_on_cue_control_regained() -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if table == null:
 		return
 
@@ -327,6 +372,8 @@ func advance_curse_chains_on_cue_control_regained() -> void:
 
 
 func update_curse_chain_slides(delta: float) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if table == null:
 		return
 
@@ -348,6 +395,8 @@ func update_curse_chain_slides(delta: float) -> void:
 
 
 func enforce_curse_chain_constraints() -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if table == null:
 		return
 
@@ -369,6 +418,8 @@ func enforce_curse_chain_constraints() -> void:
 
 
 func update_curse_warning_timers(delta: float, can_player_act: bool) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	if table == null:
 		return
 
@@ -496,6 +547,8 @@ func _clear_retired_anchor_pull_debug_state() -> void:
 
 
 func finish_frame() -> void:
+	if debug_aim_mode_suppressed:
+		return
 	_validate_curse_seed_chain_states()
 	_prune_curse_collapse_pulses()
 	_prune_curse_spread_pulses()
@@ -514,11 +567,15 @@ func finish_frame() -> void:
 
 
 func handle_collision(ball_a: Ball, ball_b: Ball) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	_try_set_post_collision_cooldown(ball_a, ball_b)
 	_try_set_post_collision_cooldown(ball_b, ball_a)
 
 
 func handle_ball_pocketed(pocketed_ball: Ball) -> void:
+	if debug_aim_mode_suppressed:
+		return
 	var owning_state: CurseSeedState = _get_curse_seed_state_for_chained_ball(pocketed_ball)
 	if owning_state == null:
 		return

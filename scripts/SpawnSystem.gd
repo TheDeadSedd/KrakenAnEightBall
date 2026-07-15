@@ -106,11 +106,26 @@ var pending_landing_callbacks: Array[SpawnLandingCallback] = []
 var spawn_drop_cooldown := 0.0
 var next_spawn_ball_index := 0
 var selected_cue_start_index := CUE_START_DEFAULT_INDEX
+var debug_aim_mode_enabled := false
+var debug_aim_anomaly_spawn_requests_normalized := 0
+var debug_aim_last_normalized_anomaly_type := "none"
 
 
 func setup(table_ref) -> void:
 	table = table_ref
 	selected_cue_start_index = CUE_START_DEFAULT_INDEX
+
+
+func set_debug_aim_mode_enabled(enabled: bool) -> void:
+	debug_aim_mode_enabled = enabled
+
+
+func get_debug_aim_normalization_snapshot() -> Dictionary:
+	return {
+		"debug_aim_mode_enabled": debug_aim_mode_enabled,
+		"anomaly_spawn_requests_normalized": debug_aim_anomaly_spawn_requests_normalized,
+		"last_normalized_anomaly_type": debug_aim_last_normalized_anomaly_type,
+	}
 
 
 func spawn_starting_balls() -> StartingBallData:
@@ -394,6 +409,10 @@ func queue_debug_powder_keg_spawn() -> void:
 
 
 func queue_debug_anchor_ball_spawn() -> void:
+	if debug_aim_mode_enabled:
+		_record_debug_aim_spawn_normalization("anchor")
+		queue_debug_normal_ball_spawn()
+		return
 	var result: Dictionary = table.anchor_ball_system.try_create_debug_curse_seed()
 	var message := "ANCHOR CURSE SEED ROOTED"
 	if not bool(result.get("created", false)):
@@ -521,6 +540,52 @@ func spawn_manual_embezzler_ball(position: Vector2) -> Ball:
 
 func has_pending_spawns() -> bool:
 	return not pending_spawn_requests.is_empty()
+
+
+func has_pending_landing_callbacks() -> bool:
+	return not pending_landing_callbacks.is_empty()
+
+
+func get_rewind_state() -> Dictionary:
+	return {
+		"pocketed_object_ball_spawn_progress": pocketed_object_ball_spawn_progress,
+		"spawn_drop_cooldown": spawn_drop_cooldown,
+		"next_spawn_ball_index": next_spawn_ball_index,
+		"selected_cue_start_index": selected_cue_start_index,
+	}
+
+
+func restore_rewind_state(state: Dictionary) -> void:
+	pending_spawn_requests.clear()
+	pending_landing_callbacks.clear()
+	pocketed_object_ball_spawn_progress = maxi(int(state.get("pocketed_object_ball_spawn_progress", 0)), 0)
+	spawn_drop_cooldown = maxf(float(state.get("spawn_drop_cooldown", 0.0)), 0.0)
+	next_spawn_ball_index = maxi(int(state.get("next_spawn_ball_index", 0)), 0)
+	selected_cue_start_index = int(state.get("selected_cue_start_index", CUE_START_DEFAULT_INDEX))
+
+
+func restore_ball_from_rewind_state(state: Dictionary) -> Ball:
+	var role: String = str(state.get("role", "object"))
+	var ball: Ball = CUE_BALL_SCENE.instantiate() as Ball if role == "cue" else BALL_SCENE.instantiate() as Ball
+	if ball == null:
+		return null
+	table.balls.add_child(ball)
+
+	var ball_type: int = int(state.get("ball_type", Ball.BallType.OBJECT))
+	var ball_number: int = int(state.get("ball_number", 1))
+	var ball_color: Color = state.get("ball_color", _ball_color(ball_number))
+	if role != "cue":
+		ball.setup(ball_type, ball_number, ball_color)
+	ball.radius = float(state.get("radius", ball.radius))
+	ball.show_ball_numbers = bool(state.get("show_ball_numbers", ball.show_ball_numbers))
+	ball.global_position = state.get("global_position", Vector2.ZERO)
+	ball.velocity = state.get("velocity", Vector2.ZERO)
+	ball.visible = true
+	ball.gameplay_enabled = true
+	ball.scale = Vector2.ONE
+	ball.modulate = Color.WHITE
+	ball.queue_redraw()
+	return ball
 
 
 func _has_pending_embezzler_spawn() -> bool:
@@ -669,28 +734,49 @@ func _get_roguelite_round_ball_position(index: int, cue_radius: float) -> Vector
 	return RACK_ORIGIN + Vector2(column * spacing, side * spacing)
 
 
-func _create_ball(ball_type: int, number: int, color: Color, position: Vector2) -> Ball:
+func _create_ball(
+	ball_type: int,
+	number: int,
+	color: Color,
+	position: Vector2,
+	anomaly_kind: String = ""
+) -> Ball:
+	var effective_anomaly_kind: String = anomaly_kind
+	if debug_aim_mode_enabled and not effective_anomaly_kind.is_empty():
+		_record_debug_aim_spawn_normalization(effective_anomaly_kind)
+		effective_anomaly_kind = ""
+	var is_wayfinder: bool = effective_anomaly_kind == "wayfinder"
+	var is_powder_keg: bool = effective_anomaly_kind == "powder_keg"
+	var is_cannon: bool = effective_anomaly_kind == "cannon"
+	var is_treasure: bool = effective_anomaly_kind == "treasure"
+	var is_embezzler: bool = effective_anomaly_kind == "embezzler"
 	var ball := BALL_SCENE.instantiate() as Ball
 	table.balls.add_child(ball)
 	ball.global_position = position
-	ball.setup(ball_type, number, color)
+	ball.setup(
+		ball_type,
+		number,
+		color,
+		is_wayfinder,
+		is_powder_keg,
+		false,
+		is_cannon,
+		is_treasure,
+		is_embezzler
+	)
+	if is_treasure:
+		table.treasure_ball_system.register_treasure_ball(ball)
+	elif is_embezzler:
+		table.embezzler_system.register_embezzler_ball(ball)
 	return ball
 
 
 func _create_wayfinder_ball(number: int, color: Color, position: Vector2) -> Ball:
-	var ball := BALL_SCENE.instantiate() as Ball
-	table.balls.add_child(ball)
-	ball.global_position = position
-	ball.setup(Ball.BallType.OBJECT, number, color, true)
-	return ball
+	return _create_ball(Ball.BallType.OBJECT, number, color, position, "wayfinder")
 
 
 func _create_powder_keg_ball(number: int, color: Color, position: Vector2) -> Ball:
-	var ball := BALL_SCENE.instantiate() as Ball
-	table.balls.add_child(ball)
-	ball.global_position = position
-	ball.setup(Ball.BallType.OBJECT, number, color, false, true)
-	return ball
+	return _create_ball(Ball.BallType.OBJECT, number, color, position, "powder_keg")
 
 
 func _create_anchor_ball(number: int, color: Color, position: Vector2) -> Ball:
@@ -700,29 +786,15 @@ func _create_anchor_ball(number: int, color: Color, position: Vector2) -> Ball:
 
 
 func _create_cannon_ball(number: int, color: Color, position: Vector2) -> Ball:
-	var ball := BALL_SCENE.instantiate() as Ball
-	table.balls.add_child(ball)
-	ball.global_position = position
-	ball.setup(Ball.BallType.OBJECT, number, color, false, false, false, true)
-	return ball
+	return _create_ball(Ball.BallType.OBJECT, number, color, position, "cannon")
 
 
 func _create_treasure_ball(number: int, color: Color, position: Vector2) -> Ball:
-	var ball := BALL_SCENE.instantiate() as Ball
-	table.balls.add_child(ball)
-	ball.global_position = position
-	ball.setup(Ball.BallType.OBJECT, number, color, false, false, false, false, true)
-	table.treasure_ball_system.register_treasure_ball(ball)
-	return ball
+	return _create_ball(Ball.BallType.OBJECT, number, color, position, "treasure")
 
 
 func _create_embezzler_ball(number: int, color: Color, position: Vector2) -> Ball:
-	var ball := BALL_SCENE.instantiate() as Ball
-	table.balls.add_child(ball)
-	ball.global_position = position
-	ball.setup(Ball.BallType.OBJECT, number, color, false, false, false, false, false, true)
-	table.embezzler_system.register_embezzler_ball(ball)
-	return ball
+	return _create_ball(Ball.BallType.OBJECT, number, color, position, "embezzler")
 
 
 func _ball_type_from_number(number: int) -> int:
@@ -757,10 +829,10 @@ func _make_reward_spawn_request() -> SpawnBallRequest:
 	request.ball_number = _get_next_spawn_ball_number()
 	if _roll_anchor_priority_spawn():
 		request.is_anchor_ball = true
-		return request
+		return _normalize_spawn_request_for_debug_aim(request)
 
 	_apply_regular_anomaly_pool_roll(request)
-	return request
+	return _normalize_spawn_request_for_debug_aim(request)
 
 
 func _apply_regular_anomaly_pool_roll(request: SpawnBallRequest) -> void:
@@ -816,10 +888,11 @@ func _make_specific_spawn_request(
 		request.is_anchor_ball = false
 	if request.is_embezzler_ball and (table == null or table.embezzler_system == null or not table.embezzler_system.can_spawn_embezzler()):
 		request.is_embezzler_ball = false
-	return request
+	return _normalize_spawn_request_for_debug_aim(request)
 
 
 func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
+	request = _normalize_spawn_request_for_debug_aim(request)
 	var spawn_position: Vector2 = _get_spawn_position_for_request(request, table.cue_ball.radius)
 	var ball: Ball
 	if request.is_wayfinder:
@@ -843,6 +916,45 @@ func _spawn_next_reward_ball(request: SpawnBallRequest) -> void:
 	_schedule_landing_callback(request, ball)
 
 
+func _normalize_spawn_request_for_debug_aim(request: SpawnBallRequest) -> SpawnBallRequest:
+	if request == null or not debug_aim_mode_enabled:
+		return request
+	var anomaly_kind: String = _get_spawn_request_anomaly_kind(request)
+	if anomaly_kind.is_empty():
+		return request
+	request.is_wayfinder = false
+	request.is_powder_keg = false
+	request.is_anchor_ball = false
+	request.is_cannon_ball = false
+	request.is_treasure_ball = false
+	request.is_embezzler_ball = false
+	_record_debug_aim_spawn_normalization(anomaly_kind)
+	return request
+
+
+func _get_spawn_request_anomaly_kind(request: SpawnBallRequest) -> String:
+	if request.is_wayfinder:
+		return "wayfinder"
+	if request.is_powder_keg:
+		return "powder_keg"
+	if request.is_anchor_ball:
+		return "anchor"
+	if request.is_cannon_ball:
+		return "cannon"
+	if request.is_treasure_ball:
+		return "treasure"
+	if request.is_embezzler_ball:
+		return "embezzler"
+	return ""
+
+
+func _record_debug_aim_spawn_normalization(anomaly_kind: String) -> void:
+	debug_aim_anomaly_spawn_requests_normalized += 1
+	debug_aim_last_normalized_anomaly_type = anomaly_kind
+	if table != null and table.has_method("notify_debug_aim_spawn_normalized"):
+		table.call_deferred("notify_debug_aim_spawn_normalized")
+
+
 func _schedule_landing_callback(request: SpawnBallRequest, ball: Ball) -> void:
 	if not request.landing_callback.is_valid():
 		return
@@ -856,6 +968,7 @@ func _schedule_landing_callback(request: SpawnBallRequest, ball: Ball) -> void:
 
 
 func _process_landing_callbacks(delta: float) -> void:
+	var had_pending_callbacks: bool = not pending_landing_callbacks.is_empty()
 	for callback_index in range(pending_landing_callbacks.size() - 1, -1, -1):
 		var landing_callback: SpawnLandingCallback = pending_landing_callbacks[callback_index] as SpawnLandingCallback
 		if landing_callback == null:
@@ -872,6 +985,11 @@ func _process_landing_callbacks(delta: float) -> void:
 		if landing_callback.ball == null or not is_instance_valid(landing_callback.ball):
 			continue
 		landing_callback.callback.call(landing_callback.ball, landing_callback.callback_data)
+	if had_pending_callbacks and pending_landing_callbacks.is_empty() and table != null:
+		table.notify_aim_prediction_state_changed(
+			"spawn_landing_callbacks_complete",
+			"spawn_complete"
+		)
 
 
 func _can_spawn_anchor_ball() -> bool:
