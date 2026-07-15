@@ -138,6 +138,10 @@ func _connect_pause_menu_signals() -> void:
 		pause_menu.debug_obstacle_collision_toggled.connect(_on_pause_obstacle_collision_toggled)
 	if not pause_menu.debug_obstacle_collision_draw_toggled.is_connected(_on_pause_obstacle_collision_draw_toggled):
 		pause_menu.debug_obstacle_collision_draw_toggled.connect(_on_pause_obstacle_collision_draw_toggled)
+	if not pause_menu.debug_pocket_capture_presentation_toggled.is_connected(_on_pause_pocket_capture_presentation_toggled):
+		pause_menu.debug_pocket_capture_presentation_toggled.connect(_on_pause_pocket_capture_presentation_toggled)
+	if not pause_menu.debug_clear_pocket_collections_requested.is_connected(_on_pause_clear_pocket_collections_requested):
+		pause_menu.debug_clear_pocket_collections_requested.connect(_on_pause_clear_pocket_collections_requested)
 	if not pause_menu.debug_oath_activate_requested.is_connected(_on_pause_debug_oath_activate_requested):
 		pause_menu.debug_oath_activate_requested.connect(_on_pause_debug_oath_activate_requested)
 	if not pause_menu.debug_oath_clear_requested.is_connected(_on_pause_debug_oath_clear_requested):
@@ -900,6 +904,17 @@ func _on_pause_obstacle_collision_draw_toggled(enabled: bool) -> void:
 	table.table_obstacle_system.set_debug_collision_draw_enabled(enabled)
 	var status_text := "Debris collision shape shown." if enabled else "Debris collision shape hidden."
 	hud_feed.add_message(status_text, "event")
+
+
+func _on_pause_pocket_capture_presentation_toggled(enabled: bool) -> void:
+	table.set_pocket_capture_presentation_enabled(enabled)
+	var status_text := "Pocket capture presentation enabled." if enabled else "Pocket capture presentation disabled."
+	hud_feed.add_message(status_text, "event")
+
+
+func _on_pause_clear_pocket_collections_requested() -> void:
+	table.clear_pocket_capture_collections("debug_clear")
+	hud_feed.add_message("Pocket collections cleared (presentation only).", "event")
 
 
 func _on_pause_debug_oath_activate_requested(oath_id: String) -> void:

@@ -232,6 +232,12 @@ Owns scene-authored pocket loading from `Table/Pockets`, pocket centers from `Co
 
 Does not own scoring, rewards, ball removal consequences, or procedural/fallback pocket geometry.
 
+### `scripts/PocketCapturePresenter.gd`
+
+Owns presentation-only pocket capture proxies, the fall/drop/under-table-roll tween sequence, six bounded pocket-local sunk-ball collections, deterministic visual-only pile variation, visible proxy caps, subtle Pocket Streak pile reactions, mode-specific clearing, rewind snapshots, and pocket-capture presentation diagnostics.
+
+`PocketCapturedBallVisual.gd` is its draw-only supporting proxy. Captured-ball proxies never enter the authoritative ball list, participate in collision/pocket/spawn checks, trigger anomaly behavior, affect scoring, or count as active balls. Passage collections persist for the run; roguelite collections clear between rounds. Settled proxies do not process continuously.
+
 ### `scripts/BoundarySystem.gd`
 
 Owns scene-authored boundary loading from `Table/Boundaries`, cached rail/jaw `CollisionShape2D` rectangles, boundary collision helpers, side-effect-free prediction helpers, reference rects, and boundary performance counters.

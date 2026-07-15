@@ -167,6 +167,7 @@ const CUE_BALL_CANNON_WAKE_DEFAULT_RETENTION := 0.22
 @onready var embezzler_system: EmbezzlerSystem = $EmbezzlerSystem
 @onready var table_impact_shake_system: TableImpactShakeSystem = $TableImpactShakeSystem
 @onready var pocket_streak_presenter: PocketStreakPresenter = $PocketStreakPresenter
+@onready var pocket_capture_presenter: PocketCapturePresenter = $PocketCapturePresenter
 @onready var cue_controller: CueController = $CuePivot
 #endregion
 
@@ -302,6 +303,7 @@ func _ready() -> void:
 	run_stats_system.setup(self)
 	_setup_roguelite_mode_if_needed()
 	_cache_table_geometry()
+	pocket_capture_presenter.setup(self)
 	cue_controller.setup()
 	if Engine.is_editor_hint():
 		cue_controller.update_cue(cue_ball, false, is_dragging, Vector2.ZERO, MAX_DRAG_DISTANCE, game_over, 0.0)
@@ -553,6 +555,7 @@ func _is_roguelite_scoreable_ball(ball: Ball) -> bool:
 func _reset_roguelite_table_for_current_round() -> void:
 	shot_rewind_system.invalidate_checkpoint("Reset unavailable: the table changed rounds.")
 	aim_preview.clear_for_authoritative_table_reset("roguelite_round_transition")
+	pocket_capture_presenter.clear_collections("roguelite_round_transition")
 	game_over = false
 	shot_active = false
 	cue_toi_first_contact_pending = false
@@ -1760,13 +1763,22 @@ func _handle_pocket_checks() -> bool:
 	var pocketed_ball: Ball = pocket_system.check_pockets(_get_moving_active_balls())
 	if pocketed_ball == null:
 		return false
+	var captured_pocket_index: int = pocket_system.get_last_captured_pocket_index()
+	var captured_pocket_position: Vector2 = pocket_system.get_last_captured_pocket_position()
+	var captured_pocket_radius: float = pocket_system.get_last_captured_pocket_radius()
 
 	if aim_preview.is_debug_aim_line_enabled():
 		aim_preview.report_debug_pocket_event(
 			pocketed_ball,
-			pocket_system.get_last_captured_pocket_index(),
-			pocket_system.get_last_captured_pocket_position()
+			captured_pocket_index,
+			captured_pocket_position
 		)
+	pocket_capture_presenter.present_capture(
+		pocketed_ball,
+		captured_pocket_index,
+		captured_pocket_position,
+		captured_pocket_radius
+	)
 	_handle_pocketed_ball(pocketed_ball)
 	return true
 
@@ -2686,6 +2698,7 @@ func _handle_pocket_streak_result(pocket_streak_result: Dictionary) -> void:
 		pocket_position = pocket_position_value
 	var pocket_radius: float = float(pocket_streak_result.get("pocket_radius", 0.0))
 	pocket_streak_presenter.show_streak(multiplier, pocket_position, pocket_radius)
+	pocket_capture_presenter.react_to_pocket_streak(pocket_position, multiplier)
 
 
 func _try_finish_shot() -> void:
@@ -2826,7 +2839,16 @@ func prepare_for_shot_rewind() -> void:
 	shot_event_system.clear_shot_events()
 	pocket_streak_system.reset_shot()
 	pocket_streak_presenter.clear_for_rewind()
+	pocket_capture_presenter.prepare_for_rewind()
 	_clear_rewind_callout_presentation()
+
+
+func set_pocket_capture_presentation_enabled(enabled: bool) -> void:
+	pocket_capture_presenter.set_presentation_enabled(enabled)
+
+
+func clear_pocket_capture_collections(reason: String = "debug_clear") -> void:
+	pocket_capture_presenter.clear_collections(reason)
 
 
 func restore_shot_rewind_balls(ball_states_value: Variant) -> void:
@@ -3376,6 +3398,7 @@ func _get_powder_keg_performance_snapshot() -> Dictionary:
 
 
 func _get_visual_cost_performance_snapshot(counts: Dictionary) -> Dictionary:
+	var pocket_capture_snapshot: Dictionary = pocket_capture_presenter.get_debug_snapshot()
 	return {
 		"trail_points": counts["trail_points"],
 		"balls_with_trails": counts["balls_with_trails"],
@@ -3411,6 +3434,19 @@ func _get_visual_cost_performance_snapshot(counts: Dictionary) -> Dictionary:
 		"score_last_popup_route": score_system.get_last_score_popup_route(),
 		"active_score_glow_labels": score_system.get_active_score_glow_label_count(),
 		"active_score_popup_tweens": score_system.get_active_score_popup_tween_count(),
+		"pocket_capture_enabled": bool(pocket_capture_snapshot.get("enabled", false)),
+		"pocket_capture_active_animations": int(pocket_capture_snapshot.get("active_capture_animations", 0)),
+		"pocket_capture_visible_proxies": int(pocket_capture_snapshot.get("visible_collected_proxies", 0)),
+		"pocket_capture_total_visual_nodes": int(pocket_capture_snapshot.get("total_visual_nodes", 0)),
+		"pocket_capture_total_captures": int(pocket_capture_snapshot.get("total_captures_represented", 0)),
+		"pocket_capture_visible_by_pocket": pocket_capture_snapshot.get("visible_proxies_by_pocket", {}),
+		"pocket_capture_total_by_pocket": pocket_capture_snapshot.get("total_captures_by_pocket", {}),
+		"pocket_capture_cap_removals": int(pocket_capture_snapshot.get("proxies_removed_by_visible_cap", 0)),
+		"pocket_capture_mode_policy": str(pocket_capture_snapshot.get("mode_persistence_policy", "unknown")),
+		"pocket_capture_last_pocket": int(pocket_capture_snapshot.get("last_captured_pocket", -1)),
+		"pocket_capture_last_identity": str(pocket_capture_snapshot.get("last_captured_ball_identity", "None")),
+		"pocket_capture_last_shot_id": int(pocket_capture_snapshot.get("last_capture_shot_id", -1)),
+		"pocket_capture_rewind_generation": int(pocket_capture_snapshot.get("rewind_generation", 0)),
 	}
 
 

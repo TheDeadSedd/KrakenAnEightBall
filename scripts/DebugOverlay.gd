@@ -2059,6 +2059,20 @@ func _make_visual_cost_performance_lines(snapshot: Dictionary) -> Array:
 		"Particles: %s Powder Keg bursts" % [
 			snapshot["active_powder_keg_particle_bursts"],
 		],
+		"Pocket captures: %s / %s visible / %s animating / %s nodes / %s total" % [
+			_debug_bool_text(bool(snapshot["pocket_capture_enabled"])),
+			snapshot["pocket_capture_visible_proxies"],
+			snapshot["pocket_capture_active_animations"],
+			snapshot["pocket_capture_total_visual_nodes"],
+			snapshot["pocket_capture_total_captures"],
+		],
+		"Pocket piles: %s visible / cap fades %s / %s / last %s @ %s" % [
+			snapshot["pocket_capture_visible_by_pocket"],
+			snapshot["pocket_capture_cap_removals"],
+			snapshot["pocket_capture_mode_policy"],
+			snapshot["pocket_capture_last_identity"],
+			snapshot["pocket_capture_last_pocket"],
+		],
 	]
 
 

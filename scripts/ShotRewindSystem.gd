@@ -87,6 +87,7 @@ func request_rewind() -> bool:
 	table.spawn_system.restore_rewind_state(_get_state(system_states, "spawn"))
 	table.pocket_streak_system.restore_rewind_state(_get_state(system_states, "pocket_streak"))
 	table.restore_shot_rewind_balls(checkpoint.get("ball_states", []))
+	table.pocket_capture_presenter.restore_rewind_state(_get_state(system_states, "pocket_capture"))
 	table.restore_shot_rewind_state(_get_state(checkpoint, "table_state"))
 	table.run_stats_system.restore_rewind_state(_get_state(system_states, "run_stats"))
 	_restore_ui_state(_get_state(checkpoint, "ui_state"))
@@ -184,6 +185,7 @@ func _capture_system_states() -> Dictionary:
 		"reserve": table.reserve_system.get_rewind_state(),
 		"spawn": table.spawn_system.get_rewind_state(),
 		"pocket_streak": table.pocket_streak_system.get_rewind_state(),
+		"pocket_capture": table.pocket_capture_presenter.get_rewind_state(),
 	}
 	if table.is_passage_mode():
 		states["passage"] = table.passage_system.get_rewind_state()

@@ -12,6 +12,8 @@ signal debug_spawn_wood_debris_requested
 signal debug_clear_debris_requested
 signal debug_obstacle_collision_toggled(enabled: bool)
 signal debug_obstacle_collision_draw_toggled(enabled: bool)
+signal debug_pocket_capture_presentation_toggled(enabled: bool)
+signal debug_clear_pocket_collections_requested
 signal debug_oath_activate_requested(oath_id: String)
 signal debug_oath_clear_requested
 signal debug_oath_advance_shot_requested
@@ -66,6 +68,9 @@ const EVENT_TEST_SPAWN_WOOD_DEBRIS_TEXT := "Spawn Wood Debris"
 const EVENT_TEST_CLEAR_DEBRIS_TEXT := "Clear Debris"
 const EVENT_TEST_OBSTACLE_COLLISION_TEXT := "Enable Debris Collision"
 const EVENT_TEST_OBSTACLE_COLLISION_DRAW_TEXT := "Show Debris Collision Shape"
+const POCKET_CAPTURE_TEST_SECTION_TITLE := "Pocket Capture Presentation"
+const POCKET_CAPTURE_TEST_ENABLED_TEXT := "Pocket Capture Presentation"
+const POCKET_CAPTURE_TEST_CLEAR_TEXT := "Clear Pocket Collections"
 const AIM_PREVIEW_TEST_SECTION_TITLE := "Aim Preview Testing"
 const AIM_PREVIEW_TEST_DEBUG_LINE_TEXT := "Debug Aim Line"
 const AIM_PREVIEW_TEST_COMPARE_PANELS_TEXT := "Aim Compare Panels"
@@ -192,6 +197,9 @@ var spawn_wood_debris_button: Button
 var clear_debris_button: Button
 var obstacle_collision_check_box: CheckBox
 var obstacle_collision_debug_check_box: CheckBox
+var pocket_capture_testing_section_label: Label
+var pocket_capture_presentation_check_box: CheckBox
+var clear_pocket_collections_button: Button
 var aim_preview_testing_section_label: Label
 var debug_aim_line_check_box: CheckBox
 var aim_compare_panels_check_box: CheckBox
@@ -264,6 +272,7 @@ func _ready() -> void:
 	_ensure_dev_options_controls()
 	_ensure_end_run_controls()
 	_ensure_event_test_controls()
+	_ensure_pocket_capture_testing_controls()
 	_ensure_aim_preview_testing_controls()
 	_ensure_back_room_testing_controls()
 	_ensure_boon_testing_controls()
@@ -311,6 +320,10 @@ func _connect_debug_panel_toggles() -> void:
 		obstacle_collision_check_box.toggled.connect(_on_obstacle_collision_toggled)
 	if not obstacle_collision_debug_check_box.toggled.is_connected(_on_obstacle_collision_draw_toggled):
 		obstacle_collision_debug_check_box.toggled.connect(_on_obstacle_collision_draw_toggled)
+	if not pocket_capture_presentation_check_box.toggled.is_connected(_on_pocket_capture_presentation_toggled):
+		pocket_capture_presentation_check_box.toggled.connect(_on_pocket_capture_presentation_toggled)
+	if not clear_pocket_collections_button.pressed.is_connected(_on_clear_pocket_collections_pressed):
+		clear_pocket_collections_button.pressed.connect(_on_clear_pocket_collections_pressed)
 	if not debug_aim_line_check_box.toggled.is_connected(_on_debug_aim_line_toggled):
 		debug_aim_line_check_box.toggled.connect(_on_debug_aim_line_toggled)
 	if not aim_compare_panels_check_box.toggled.is_connected(_on_aim_compare_panels_toggled):
@@ -473,6 +486,7 @@ func get_debug_session_snapshot() -> Dictionary:
 		"contraband_kind": _get_selected_loose_cargo_contraband_kind(),
 		"obstacle_collision": obstacle_collision_check_box.button_pressed,
 		"obstacle_collision_draw": obstacle_collision_debug_check_box.button_pressed,
+		"pocket_capture_presentation": pocket_capture_presentation_check_box.button_pressed,
 		"debug_aim_line": debug_aim_line_check_box.button_pressed,
 		"aim_compare_panels": aim_compare_panels_check_box.button_pressed,
 		"verbose_aim_candidates": verbose_aim_candidates_check_box.button_pressed,
@@ -497,6 +511,7 @@ func apply_debug_session_snapshot(snapshot: Dictionary) -> void:
 	debug_loose_cargo_contraband_kind_selected.emit(_get_selected_loose_cargo_contraband_kind())
 	_set_debug_option(obstacle_collision_check_box, bool(snapshot.get("obstacle_collision", true)), debug_obstacle_collision_toggled)
 	_set_debug_option(obstacle_collision_debug_check_box, bool(snapshot.get("obstacle_collision_draw", false)), debug_obstacle_collision_draw_toggled)
+	_set_debug_option(pocket_capture_presentation_check_box, bool(snapshot.get("pocket_capture_presentation", true)), debug_pocket_capture_presentation_toggled)
 	_set_debug_option(debug_aim_line_check_box, bool(snapshot.get("debug_aim_line", false)), debug_aim_line_toggled)
 	_set_debug_option(aim_compare_panels_check_box, bool(snapshot.get("aim_compare_panels", false)), debug_aim_compare_panels_toggled)
 	_set_debug_option(verbose_aim_candidates_check_box, bool(snapshot.get("verbose_aim_candidates", false)), debug_verbose_aim_candidates_toggled)
@@ -857,6 +872,25 @@ func _ensure_event_test_controls() -> void:
 		obstacle_collision_debug_check_box.set_pressed_no_signal(false)
 		debug_section.add_child(obstacle_collision_debug_check_box)
 		debug_section.move_child(obstacle_collision_debug_check_box, 10)
+
+
+func _ensure_pocket_capture_testing_controls() -> void:
+	if pocket_capture_testing_section_label == null:
+		pocket_capture_testing_section_label = Label.new()
+		pocket_capture_testing_section_label.text = POCKET_CAPTURE_TEST_SECTION_TITLE
+		_apply_debug_section_label_style(pocket_capture_testing_section_label)
+		debug_section.add_child(pocket_capture_testing_section_label)
+	if pocket_capture_presentation_check_box == null:
+		pocket_capture_presentation_check_box = _make_event_test_check_box(POCKET_CAPTURE_TEST_ENABLED_TEXT)
+		pocket_capture_presentation_check_box.set_pressed_no_signal(true)
+		debug_section.add_child(pocket_capture_presentation_check_box)
+	if clear_pocket_collections_button == null:
+		clear_pocket_collections_button = _make_event_test_button(
+			POCKET_CAPTURE_TEST_CLEAR_TEXT,
+			"ClearPocketCollectionsButton"
+		)
+		debug_section.add_child(clear_pocket_collections_button)
+
 
 func _ensure_aim_preview_testing_controls() -> void:
 	if aim_preview_testing_section_label == null:
@@ -1288,6 +1322,24 @@ func _register_local_dev_options() -> void:
 	_register_action_option("debris.clear", "Clear Debris", clear_debris_button, [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Table Debris")], "Removes all currently spawned wood debris from the table.", ["obstacle", "remove planks"])
 	_register_bool_control("debris.collision", "Enable Debris Collision", obstacle_collision_check_box, [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Table Debris")], "Enables custom ball collision against the authored debris polygons. This changes active table collision behavior.", "Balls bounce from wood debris.", "Debris remains visual-only.", ["polygon collision", "wood blocker"])
 	_register_bool_control("debris.collision_draw", "Show Debris Collision Shape", obstacle_collision_debug_check_box, [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Table Debris")], "Draws the exact transformed polygon used by debris collision so art alignment can be inspected.", "Collision polygons are visible.", "Collision polygons are hidden.", ["polygon debug", "obstacle outline"])
+	_register_bool_control(
+		"pocket_capture.presentation_enabled",
+		"Pocket Capture Presentation",
+		pocket_capture_presentation_check_box,
+		[_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Pocket Capture Presentation")],
+		"Enables presentation-only pocket fall animations and bounded sunk-ball collections. It does not affect capture, scoring, physics, or active-ball counts.",
+		"Captured balls animate into visual pocket collections.",
+		"Pocket capture presentation is disabled and its visual collections are cleared.",
+		["sink animation", "pocket pile", "captured balls"]
+	)
+	_register_action_option(
+		"pocket_capture.clear_collections",
+		"Clear Pocket Collections",
+		clear_pocket_collections_button,
+		[_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Pocket Capture Presentation")],
+		"Clears only the presentation proxies currently collected beneath the pockets. It does not restore balls, change scoring, or alter the run.",
+		["clear pocket pile", "visual reset", "sunk ball presentation"]
+	)
 
 	_register_bool_control("back_room.force_available", "Force Back Room Available", force_back_room_available_check_box, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Back Room")], "Bypasses only the Back Room refresh-cost unlock threshold. Real cost, Reserve capacity, Embezzler limits, and Oath blockers still apply.", "The Back Room is treated as unlocked for testing.", "The normal unlock threshold is required.", ["deal unlock", "quartermaster"])
 	_register_action_option("back_room.open", "Open Back Room Deal", open_back_room_deal_button, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Back Room")], "Opens the real Back Room Deal panel. Purchases still use normal costs and validation.", ["deal panel", "quartermaster"])
@@ -2326,6 +2378,14 @@ func _on_obstacle_collision_toggled(enabled: bool) -> void:
 
 func _on_obstacle_collision_draw_toggled(enabled: bool) -> void:
 	debug_obstacle_collision_draw_toggled.emit(enabled)
+
+
+func _on_pocket_capture_presentation_toggled(enabled: bool) -> void:
+	debug_pocket_capture_presentation_toggled.emit(enabled)
+
+
+func _on_clear_pocket_collections_pressed() -> void:
+	debug_clear_pocket_collections_requested.emit()
 
 
 func _on_debug_aim_line_toggled(enabled: bool) -> void:
