@@ -14,6 +14,8 @@ signal debug_obstacle_collision_toggled(enabled: bool)
 signal debug_obstacle_collision_draw_toggled(enabled: bool)
 signal debug_pocket_capture_presentation_toggled(enabled: bool)
 signal debug_clear_pocket_collections_requested
+signal debug_pocket_collection_anchors_toggled(enabled: bool)
+signal debug_reflow_pocket_collections_requested
 signal debug_oath_activate_requested(oath_id: String)
 signal debug_oath_clear_requested
 signal debug_oath_advance_shot_requested
@@ -71,6 +73,8 @@ const EVENT_TEST_OBSTACLE_COLLISION_DRAW_TEXT := "Show Debris Collision Shape"
 const POCKET_CAPTURE_TEST_SECTION_TITLE := "Pocket Capture Presentation"
 const POCKET_CAPTURE_TEST_ENABLED_TEXT := "Pocket Capture Presentation"
 const POCKET_CAPTURE_TEST_CLEAR_TEXT := "Clear Pocket Collections"
+const POCKET_CAPTURE_TEST_ANCHORS_TEXT := "Show Pocket Collection Anchors"
+const POCKET_CAPTURE_TEST_REFLOW_TEXT := "Reflow Pocket Collections"
 const AIM_PREVIEW_TEST_SECTION_TITLE := "Aim Preview Testing"
 const AIM_PREVIEW_TEST_DEBUG_LINE_TEXT := "Debug Aim Line"
 const AIM_PREVIEW_TEST_COMPARE_PANELS_TEXT := "Aim Compare Panels"
@@ -200,6 +204,8 @@ var obstacle_collision_debug_check_box: CheckBox
 var pocket_capture_testing_section_label: Label
 var pocket_capture_presentation_check_box: CheckBox
 var clear_pocket_collections_button: Button
+var pocket_collection_anchors_check_box: CheckBox
+var reflow_pocket_collections_button: Button
 var aim_preview_testing_section_label: Label
 var debug_aim_line_check_box: CheckBox
 var aim_compare_panels_check_box: CheckBox
@@ -324,6 +330,10 @@ func _connect_debug_panel_toggles() -> void:
 		pocket_capture_presentation_check_box.toggled.connect(_on_pocket_capture_presentation_toggled)
 	if not clear_pocket_collections_button.pressed.is_connected(_on_clear_pocket_collections_pressed):
 		clear_pocket_collections_button.pressed.connect(_on_clear_pocket_collections_pressed)
+	if not pocket_collection_anchors_check_box.toggled.is_connected(_on_pocket_collection_anchors_toggled):
+		pocket_collection_anchors_check_box.toggled.connect(_on_pocket_collection_anchors_toggled)
+	if not reflow_pocket_collections_button.pressed.is_connected(_on_reflow_pocket_collections_pressed):
+		reflow_pocket_collections_button.pressed.connect(_on_reflow_pocket_collections_pressed)
 	if not debug_aim_line_check_box.toggled.is_connected(_on_debug_aim_line_toggled):
 		debug_aim_line_check_box.toggled.connect(_on_debug_aim_line_toggled)
 	if not aim_compare_panels_check_box.toggled.is_connected(_on_aim_compare_panels_toggled):
@@ -487,6 +497,7 @@ func get_debug_session_snapshot() -> Dictionary:
 		"obstacle_collision": obstacle_collision_check_box.button_pressed,
 		"obstacle_collision_draw": obstacle_collision_debug_check_box.button_pressed,
 		"pocket_capture_presentation": pocket_capture_presentation_check_box.button_pressed,
+		"pocket_collection_anchors": pocket_collection_anchors_check_box.button_pressed,
 		"debug_aim_line": debug_aim_line_check_box.button_pressed,
 		"aim_compare_panels": aim_compare_panels_check_box.button_pressed,
 		"verbose_aim_candidates": verbose_aim_candidates_check_box.button_pressed,
@@ -512,6 +523,7 @@ func apply_debug_session_snapshot(snapshot: Dictionary) -> void:
 	_set_debug_option(obstacle_collision_check_box, bool(snapshot.get("obstacle_collision", true)), debug_obstacle_collision_toggled)
 	_set_debug_option(obstacle_collision_debug_check_box, bool(snapshot.get("obstacle_collision_draw", false)), debug_obstacle_collision_draw_toggled)
 	_set_debug_option(pocket_capture_presentation_check_box, bool(snapshot.get("pocket_capture_presentation", true)), debug_pocket_capture_presentation_toggled)
+	_set_debug_option(pocket_collection_anchors_check_box, bool(snapshot.get("pocket_collection_anchors", false)), debug_pocket_collection_anchors_toggled)
 	_set_debug_option(debug_aim_line_check_box, bool(snapshot.get("debug_aim_line", false)), debug_aim_line_toggled)
 	_set_debug_option(aim_compare_panels_check_box, bool(snapshot.get("aim_compare_panels", false)), debug_aim_compare_panels_toggled)
 	_set_debug_option(verbose_aim_candidates_check_box, bool(snapshot.get("verbose_aim_candidates", false)), debug_verbose_aim_candidates_toggled)
@@ -890,6 +902,16 @@ func _ensure_pocket_capture_testing_controls() -> void:
 			"ClearPocketCollectionsButton"
 		)
 		debug_section.add_child(clear_pocket_collections_button)
+	if pocket_collection_anchors_check_box == null:
+		pocket_collection_anchors_check_box = _make_event_test_check_box(POCKET_CAPTURE_TEST_ANCHORS_TEXT)
+		pocket_collection_anchors_check_box.set_pressed_no_signal(false)
+		debug_section.add_child(pocket_collection_anchors_check_box)
+	if reflow_pocket_collections_button == null:
+		reflow_pocket_collections_button = _make_event_test_button(
+			POCKET_CAPTURE_TEST_REFLOW_TEXT,
+			"ReflowPocketCollectionsButton"
+		)
+		debug_section.add_child(reflow_pocket_collections_button)
 
 
 func _ensure_aim_preview_testing_controls() -> void:
@@ -1339,6 +1361,24 @@ func _register_local_dev_options() -> void:
 		[_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Pocket Capture Presentation")],
 		"Clears only the presentation proxies currently collected beneath the pockets. It does not restore balls, change scoring, or alter the run.",
 		["clear pocket pile", "visual reset", "sunk ball presentation"]
+	)
+	_register_bool_control(
+		"pocket_capture.show_collection_anchors",
+		"Show Pocket Collection Anchors",
+		pocket_collection_anchors_check_box,
+		[_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Pocket Capture Presentation")],
+		"Draws each presentation-only CollectionAnchor, its inward vector, and the radius-aware resting basin. These markers never affect pocket collision or gameplay.",
+		"Authored pocket collection anchors and basins are visible.",
+		"Pocket collection layout guides are hidden.",
+		["pocket basin", "presentation anchor", "resting region"]
+	)
+	_register_action_option(
+		"pocket_capture.reflow_collections",
+		"Reflow Pocket Collections",
+		reflow_pocket_collections_button,
+		[_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Pocket Capture Presentation")],
+		"Refreshes authored CollectionAnchor positions and moves existing settled proxies into their presentation-only basins. Scoring, captures, and ball state are untouched.",
+		["refresh anchors", "retune pile", "visual layout"]
 	)
 
 	_register_bool_control("back_room.force_available", "Force Back Room Available", force_back_room_available_check_box, [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Back Room")], "Bypasses only the Back Room refresh-cost unlock threshold. Real cost, Reserve capacity, Embezzler limits, and Oath blockers still apply.", "The Back Room is treated as unlocked for testing.", "The normal unlock threshold is required.", ["deal unlock", "quartermaster"])
@@ -2386,6 +2426,14 @@ func _on_pocket_capture_presentation_toggled(enabled: bool) -> void:
 
 func _on_clear_pocket_collections_pressed() -> void:
 	debug_clear_pocket_collections_requested.emit()
+
+
+func _on_pocket_collection_anchors_toggled(enabled: bool) -> void:
+	debug_pocket_collection_anchors_toggled.emit(enabled)
+
+
+func _on_reflow_pocket_collections_pressed() -> void:
+	debug_reflow_pocket_collections_requested.emit()
 
 
 func _on_debug_aim_line_toggled(enabled: bool) -> void:

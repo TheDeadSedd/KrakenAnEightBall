@@ -2073,6 +2073,14 @@ func _make_visual_cost_performance_lines(snapshot: Dictionary) -> Array:
 			snapshot["pocket_capture_last_identity"],
 			snapshot["pocket_capture_last_pocket"],
 		],
+		"Pocket basins: %s authored / %s missing / guides %s / rev %s / reflows %s (%s)" % [
+			snapshot["pocket_capture_authored_anchors"],
+			snapshot["pocket_capture_missing_anchors"],
+			_debug_bool_text(bool(snapshot["pocket_capture_anchor_debug"])),
+			snapshot["pocket_capture_layout_revision"],
+			snapshot["pocket_capture_reflows"],
+			snapshot["pocket_capture_last_reflow_reason"],
+		],
 	]
 
 

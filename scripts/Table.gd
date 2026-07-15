@@ -2851,6 +2851,14 @@ func clear_pocket_capture_collections(reason: String = "debug_clear") -> void:
 	pocket_capture_presenter.clear_collections(reason)
 
 
+func set_pocket_collection_anchor_debug_enabled(enabled: bool) -> void:
+	pocket_capture_presenter.set_collection_anchor_debug_enabled(enabled)
+
+
+func reflow_pocket_capture_collections(reason: String = "manual") -> void:
+	pocket_capture_presenter.reflow_collections(reason, true, true)
+
+
 func restore_shot_rewind_balls(ball_states_value: Variant) -> void:
 	var ball_states: Array = ball_states_value if ball_states_value is Array else []
 	for child in balls.get_children():
@@ -3443,6 +3451,12 @@ func _get_visual_cost_performance_snapshot(counts: Dictionary) -> Dictionary:
 		"pocket_capture_total_by_pocket": pocket_capture_snapshot.get("total_captures_by_pocket", {}),
 		"pocket_capture_cap_removals": int(pocket_capture_snapshot.get("proxies_removed_by_visible_cap", 0)),
 		"pocket_capture_mode_policy": str(pocket_capture_snapshot.get("mode_persistence_policy", "unknown")),
+		"pocket_capture_anchor_debug": bool(pocket_capture_snapshot.get("show_collection_anchor_debug", false)),
+		"pocket_capture_authored_anchors": int(pocket_capture_snapshot.get("authored_collection_anchor_count", 0)),
+		"pocket_capture_missing_anchors": int(pocket_capture_snapshot.get("missing_collection_anchor_count", 0)),
+		"pocket_capture_layout_revision": int(pocket_capture_snapshot.get("collection_layout_revision", 0)),
+		"pocket_capture_reflows": int(pocket_capture_snapshot.get("collection_reflow_count", 0)),
+		"pocket_capture_last_reflow_reason": str(pocket_capture_snapshot.get("last_reflow_reason", "initial")),
 		"pocket_capture_last_pocket": int(pocket_capture_snapshot.get("last_captured_pocket", -1)),
 		"pocket_capture_last_identity": str(pocket_capture_snapshot.get("last_captured_ball_identity", "None")),
 		"pocket_capture_last_shot_id": int(pocket_capture_snapshot.get("last_capture_shot_id", -1)),

@@ -234,9 +234,9 @@ Does not own scoring, rewards, ball removal consequences, or procedural/fallback
 
 ### `scripts/PocketCapturePresenter.gd`
 
-Owns presentation-only pocket capture proxies, the fall/drop/under-table-roll tween sequence, six bounded pocket-local sunk-ball collections, deterministic visual-only pile variation, visible proxy caps, subtle Pocket Streak pile reactions, mode-specific clearing, rewind snapshots, and pocket-capture presentation diagnostics.
+Owns presentation-only pocket capture proxies, the fall/drop/under-table-roll tween sequence, six bounded pocket-local sunk-ball collections, authored `CollectionAnchor` resting centers, corner/side-specific radius-aware resting basins, deterministic visual-only pile variation, collection reflow/debug guides, visible proxy caps, subtle Pocket Streak pile reactions, mode-specific clearing, rewind snapshots, and pocket-capture presentation diagnostics.
 
-`PocketCapturedBallVisual.gd` is its draw-only supporting proxy. Captured-ball proxies never enter the authoritative ball list, participate in collision/pocket/spawn checks, trigger anomaly behavior, affect scoring, or count as active balls. Passage collections persist for the run; roguelite collections clear between rounds. Settled proxies do not process continuously.
+The authored markers live under each `Table/Pockets/<Pocket>/CollectionAnchor` in `Main.tscn`. They are presentation geometry only: `PocketSystem.gd` continues reading only the existing `CollisionShape2D` centers/radii for capture and spawn safety. `PocketCapturedBallVisual.gd` is the draw-only supporting proxy. Captured-ball proxies never enter the authoritative ball list, participate in collision/pocket/spawn checks, trigger anomaly behavior, affect scoring, or count as active balls. Passage collections persist for the run; roguelite collections clear between rounds. Settled proxies do not process continuously.
 
 ### `scripts/BoundarySystem.gd`
 

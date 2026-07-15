@@ -127,6 +127,20 @@ func play_collection_reaction(offset: Vector2, scale_factor: float, duration: fl
 	reaction_tween.parallel().tween_property(self, "scale", settled_scale, return_time).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
+func reflow_settled(target_position: Vector2, duration: float = 0.18) -> void:
+	settled_position = target_position
+	if not settled:
+		return
+	if reaction_tween != null and reaction_tween.is_running():
+		reaction_tween.kill()
+	reaction_tween = null
+	if duration <= 0.0:
+		position = settled_position
+		return
+	reaction_tween = create_tween()
+	reaction_tween.tween_property(self, "position", settled_position, duration).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+
+
 func fade_deeper_and_free(deeper_position: Vector2, duration: float) -> void:
 	cancel_animation()
 	settled = false

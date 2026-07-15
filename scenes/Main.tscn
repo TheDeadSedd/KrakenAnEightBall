@@ -17,12 +17,12 @@
 [ext_resource type="Script" uid="uid://cxove57ty23eg" path="res://scripts/RunLedgerHUD.gd" id="15_run_ledger_hud"]
 [ext_resource type="Script" uid="uid://b48w0aajbeplw" path="res://scripts/RunStatsHUD.gd" id="16_run_stats_hud"]
 [ext_resource type="Script" uid="uid://b6aiwp4bn30sw" path="res://scripts/RunHistorySystem.gd" id="17_run_history_system"]
-[ext_resource type="Script" path="res://scripts/PassageHUD.gd" id="18_passage_hud"]
-[ext_resource type="Script" path="res://scripts/OathHUD.gd" id="19_oath_hud"]
-[ext_resource type="Script" path="res://scripts/ProgressionSystem.gd" id="20_progression_system"]
-[ext_resource type="Script" path="res://scripts/CueProgressionSystem.gd" id="21_cue_progression_system"]
-[ext_resource type="Script" path="res://scripts/CueStartSelectorHUD.gd" id="22_cue_start_selector_hud"]
-[ext_resource type="Script" path="res://scripts/KrakenBoonHUD.gd" id="23_kraken_boon_hud"]
+[ext_resource type="Script" uid="uid://c2rcrs875pxm" path="res://scripts/PassageHUD.gd" id="18_passage_hud"]
+[ext_resource type="Script" uid="uid://tmyg8grrtr5c" path="res://scripts/OathHUD.gd" id="19_oath_hud"]
+[ext_resource type="Script" uid="uid://baiyksuoxaeva" path="res://scripts/ProgressionSystem.gd" id="20_progression_system"]
+[ext_resource type="Script" uid="uid://i2s4l72tipd" path="res://scripts/CueProgressionSystem.gd" id="21_cue_progression_system"]
+[ext_resource type="Script" uid="uid://oq86yxvoeoge" path="res://scripts/CueStartSelectorHUD.gd" id="22_cue_start_selector_hud"]
+[ext_resource type="Script" uid="uid://d3c13rh5ygdjd" path="res://scripts/KrakenBoonHUD.gd" id="23_kraken_boon_hud"]
 
 [sub_resource type="RectangleShape2D" id="RectangleShape2D_rvslj"]
 size = Vector2(398.57813, 22)
@@ -92,16 +92,15 @@ script = ExtResource("12_gameplay_music_system")
 [node name="RunHistorySystem" type="Node" parent="." unique_id=1838414387]
 script = ExtResource("17_run_history_system")
 
-[node name="ProgressionSystem" type="Node" parent="."]
+[node name="ProgressionSystem" type="Node" parent="." unique_id=875211881]
 script = ExtResource("20_progression_system")
 
-[node name="CueProgressionSystem" type="Node" parent="."]
+[node name="CueProgressionSystem" type="Node" parent="." unique_id=1806761150]
 script = ExtResource("21_cue_progression_system")
 
 [node name="Table" parent="." unique_id=1446886136 instance=ExtResource("1_table_scene")]
 
 [node name="Boundaries" type="Node2D" parent="Table" unique_id=2023568208]
-visible = false
 
 [node name="TopRail1" type="StaticBody2D" parent="Table/Boundaries" unique_id=1820286007]
 
@@ -205,7 +204,6 @@ position = Vector2(-1, 1)
 shape = SubResource("SegmentShape2D_q8u5g")
 
 [node name="Pockets" type="Node2D" parent="Table" unique_id=168170532]
-visible = false
 
 [node name="PocketTopLeft" type="Area2D" parent="Table/Pockets" unique_id=1290076813]
 
@@ -213,11 +211,17 @@ visible = false
 position = Vector2(477, 282)
 shape = SubResource("CircleShape2D_rvslj")
 
+[node name="CollectionAnchor" type="Marker2D" parent="Table/Pockets/PocketTopLeft" unique_id=1871108116]
+position = Vector2(491, 298)
+
 [node name="PocketTopMiddle" type="Area2D" parent="Table/Pockets" unique_id=562464281]
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Pockets/PocketTopMiddle" unique_id=157751317]
 position = Vector2(960, 259)
 shape = SubResource("CircleShape2D_rvslj")
+
+[node name="CollectionAnchor" type="Marker2D" parent="Table/Pockets/PocketTopMiddle" unique_id=408912703]
+position = Vector2(960, 288)
 
 [node name="PocketTopRight" type="Area2D" parent="Table/Pockets" unique_id=1332491691]
 
@@ -225,11 +229,17 @@ shape = SubResource("CircleShape2D_rvslj")
 position = Vector2(1441, 279)
 shape = SubResource("CircleShape2D_rvslj")
 
+[node name="CollectionAnchor" type="Marker2D" parent="Table/Pockets/PocketTopRight" unique_id=1029334321]
+position = Vector2(1429, 294)
+
 [node name="PocketBottomLeft" type="Area2D" parent="Table/Pockets" unique_id=1226509107]
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Pockets/PocketBottomLeft" unique_id=148630836]
 position = Vector2(478, 790)
 shape = SubResource("CircleShape2D_rvslj")
+
+[node name="CollectionAnchor" type="Marker2D" parent="Table/Pockets/PocketBottomLeft" unique_id=343184984]
+position = Vector2(495, 774)
 
 [node name="PocketBottom Middle" type="Area2D" parent="Table/Pockets" unique_id=1890614378]
 
@@ -237,11 +247,17 @@ shape = SubResource("CircleShape2D_rvslj")
 position = Vector2(959, 813)
 shape = SubResource("CircleShape2D_rvslj")
 
+[node name="CollectionAnchor" type="Marker2D" parent="Table/Pockets/PocketBottom Middle" unique_id=886542636]
+position = Vector2(959, 787)
+
 [node name="PocketBottomRight" type="Area2D" parent="Table/Pockets" unique_id=62862024]
 
 [node name="CollisionShape2D" type="CollisionShape2D" parent="Table/Pockets/PocketBottomRight" unique_id=1385265997]
 position = Vector2(1440, 791)
 shape = SubResource("CircleShape2D_rvslj")
+
+[node name="CollectionAnchor" type="Marker2D" parent="Table/Pockets/PocketBottomRight" unique_id=773437987]
+position = Vector2(1427, 775)
 
 [node name="CanvasLayer" type="CanvasLayer" parent="." unique_id=980633167]
 
@@ -311,7 +327,7 @@ offset_bottom = 402.0
 mouse_filter = 2
 script = ExtResource("16_run_stats_hud")
 
-[node name="CueStartSelectorHUD" type="Control" parent="CanvasLayer/HUD"]
+[node name="CueStartSelectorHUD" type="Control" parent="CanvasLayer/HUD" unique_id=992087221]
 process_mode = 3
 z_index = 23
 layout_mode = 1
@@ -323,7 +339,7 @@ grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("22_cue_start_selector_hud")
 
-[node name="PassageHUD" type="Control" parent="CanvasLayer/HUD"]
+[node name="PassageHUD" type="Control" parent="CanvasLayer/HUD" unique_id=830257974]
 process_mode = 3
 z_index = 19
 anchors_preset = 0
@@ -334,7 +350,7 @@ offset_bottom = 164.0
 mouse_filter = 2
 script = ExtResource("18_passage_hud")
 
-[node name="OathHUD" type="Control" parent="CanvasLayer/HUD"]
+[node name="OathHUD" type="Control" parent="CanvasLayer/HUD" unique_id=1049301790]
 process_mode = 3
 z_index = 21
 anchors_preset = 0
@@ -345,7 +361,7 @@ offset_bottom = 416.0
 mouse_filter = 2
 script = ExtResource("19_oath_hud")
 
-[node name="KrakenBoonHUD" type="Control" parent="CanvasLayer/HUD"]
+[node name="KrakenBoonHUD" type="Control" parent="CanvasLayer/HUD" unique_id=83470975]
 process_mode = 3
 z_index = 23
 anchors_preset = 0
