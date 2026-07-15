@@ -3481,6 +3481,7 @@ func _get_aim_performance_snapshot(aim_snapshot: Dictionary) -> Dictionary:
 		"aim_cloned_event_comparison": aim_snapshot.get("cloned_event_comparison", {}),
 		"aim_cloned_profiler": aim_snapshot.get("cloned_profiler", {}),
 		"aim_staged_prediction": aim_snapshot.get("staged_prediction", {}),
+		"aim_player_parity": aim_snapshot.get("player_aim_parity", {}),
 		"debug_aim_mode": get_debug_aim_mode_snapshot(),
 		"cue_toi_correction_enabled": cue_first_contact_toi_enabled,
 		"cue_toi_first_contact_active": _should_run_cue_first_contact_toi(),

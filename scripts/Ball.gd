@@ -1296,6 +1296,10 @@ func _get_display_color() -> Color:
 	return WAYFINDER_BASE_COLOR
 
 
+func get_aim_preview_display_color() -> Color:
+	return _get_display_color()
+
+
 func _get_rim_color(display_color: Color) -> Color:
 	if _is_eight_ball_visual():
 		return EIGHT_BALL_OBSIDIAN_RIM_COLOR

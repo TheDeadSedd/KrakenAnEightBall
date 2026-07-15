@@ -1702,6 +1702,11 @@ func _cancel_pending_deep_prediction() -> void:
 
 func _get_cloned_aim_section(key: String) -> String:
 	if key in [
+		"use_cloned_settled_normal_aim",
+		"immediate_to_cloned_blend_duration_ms",
+	]:
+		return "Aim Presentation"
+	if key in [
 		"use_staged_deep_prediction",
 		"deep_aim_settle_delay_ms",
 		"progressive_deep_aim_reveal",
@@ -1712,7 +1717,7 @@ func _get_cloned_aim_section(key: String) -> String:
 		return "Staged Deep Prediction"
 	if key == "profile_enabled":
 		return "Aim Profiler"
-	if key in ["enabled", "use_for_long_sight", "result_detail_mode"]:
+	if key in ["enabled", "use_legacy_long_sight_debug", "result_detail_mode"]:
 		return "Cloned Predictor"
 	if key in ["max_simulated_seconds", "simulation_frame_rate", "simulation_substeps", "max_physics_frames", "max_total_iterations", "max_geometry_probes", "max_processing_time_ms", "max_collision_events_per_substep"]:
 		return "Simulation Timing & Work"

@@ -60,6 +60,7 @@ var _phase_totals_us: Dictionary = {}
 var _phase_maximums_us: Dictionary = {}
 var _last_sample: Dictionary = {}
 var _reason_counts: Dictionary = {}
+var _player_request_class_counts: Dictionary = {}
 var _recent_completion_usec: Array[int] = []
 var _rebuilds_per_second := 0.0
 var _cache_rebuild_baseline := 0
@@ -135,6 +136,7 @@ func reset(cache_snapshot: Dictionary = {}) -> void:
 	_phase_maximums_us.clear()
 	_last_sample.clear()
 	_reason_counts.clear()
+	_player_request_class_counts.clear()
 	_recent_completion_usec.clear()
 	_rebuilds_per_second = 0.0
 	_cache_rebuild_baseline = int(cache_snapshot.get("rebuild_count", 0))
@@ -216,6 +218,10 @@ func record_completed_rebuild(sample: Dictionary) -> void:
 	_last_sample = normalized_sample
 	var reason: String = str(normalized_sample.get("rebuild_reason", "unknown"))
 	_reason_counts[reason] = int(_reason_counts.get(reason, 0)) + 1
+	var request_class: String = str(normalized_sample.get("player_request_class", "unclassified"))
+	_player_request_class_counts[request_class] = int(
+		_player_request_class_counts.get(request_class, 0)
+	) + 1
 	_record_completion_time(int(normalized_sample.get("completed_usec", Time.get_ticks_usec())))
 
 
@@ -400,6 +406,7 @@ func get_snapshot(cache_snapshot: Dictionary = {}) -> Dictionary:
 		"cache_misses": maxi(int(cache_snapshot.get("rebuild_count", 0)) - _cache_rebuild_baseline, 0),
 		"last_rebuild_reason": str(_last_sample.get("rebuild_reason", "none")),
 		"rebuild_reason_counts": _reason_counts.duplicate(true),
+		"player_request_class_counts": _player_request_class_counts.duplicate(true),
 		"staged_prediction": _make_staged_prediction_snapshot(),
 	}
 

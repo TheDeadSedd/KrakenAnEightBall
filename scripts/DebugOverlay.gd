@@ -2105,11 +2105,13 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 	var availability: Dictionary = snapshot.get("aim_cloned_prediction_availability", {})
 	var invalidation: Dictionary = snapshot.get("aim_cloned_invalidation", {})
 	var staged_prediction: Dictionary = snapshot.get("aim_staged_prediction", {})
+	var player_parity: Dictionary = snapshot.get("aim_player_parity", {})
 	if simulation.is_empty():
 		var unavailable_lines: Array = [
 			"No cloned trajectory has been built.",
 			"Enable Debug Aim Line, then drag the cue.",
 		]
+		_append_player_aim_parity_lines(unavailable_lines, player_parity)
 		_append_staged_aim_lines(unavailable_lines, staged_prediction)
 		_append_aim_availability_lines(unavailable_lines, availability, invalidation)
 		return unavailable_lines
@@ -2121,7 +2123,9 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 				warning_value.get("reason", "unsupported"),
 				warning_value.get("ball_label", "Ball ?"),
 			])
-	var lines: Array = [
+	var lines: Array = []
+	_append_player_aim_parity_lines(lines, player_parity)
+	lines.append_array([
 		"Enabled: %s / valid: %s / complete: %s" % [
 			_debug_true_false_text(bool(simulation.get("configuration", {}).get("enabled", false))),
 			_debug_true_false_text(bool(simulation.get("valid", false))),
@@ -2174,7 +2178,7 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 		],
 		"Stop: %s" % simulation.get("stop_reason", "none"),
 		"Cap: %s" % str(simulation.get("cap_reached", "none")),
-	]
+	])
 	_append_staged_aim_lines(lines, staged_prediction)
 	_append_aim_availability_lines(lines, availability, invalidation)
 	var debug_mode: Dictionary = snapshot.get("debug_aim_mode", {})
@@ -2220,6 +2224,78 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 	return lines
 
 
+func _append_player_aim_parity_lines(lines: Array, parity: Dictionary) -> void:
+	if parity.is_empty():
+		return
+	lines.append("Player Immediate Source: %s" % parity.get(
+		"immediate_source",
+		"Lightweight Responsive Predictor"
+	))
+	lines.append("Player Settled Source: %s" % parity.get(
+		"settled_source",
+		"Cloned Deterministic Predictor"
+	))
+	lines.append("Normal Aim Visible Scope: %s" % parity.get(
+		"normal_visible_scope",
+		"Cue First Contact + Full First-Ball Route"
+	))
+	lines.append("Extended Aim Visible Depth: %s" % parity.get("extended_visible_depth", 0))
+	lines.append("Current Display Source: %s" % parity.get("current_display_source", "Immediate"))
+	lines.append("Player Extended Source: %s" % parity.get(
+		"extended_source",
+		"Cloned Deterministic Predictor"
+	))
+	lines.append("Immediate first ball: %s" % _debug_aim_ball_label(
+		int(parity.get("immediate_first_ball_number", -1)),
+		int(parity.get("immediate_first_ball_id", -1))
+	))
+	lines.append("Cloned first event ball: %s" % _debug_aim_ball_label(
+		int(parity.get("cloned_first_event_ball_number", -1)),
+		int(parity.get("cloned_first_event_ball_id", -1))
+	))
+	if bool(parity.get("agreement_available", false)):
+		lines.append("Immediate / cloned first contact agree: %s" % _debug_true_false_text(
+			bool(parity.get("first_contacts_agree", false))
+		))
+	else:
+		lines.append("Immediate / cloned first contact agree: n/a")
+	if bool(parity.get("first_contact_mismatch", false)):
+		lines.append("WARNING: Immediate/cloned first-contact mismatch")
+	var first_ball_route: Dictionary = parity.get("first_ball_route", {})
+	if int(first_ball_route.get("ball_id", -1)) >= 0:
+		lines.append("First Struck Ball: %s" % _debug_aim_ball_label(
+			int(first_ball_route.get("ball_number", -1)),
+			int(first_ball_route.get("ball_id", -1))
+		))
+		lines.append("First-Ball Events: %s total / %s secondary / %s rails / %s pocket / %s stop" % [
+			first_ball_route.get("total_events", 0),
+			first_ball_route.get("secondary_ball_contacts", 0),
+			first_ball_route.get("rail_contacts", 0),
+			first_ball_route.get("pocket_events", 0),
+			first_ball_route.get("stop_events", 0),
+		])
+		lines.append("First-Ball Trace: %s cloned / %s visible / final %s" % [
+			first_ball_route.get("cloned_trace_points", 0),
+			first_ball_route.get("visible_trace_points", 0),
+			first_ball_route.get("final_stop_reason", "none"),
+		])
+	if bool(parity.get("legacy_debug_ignored", false)):
+		lines.append("Legacy A/B request ignored outside a debug build.")
+	var correction: Dictionary = parity.get("settled_correction", {})
+	if not correction.is_empty():
+		lines.append("Settled correction: endpoint %.2f px / cue %.2f deg / child %.2f deg" % [
+			float(correction.get("cue_endpoint_delta_px", 0.0)),
+			float(correction.get("cue_final_segment_angle_delta_degrees", 0.0)),
+			float(correction.get("first_child_angle_delta_degrees", 0.0)),
+		])
+		lines.append("Rails immediate / cloned: %s / %s; max route delta %.2f px" % [
+			correction.get("immediate_pre_contact_rails", 0),
+			correction.get("cloned_pre_contact_rails", 0),
+			float(correction.get("maximum_route_deviation_px", 0.0)),
+		])
+	lines.append("")
+
+
 func _append_staged_aim_lines(lines: Array, staged: Dictionary) -> void:
 	if staged.is_empty() or not bool(staged.get("show_status", true)):
 		return
@@ -2230,6 +2306,15 @@ func _append_staged_aim_lines(lines: Array, staged: Dictionary) -> void:
 		staged.get("state", "idle"),
 	])
 	lines.append("Reason: %s" % staged.get("reason", "none"))
+	lines.append("Player class / display: %s / %s" % [
+		staged.get("player_request_class", "none"),
+		staged.get("current_display_source", "Immediate"),
+	])
+	lines.append("Blend: %.0f%% / %s ms / interruptions %s" % [
+		float(staged.get("blend_progress", 1.0)) * 100.0,
+		staged.get("blend_duration_ms", 60),
+		staged.get("blend_interruptions", 0),
+	])
 	lines.append("Settle remaining / configured: %.1f / %s ms" % [
 		float(staged.get("settle_remaining_ms", 0.0)),
 		staged.get("settle_delay_ms", 75),
@@ -2342,6 +2427,9 @@ func _make_aim_profiler_lines(snapshot: Dictionary) -> Array:
 		"Reason counts: %s" % _format_aim_profiler_reason_counts(
 			profiler.get("rebuild_reason_counts", {})
 		),
+		"Player request classes: %s" % _format_aim_profiler_reason_counts(
+			profiler.get("player_request_class_counts", {})
+		),
 	]
 	_append_staged_profiler_lines(lines, profiler)
 	if not enabled:
@@ -2368,6 +2456,10 @@ func _make_aim_profiler_lines(snapshot: Dictionary) -> Array:
 	var last_sample: Dictionary = profiler.get("last_sample", {})
 	lines.append("")
 	lines.append("Last completed workload")
+	lines.append("Player request class: %s" % last_sample.get(
+		"player_request_class",
+		"unclassified"
+	))
 	lines.append("Frames/substeps: %s / %s" % [
 		last_sample.get("simulated_physics_frames", 0),
 		last_sample.get("simulated_substeps", 0),
@@ -2527,6 +2619,14 @@ func _append_staged_profiler_lines(lines: Array, profiler: Dictionary) -> void:
 		counters.get("deep_cache_misses", 0),
 		counters.get("shown_results_reused_from_cache", 0),
 	])
+	lines.append("Normal / extended requests: %s / %s" % [
+		state.get("normal_cloned_requests", 0),
+		state.get("extended_cloned_requests", 0),
+	])
+	lines.append("Normal / extended cache hits: %s / %s" % [
+		state.get("normal_cloned_cache_hits", 0),
+		state.get("extended_cloned_cache_hits", 0),
+	])
 	lines.append("Cached results accepted / rejected: %s / %s" % [
 		counters.get("cached_results_accepted", 0),
 		counters.get("cached_results_rejected", 0),
@@ -2569,6 +2669,22 @@ func _append_staged_profiler_lines(lines: Array, profiler: Dictionary) -> void:
 	lines.append("Predictions/sec / CPU share: %.1f / %.1f%%" % [
 		float(staged.get("deep_predictions_per_second", 0.0)),
 		float(staged.get("cpu_shares_percent", {}).get("deep_compute", 0.0)),
+	])
+	var settled_metrics: Dictionary = state.get("player_settled_aim", {})
+	lines.append("Normal / extended first-visible avg: %.2f / %.2f ms" % [
+		float(settled_metrics.get("normal_first_visible_latency_ms", 0.0)),
+		float(settled_metrics.get("extended_first_visible_latency_ms", 0.0)),
+	])
+	lines.append("Settled accepted / identical / corrected: %s / %s / %s" % [
+		settled_metrics.get("settled_routes_accepted", 0),
+		settled_metrics.get("effectively_identical_routes", 0),
+		settled_metrics.get("visible_corrections", 0),
+	])
+	lines.append("Correction thresholds 1px / 3px / 1deg / first-ball: %s / %s / %s / %s" % [
+		settled_metrics.get("corrections_above_1_px", 0),
+		settled_metrics.get("corrections_above_3_px", 0),
+		settled_metrics.get("corrections_above_1_degree", 0),
+		settled_metrics.get("first_ball_disagreements", 0),
 	])
 	lines.append("")
 	lines.append("PRESENTATION - CPU us last | avg | P95 | max")
@@ -2823,7 +2939,7 @@ func _make_aim_launch_lines(snapshot: Dictionary) -> Array:
 		"Debug Aim Line: %s" % _debug_bool_text(bool(compare.get("debug_aim_line_enabled", false))),
 		"Deep commit: %s" % compare.get(
 			"deep_prediction_commit_status",
-			"deep_prediction_not_ready"
+			"immediate_only_at_commit"
 		),
 		"Source: %s / persisted %s / recording %s" % [
 			compare.get("source", "none"),

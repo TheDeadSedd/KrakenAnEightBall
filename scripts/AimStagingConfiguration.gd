@@ -6,6 +6,8 @@ class_name AimStagingConfiguration
 
 const USE_STAGED_DEEP_PREDICTION := "use_staged_deep_prediction"
 const DEEP_AIM_SETTLE_DELAY_MS := "deep_aim_settle_delay_ms"
+const USE_CLONED_SETTLED_NORMAL_AIM := "use_cloned_settled_normal_aim"
+const IMMEDIATE_TO_CLONED_BLEND_DURATION_MS := "immediate_to_cloned_blend_duration_ms"
 const PROGRESSIVE_DEEP_AIM_REVEAL := "progressive_deep_aim_reveal"
 const DEEP_AIM_REVEAL_DURATION_MS := "deep_aim_reveal_duration_ms"
 const KEEP_STALE_DEEP_AIM_FAINTLY_VISIBLE := "keep_stale_deep_aim_faintly_visible"
@@ -37,6 +39,30 @@ static func get_configuration_schema() -> Array[Dictionary]:
 			"low_effect": "Deep paths arrive sooner but are easier to request during brief pauses.",
 			"high_effect": "Dragging stays lighter, but deep paths take longer to begin.",
 			"keywords": ["settle timer", "aim pause", "request delay"],
+		},
+		{
+			"key": USE_CLONED_SETTLED_NORMAL_AIM,
+			"label": "Use Cloned Settled Aim For Normal Players (Debug A/B)",
+			"type": "bool",
+			"default": true,
+			"description": "After the player holds the cue still, replaces the quick approximate route with the same accurate cloned simulation used by deep aim.",
+			"on_effect": "Multi-rail and contact geometry use authoritative cloned prediction after settling.",
+			"off_effect": "Keeps the lightweight immediate predictor as the final normal aim route for developer comparison. This may be less accurate.",
+			"keywords": ["normal aim", "cloned settled aim", "debug a/b", "authoritative route"],
+		},
+		{
+			"key": IMMEDIATE_TO_CLONED_BLEND_DURATION_MS,
+			"label": "Immediate To Cloned Blend Duration",
+			"type": "int",
+			"minimum": 0,
+			"maximum": 250,
+			"step": 5,
+			"default": 60,
+			"description": "Presentation-only crossfade duration from the responsive immediate route to accepted cloned geometry. Zero switches immediately.",
+			"unit": "milliseconds",
+			"low_effect": "The authoritative route replaces the immediate route more quickly.",
+			"high_effect": "Corrections blend more gently but remain visible for longer.",
+			"keywords": ["aim blend", "crossfade", "settled route", "transition"],
 		},
 		{
 			"key": PROGRESSIVE_DEEP_AIM_REVEAL,

@@ -15,6 +15,7 @@ const FRACTION_EPSILON := 0.0001
 const TIE_EPSILON := 0.000001
 const PLAYER_TRACE_COLLINEAR_ANGLE_DEGREES := 1.25
 const PLAYER_TRACE_COLLINEAR_DISTANCE_EPSILON := 0.75
+const PLAYER_FIRST_BALL_ROUTE_SIMULATION_DEPTH := 16
 const EMERGENCY_MAX_ITERATIONS := 1000000
 const EMERGENCY_MAX_GEOMETRY_PROBES := 50000000
 const EMERGENCY_MAX_REMAINING_TIME_ITERATIONS := 512
@@ -207,7 +208,7 @@ var _swept_grid_rebuilds := 0
 static func get_configuration_schema(default_substeps: int = 4) -> Array[Dictionary]:
 	var schema: Array[Dictionary] = [
 		{"key": "enabled", "label": "Enable Cloned Aim Simulation", "type": "bool", "default": true},
-		{"key": "use_for_long_sight", "label": "Use Cloned Predictor for Long Sight", "type": "bool", "default": true},
+		{"key": "use_legacy_long_sight_debug", "label": "Use Legacy Long Sight Predictor (Debug A/B)", "type": "bool", "default": false},
 		{"key": "profile_enabled", "label": "Profile Cloned Aim Simulation", "type": "bool", "default": false},
 		{"key": "result_detail_mode", "label": "Prediction Result Detail", "type": "select", "default": RESULT_MODE_FULL_DEBUG, "choices": RESULT_MODE_CHOICES},
 		{"key": "max_simulated_seconds", "label": "Maximum Simulated Seconds", "type": "float", "minimum": 0.1, "maximum": 120.0, "step": 0.1, "default": 10.0},
@@ -248,17 +249,24 @@ static func get_configuration_schema(default_substeps: int = 4) -> Array[Diction
 static func _get_configuration_help() -> Dictionary:
 	return {
 		"enabled": {
-			"description": "Runs the cloned deterministic table simulation used by advanced aim diagnostics.",
+			"description": "Runs the cloned deterministic table simulation used by advanced aim diagnostics. Player-facing extended aim keeps its required production clone path.",
 			"on_effect": "The cloned predictor may rebuild while aiming and provide simulation diagnostics.",
-			"off_effect": "No cloned simulation is run; the normal lightweight preview remains available.",
+			"off_effect": "Debug cloned simulation is disabled; active player-facing extended aim still uses its production cloned configuration.",
 			"keywords": ["trajectory clone", "deterministic prediction"],
 			"aliases": ["Cloned Predictor"],
 		},
-		"use_for_long_sight": {
-			"description": "Uses cloned table trajectories for Long Sight's extended paths instead of its lighter prediction path.",
-			"on_effect": "Long Sight can use the cloned predictor and its configured work limits.",
-			"off_effect": "Long Sight uses its established lightweight path predictor.",
+		"use_legacy_long_sight_debug": {
+			"description": "Uses the older lightweight extended-aim calculation instead of the cloned deterministic predictor. This exists only for developer comparison and may be less accurate.",
+			"on_effect": "Tests the old linear predictor in debug builds. Release builds ignore this switch and remain cloned.",
+			"off_effect": "Player-facing Long Sight uses the accurate cloned deterministic simulation.",
 			"keywords": ["boon", "secondary path", "advanced aim"],
+			"aliases": [
+				"legacy aim",
+				"old long sight",
+				"linear predictor",
+				"cloned predictor comparison",
+				"Use Cloned Predictor for Long Sight",
+			],
 		},
 		"profile_enabled": {
 			"description": "Records phase-level CPU timings and bounded rebuild history for the cloned aim simulation.",
@@ -641,18 +649,39 @@ static func _make_deep_debug_configuration(default_substeps: int) -> Dictionary:
 
 
 static func get_player_long_sight_configuration(chain_depth: int, default_substeps: int = 4) -> Dictionary:
+	return get_player_aim_configuration(chain_depth, default_substeps)
+
+
+static func get_player_aim_configuration(chain_depth: int, default_substeps: int = 4) -> Dictionary:
 	var configuration: Dictionary = get_default_configuration(default_substeps)
 	configuration["result_detail_mode"] = RESULT_MODE_PLAYER_MINIMAL
-	configuration["max_simulated_seconds"] = 5.0
-	configuration["max_physics_frames"] = 300
-	configuration["max_total_iterations"] = 12000
-	configuration["max_geometry_probes"] = 500000
-	configuration["max_total_events"] = 160
-	configuration["max_ball_contacts"] = 96
-	configuration["max_cue_ball_contacts"] = 32
-	configuration["max_rail_contacts"] = 96
-	configuration["max_pocket_events"] = 32
-	configuration["max_child_generation_depth"] = clampi(chain_depth, 0, 64)
+	configuration["max_simulated_seconds"] = 8.0
+	configuration["max_physics_frames"] = 480
+	if chain_depth <= 0:
+		# Normal aim is shallow in causal visibility, not in travel distance. The
+		# cue still has room to reach a first contact after several rail events.
+		configuration["max_total_iterations"] = 16000
+		configuration["max_geometry_probes"] = 750000
+		configuration["max_total_events"] = 40
+		configuration["max_ball_contacts"] = 16
+		configuration["max_cue_ball_contacts"] = 8
+		configuration["max_rail_contacts"] = 48
+		configuration["max_pocket_events"] = 8
+		# Visible normal aim remains depth 1. Hidden causal simulation continues
+		# far enough to retain the first struck ball's own complete response route.
+		configuration["max_child_generation_depth"] = PLAYER_FIRST_BALL_ROUTE_SIMULATION_DEPTH
+	else:
+		configuration["max_total_iterations"] = 12000
+		configuration["max_geometry_probes"] = 500000
+		configuration["max_total_events"] = 160
+		configuration["max_ball_contacts"] = 96
+		configuration["max_cue_ball_contacts"] = 32
+		configuration["max_rail_contacts"] = 96
+		configuration["max_pocket_events"] = 32
+		configuration["max_child_generation_depth"] = maxi(
+			clampi(chain_depth, 1, 64),
+			PLAYER_FIRST_BALL_ROUTE_SIMULATION_DEPTH
+		)
 	configuration["max_points_per_ball"] = 900
 	configuration["max_total_trace_points"] = 8000
 	configuration["player_trace_spacing"] = 10.0
@@ -2141,6 +2170,10 @@ func _compact_event_for_result(event: Dictionary) -> Dictionary:
 		"generation_depth",
 		"causal_root_ball_id",
 		"contact_point",
+		"source_radius",
+		"target_radius",
+		"source_center",
+		"target_center",
 		"pocket_index",
 		"rail_index",
 		"supported",

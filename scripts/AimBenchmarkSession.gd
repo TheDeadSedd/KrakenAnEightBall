@@ -187,6 +187,7 @@ var _phase_maximums_us: Dictionary = {}
 var _work_totals: Dictionary = {}
 var _work_maximums: Dictionary = {}
 var _rebuild_reason_counts: Dictionary = {}
+var _player_request_class_counts: Dictionary = {}
 var _stop_reason_counts: Dictionary = {}
 var _iteration_totals: Dictionary = {}
 var _iteration_source_totals: Dictionary = {}
@@ -263,6 +264,7 @@ func reset() -> void:
 	_work_totals.clear()
 	_work_maximums.clear()
 	_rebuild_reason_counts.clear()
+	_player_request_class_counts.clear()
 	_stop_reason_counts.clear()
 	_iteration_totals.clear()
 	_iteration_source_totals.clear()
@@ -381,6 +383,10 @@ func record_completed_rebuild(sample_value: Dictionary) -> void:
 
 	var rebuild_reason: String = str(sample.get("rebuild_reason", "unknown"))
 	_rebuild_reason_counts[rebuild_reason] = int(_rebuild_reason_counts.get(rebuild_reason, 0)) + 1
+	var request_class: String = str(sample.get("player_request_class", "unclassified"))
+	_player_request_class_counts[request_class] = int(
+		_player_request_class_counts.get(request_class, 0)
+	) + 1
 	var stop_reason: String = str(sample.get("stop_reason", "unknown"))
 	_stop_reason_counts[stop_reason] = int(_stop_reason_counts.get(stop_reason, 0)) + 1
 	var iteration_breakdown: Dictionary = sample.get("iteration_breakdown", {})
@@ -652,6 +658,7 @@ func get_snapshot() -> Dictionary:
 		"cache_hits": _cache_hits,
 		"cache_misses": _captured_rebuilds,
 		"rebuild_reason_counts": _rebuild_reason_counts.duplicate(true),
+		"player_request_class_counts": _player_request_class_counts.duplicate(true),
 		"stop_reason_counts": _stop_reason_counts.duplicate(true),
 		"iteration_totals": _iteration_totals.duplicate(true),
 		"iteration_source_totals": _iteration_source_totals.duplicate(true),
@@ -988,6 +995,9 @@ func make_plain_text_report() -> String:
 	lines.append("Hits: %s" % snapshot.get("cache_hits", 0))
 	lines.append("Misses/completed rebuilds: %s" % snapshot.get("cache_misses", 0))
 	lines.append("Rebuild reasons: %s" % _format_counts(snapshot.get("rebuild_reason_counts", {})))
+	lines.append("Player request classes: %s" % _format_counts(
+		snapshot.get("player_request_class_counts", {})
+	))
 	lines.append("")
 	lines.append("PREDICTION AVAILABILITY")
 	var availability: Dictionary = last_sample.get("prediction_availability", {})
