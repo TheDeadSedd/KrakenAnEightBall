@@ -233,6 +233,8 @@ func _connect_hud_signals() -> void:
 		debug_overlay.reset_table_requested.connect(_on_debug_reset_table_requested)
 	if not debug_overlay.reset_last_shot_requested.is_connected(_on_debug_reset_last_shot_requested):
 		debug_overlay.reset_last_shot_requested.connect(_on_debug_reset_last_shot_requested)
+	if not debug_overlay.debug_notification_requested.is_connected(_on_debug_notification_requested):
+		debug_overlay.debug_notification_requested.connect(_on_debug_notification_requested)
 
 
 func _setup_hud_presenters() -> void:
@@ -258,6 +260,7 @@ func _setup_hud_presenters() -> void:
 	table.emit_ready_status_if_needed("")
 	debug_overlay.setup(table)
 	pause_menu.configure_dev_options_debug_overlay(debug_overlay)
+	pause_menu.configure_dev_options_ball_audio(table.ball_audio_system)
 	table.shot_rewind_system.set_ui_bridge(self)
 	debug_overlay.set_shot_rewind_state(table.shot_rewind_system.get_state_snapshot())
 	_apply_mode_visibility()
@@ -594,6 +597,12 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _on_status_text_changed(text: String) -> void:
 	hud_feed.add_message(text, "status")
+
+
+func _on_debug_notification_requested(text: String, category: String) -> void:
+	if text.strip_edges().is_empty():
+		return
+	hud_feed.add_message(text, category if not category.is_empty() else "event")
 
 
 func _on_game_finished(text: String) -> void:
@@ -1207,6 +1216,8 @@ func _on_debug_reset_table_requested() -> void:
 	if reset_table_in_progress or end_run_in_progress:
 		return
 	reset_table_in_progress = true
+	if table != null and table.shot_ledger_system != null:
+		table.shot_ledger_system.cancel_active_shot("reset_table")
 	GAME_MODE_SCRIPT.set_pending_mode(get_tree(), game_mode_id)
 	GAME_MODE_SCRIPT.set_pending_debug_session(get_tree(), _capture_debug_session_snapshot())
 	get_tree().paused = false

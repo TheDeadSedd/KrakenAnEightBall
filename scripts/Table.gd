@@ -141,6 +141,7 @@ const CUE_BALL_CANNON_WAKE_DEFAULT_RETENTION := 0.22
 @onready var pocket_system: PocketSystem = $PocketSystem
 @onready var boundary_system: BoundarySystem = $BoundarySystem
 @onready var shot_event_system: ShotEventSystem = $ShotEventSystem
+@onready var shot_ledger_system: ShotLedgerSystem = $ShotLedgerSystem
 @onready var score_system: ScoreSystem = $ScoreSystem
 @onready var pocket_streak_system: PocketStreakSystem = $PocketStreakSystem
 @onready var ball_drop_system: BallDropSystem = $BallDropSystem
@@ -265,6 +266,7 @@ func _ready() -> void:
 	pocket_system.setup(self)
 	boundary_system.setup(self)
 	shot_event_system.setup(self)
+	shot_ledger_system.setup(self)
 	score_system.setup(self)
 	pocket_streak_system.setup(self)
 	ball_drop_system.setup(self)
@@ -554,6 +556,7 @@ func _is_roguelite_scoreable_ball(ball: Ball) -> bool:
 
 func _reset_roguelite_table_for_current_round() -> void:
 	shot_rewind_system.invalidate_checkpoint("Reset unavailable: the table changed rounds.")
+	shot_ledger_system.cancel_active_shot("roguelite_round_transition")
 	aim_preview.clear_for_authoritative_table_reset("roguelite_round_transition")
 	pocket_capture_presenter.clear_collections("roguelite_round_transition")
 	game_over = false
@@ -800,6 +803,7 @@ func _physics_process(delta: float) -> void:
 			_move_balls_with_cue_first_contact_toi(step_delta)
 		else:
 			_move_balls(step_delta)
+		_record_shot_ledger_travel_step()
 		anchor_ball_system.enforce_curse_chain_constraints()
 		if cue_toi_path_active:
 			_populate_ball_collision_grid(cue_toi_spatial_grid_this_substep, cue_toi_active_balls_this_substep)
@@ -1531,9 +1535,16 @@ func _resolve_ball_contact_response(
 	var pre_collision_velocity_a: Vector2 = ball_a.velocity
 	var pre_collision_velocity_b: Vector2 = ball_b.velocity
 	var collision_impact_speed: float = _get_ball_collision_impact_speed(ball_a, ball_b, normal)
-	if collision_impact_speed > 0.0:
-		ball_audio_system.handle_ball_collision(ball_a, ball_b, collision_impact_speed)
 	var collision_response_applied: bool = _apply_ball_collision_response(ball_a, ball_b, normal, collision_impact_speed)
+	if collision_response_applied and collision_impact_speed > 0.0:
+		# Playback remains in this collision tick, but only after the contact has
+		# been authoritatively accepted by the real response path.
+		ball_audio_system.handle_ball_collision(
+			ball_a,
+			ball_b,
+			collision_impact_speed,
+			Time.get_ticks_usec()
+		)
 	if aim_contact_order_diagnostics.resolver_capture_open:
 		aim_contact_order_diagnostics.record_pair_resolution(
 			ball_a,
@@ -1572,6 +1583,27 @@ func _resolve_ball_contact_response(
 	wayfinder_system.handle_collision(ball_a, ball_b)
 	powder_keg_system.handle_collision(ball_a, ball_b)
 	anchor_ball_system.handle_collision(ball_a, ball_b)
+	if shot_active:
+		if collision_response_applied and collision_impact_speed > ShotLedgerSystem.MEANINGFUL_IMPACT_EPSILON:
+			shot_ledger_system.record_ball_contact({
+				"ball_a_id": ball_a.get_instance_id(),
+				"ball_b_id": ball_b.get_instance_id(),
+				"contact_point": ball_a.global_position + normal * ball_a.radius,
+				"contact_normal": normal,
+				"pre_velocity_a": pre_collision_velocity_a,
+				"pre_velocity_b": pre_collision_velocity_b,
+				"post_velocity_a": ball_a.velocity,
+				"post_velocity_b": ball_b.velocity,
+				"relative_normal_speed": collision_impact_speed,
+				"accepted_impact": true,
+				"resolution_source": resolution_source,
+			})
+		else:
+			shot_ledger_system.record_suppressed_ball_contact(
+				ball_a.get_instance_id(),
+				ball_b.get_instance_id(),
+				"separation_only" if not collision_response_applied else "below_impact_epsilon"
+			)
 	return collision_response_applied
 
 
@@ -1735,8 +1767,23 @@ func _resolve_rail_collisions() -> void:
 		return
 
 	for ball in _get_moving_active_balls():
+		var clamps_before: int = boundary_system.get_clamps_without_bounce_this_frame()
 		var hit_events: Array = boundary_system.resolve_ball_against_boundaries(ball, RAIL_RESTITUTION)
+		var clamp_count: int = boundary_system.get_clamps_without_bounce_this_frame() - clamps_before
+		if clamp_count > 0:
+			shot_ledger_system.record_suppressed_rail_clamps(clamp_count)
 		for hit_event in hit_events:
+			if shot_active:
+				shot_ledger_system.record_rail_contact({
+					"ball_id": ball.get_instance_id(),
+					"rail_id": str(hit_event.boundary_id),
+					"rail_kind": str(hit_event.boundary_kind),
+					"contact_point": hit_event.position - hit_event.normal * ball.radius,
+					"contact_normal": hit_event.normal,
+					"pre_velocity": hit_event.incoming_velocity,
+					"post_velocity": hit_event.outgoing_velocity,
+					"normal_speed": maxf(-hit_event.incoming_velocity.dot(hit_event.normal), 0.0),
+				})
 			_note_cue_rail_touch(ball)
 			shot_event_system.record_rail_contact(ball, hit_event.position)
 			if aim_preview.is_debug_aim_line_enabled():
@@ -1766,6 +1813,16 @@ func _handle_pocket_checks() -> bool:
 	var captured_pocket_index: int = pocket_system.get_last_captured_pocket_index()
 	var captured_pocket_position: Vector2 = pocket_system.get_last_captured_pocket_position()
 	var captured_pocket_radius: float = pocket_system.get_last_captured_pocket_radius()
+	if shot_active:
+		shot_ledger_system.record_pocket({
+			"ball_id": pocketed_ball.get_instance_id(),
+			"pocket_index": captured_pocket_index,
+			"pocket_name": pocket_system.get_last_captured_pocket_name(),
+			"pocket_center": captured_pocket_position,
+			"capture_position": pocketed_ball.global_position,
+			"ball_kind": _get_shot_ledger_ball_kind(pocketed_ball),
+			"counts_as_object_ball": pocketed_ball.ball_type == Ball.BallType.OBJECT,
+		})
 
 	if aim_preview.is_debug_aim_line_enabled():
 		aim_preview.report_debug_pocket_event(
@@ -2476,6 +2533,7 @@ func _note_actual_cue_pocketed(ball: Ball) -> void:
 func _start_shot_tracking() -> void:
 	_deactivate_initial_cue_start_selection()
 	shot_active = true
+	shot_ledger_system.begin_shot(_make_shot_ledger_start_context())
 	_reset_cue_toi_for_committed_shot()
 	shots_taken_count += 1
 	shot_taken.emit(shots_taken_count)
@@ -2498,6 +2556,95 @@ func _start_shot_tracking() -> void:
 	table_event_system.start_shot()
 	embezzler_system.handle_shot_started()
 	shot_rewind_system.notify_table_state_changed()
+
+
+func _make_shot_ledger_start_context() -> Dictionary:
+	var starting_balls: Dictionary = {}
+	for child in balls.get_children():
+		var ball: Ball = child as Ball
+		if ball == null or not is_instance_valid(ball) or ball.is_queued_for_deletion():
+			continue
+		if not ball.is_gameplay_active():
+			continue
+		var ball_id: int = ball.get_instance_id()
+		starting_balls[str(ball_id)] = {
+			"ball_id": ball_id,
+			"ball_number": ball.ball_number,
+			"ball_kind": _get_shot_ledger_ball_kind(ball),
+			"anomaly_type": _get_shot_ledger_anomaly_type(ball),
+			"counts_as_object_ball": ball.ball_type == Ball.BallType.OBJECT,
+			"radius": ball.radius,
+			"start_position": ball.global_position,
+			"start_velocity": ball.velocity,
+		}
+	return {
+		"mode_id": game_mode_id,
+		"cue_ball_id": cue_ball.get_instance_id() if is_instance_valid(cue_ball) else -1,
+		"ball_id_strategy": "runtime_instance_id",
+		"starting_balls": starting_balls,
+	}
+
+
+func _make_shot_ledger_final_state() -> Dictionary:
+	var ending_balls: Dictionary = {}
+	for child in balls.get_children():
+		var ball: Ball = child as Ball
+		if ball == null or not is_instance_valid(ball) or ball.is_queued_for_deletion():
+			continue
+		var ball_id: int = ball.get_instance_id()
+		ending_balls[str(ball_id)] = {
+			"ball_id": ball_id,
+			"ball_number": ball.ball_number,
+			"ball_kind": _get_shot_ledger_ball_kind(ball),
+			"anomaly_type": _get_shot_ledger_anomaly_type(ball),
+			"active": ball.is_gameplay_active(),
+			"pocketed": false,
+			"final_position": ball.global_position,
+			"final_velocity": ball.velocity,
+		}
+	return {"ending_balls": ending_balls}
+
+
+func _record_shot_ledger_travel_step() -> void:
+	if not shot_active or not shot_ledger_system.is_shot_active():
+		return
+	for child in balls.get_children():
+		var ball: Ball = child as Ball
+		if ball == null or not is_instance_valid(ball) or ball.is_queued_for_deletion():
+			continue
+		if not ball.is_gameplay_active():
+			continue
+		shot_ledger_system.record_ball_position(ball.get_instance_id(), ball.global_position)
+
+
+func _get_shot_ledger_ball_kind(ball: Ball) -> String:
+	if ball == null:
+		return "unknown"
+	if ball == cue_ball or ball.ball_type == Ball.BallType.CUE:
+		return "cue"
+	if ball == eight_ball or ball.ball_type == Ball.BallType.EIGHT:
+		return "eight"
+	if not _get_shot_ledger_anomaly_type(ball).is_empty():
+		return "anomaly"
+	return "object"
+
+
+func _get_shot_ledger_anomaly_type(ball: Ball) -> String:
+	if ball == null:
+		return ""
+	if ball.is_wayfinder:
+		return "wayfinder"
+	if ball.is_powder_keg:
+		return "powder_keg"
+	if ball.is_anchor_ball or ball.is_anchor_curse_seed:
+		return "anchor"
+	if ball.is_cannon_ball:
+		return "cannon"
+	if ball.is_treasure_ball:
+		return "treasure"
+	if ball.is_embezzler_ball:
+		return "embezzler"
+	return ""
 
 
 func _reset_cue_toi_for_committed_shot() -> void:
@@ -2717,6 +2864,7 @@ func _try_finish_shot() -> void:
 	shot_event_system.finish_shot()
 	pocket_streak_system.finish_shot()
 	table_event_system.finish_shot()
+	shot_ledger_system.finalize_shot(_make_shot_ledger_final_state())
 	shot_finished.emit(shots_taken_count)
 	if should_advance_anchor_chains:
 		_handle_cue_control_regained_after_shot()
@@ -2829,6 +2977,7 @@ func get_shot_rewind_state() -> Dictionary:
 
 func prepare_for_shot_rewind() -> void:
 	game_over = false
+	shot_ledger_system.cancel_active_shot("shot_rewind")
 	shot_active = false
 	cue_toi_first_contact_pending = false
 	_reset_cue_toi_shot_counters()
@@ -3361,6 +3510,78 @@ func _get_audio_performance_snapshot() -> Dictionary:
 		"collision_audio_skipped_global_cooldown": collision_audio_snapshot["skipped_global_cooldown"],
 		"collision_audio_skipped_pair_cooldown": collision_audio_snapshot["skipped_pair_cooldown"],
 		"collision_audio_pool_steals": collision_audio_snapshot["pool_steals"],
+		"collision_audio_default_mode": collision_audio_snapshot["default_mode"],
+		"collision_audio_sampled_requests": collision_audio_snapshot["sampled_play_requests"],
+		"collision_audio_sampled_playbacks": collision_audio_snapshot["sampled_playback_count"],
+		"collision_audio_sampled_pool_ready": collision_audio_snapshot["sampled_pool_ready"],
+		"collision_audio_sampled_pool_target_size": collision_audio_snapshot["sampled_pool_target_size"],
+		"collision_audio_last_request_delay_usec": collision_audio_snapshot["last_collision_to_play_request_delay_usec"],
+		"collision_audio_deferred_sampled_plays": collision_audio_snapshot["deferred_sampled_play_count"],
+		"collision_audio_impact_time_allocations": collision_audio_snapshot["impact_time_player_allocations"],
+		"collision_audio_first_hit_initializations": collision_audio_snapshot["first_hit_initialization_count"],
+		"collision_audio_sampled_wav_leading_silence_msec": collision_audio_snapshot["sampled_wav_leading_silence_msec"],
+		"collision_audio_sampled_wav_strong_transient_msec": collision_audio_snapshot["sampled_wav_strong_transient_msec"],
+		"collision_audio_sampled_wav_trimmed_msec": collision_audio_snapshot["sampled_wav_trimmed_msec"],
+		"collision_audio_mode": collision_audio_snapshot["mode"],
+		"collision_audio_effective_mode": collision_audio_snapshot["effective_mode"],
+		"collision_audio_generated_bank_ready": collision_audio_snapshot["generated_bank_ready"],
+		"collision_audio_sample_rate": collision_audio_snapshot["sample_rate"],
+		"collision_audio_strength_band_count": collision_audio_snapshot["strength_band_count"],
+		"collision_audio_variants_per_band": collision_audio_snapshot["variants_per_band"],
+		"collision_audio_generated_stream_count": collision_audio_snapshot["generated_stream_count"],
+		"collision_audio_material_profile": collision_audio_snapshot["material_profile"],
+		"collision_audio_primary_frequency_min_hz": collision_audio_snapshot["generated_primary_frequency_min_hz"],
+		"collision_audio_primary_frequency_max_hz": collision_audio_snapshot["generated_primary_frequency_max_hz"],
+		"collision_audio_secondary_frequency_min_hz": collision_audio_snapshot["generated_secondary_frequency_min_hz"],
+		"collision_audio_secondary_frequency_max_hz": collision_audio_snapshot["generated_secondary_frequency_max_hz"],
+		"collision_audio_body_frequency_min_hz": collision_audio_snapshot["generated_body_frequency_min_hz"],
+		"collision_audio_body_frequency_max_hz": collision_audio_snapshot["generated_body_frequency_max_hz"],
+		"collision_audio_generated_duration_min_ms": collision_audio_snapshot["generated_duration_min_ms"],
+		"collision_audio_generated_duration_max_ms": collision_audio_snapshot["generated_duration_max_ms"],
+		"collision_audio_generated_transient_min_ms": collision_audio_snapshot["generated_transient_min_ms"],
+		"collision_audio_generated_transient_max_ms": collision_audio_snapshot["generated_transient_max_ms"],
+		"collision_audio_authored_duration_min_ms": collision_audio_snapshot["authored_duration_min_ms"],
+		"collision_audio_authored_duration_max_ms": collision_audio_snapshot["authored_duration_max_ms"],
+		"collision_audio_authored_transient_min_ms": collision_audio_snapshot["authored_transient_min_ms"],
+		"collision_audio_authored_transient_max_ms": collision_audio_snapshot["authored_transient_max_ms"],
+		"collision_audio_body_primary_ratio": collision_audio_snapshot["body_to_primary_amplitude_ratio"],
+		"collision_audio_modal_count": collision_audio_snapshot["modal_count"],
+		"collision_audio_modal_frequency_min_hz": collision_audio_snapshot["modal_frequency_min_hz"],
+		"collision_audio_modal_frequency_max_hz": collision_audio_snapshot["modal_frequency_max_hz"],
+		"collision_audio_modal_decay_min_ms": collision_audio_snapshot["modal_decay_min_ms"],
+		"collision_audio_modal_decay_max_ms": collision_audio_snapshot["modal_decay_max_ms"],
+		"collision_audio_micro_impulse_separation_min_ms": collision_audio_snapshot["micro_impulse_separation_min_ms"],
+		"collision_audio_micro_impulse_separation_max_ms": collision_audio_snapshot["micro_impulse_separation_max_ms"],
+		"collision_audio_low_body_frequency_min_hz": collision_audio_snapshot["low_body_frequency_min_hz"],
+		"collision_audio_low_body_frequency_max_hz": collision_audio_snapshot["low_body_frequency_max_hz"],
+		"collision_audio_low_body_amplitude_min": collision_audio_snapshot["low_body_relative_amplitude_min"],
+		"collision_audio_low_body_amplitude_max": collision_audio_snapshot["low_body_relative_amplitude_max"],
+		"collision_audio_candidate_name": collision_audio_snapshot["candidate_name"],
+		"collision_audio_modal_centers_hz": collision_audio_snapshot["modal_center_frequencies_hz"],
+		"collision_audio_secondary_pulse_enabled": collision_audio_snapshot["secondary_pulse_enabled"],
+		"collision_audio_compression_impulse_level": collision_audio_snapshot["compression_impulse_level"],
+		"collision_audio_table_coupling_level": collision_audio_snapshot["table_coupling_level"],
+		"collision_audio_highpass_cutoff_hz": collision_audio_snapshot["highpass_cutoff_hz"],
+		"collision_audio_saturation_amount": collision_audio_snapshot["saturation_amount"],
+		"collision_audio_material_tail_retained": collision_audio_snapshot["material_tail_retained"],
+		"collision_audio_active_procedural_voices": collision_audio_snapshot["active_procedural_voices"],
+		"collision_audio_active_sampled_voices": collision_audio_snapshot["active_sampled_voices"],
+		"collision_audio_max_procedural_voices": collision_audio_snapshot["max_procedural_voices"],
+		"collision_audio_procedural_voice_limit": collision_audio_snapshot["procedural_voice_limit"],
+		"collision_audio_sampled_layer_plays": collision_audio_snapshot["sampled_layer_plays"],
+		"collision_audio_procedural_layer_plays": collision_audio_snapshot["procedural_layer_plays"],
+		"collision_audio_suppressed_weak": collision_audio_snapshot["suppressed_weak_impacts"],
+		"collision_audio_suppressed_repeated_pair": collision_audio_snapshot["suppressed_repeated_pair_contacts"],
+		"collision_audio_voice_budget_rejections": collision_audio_snapshot["voice_budget_rejections"],
+		"collision_audio_procedural_pool_steals": collision_audio_snapshot["procedural_pool_steals"],
+		"collision_audio_layered_sample_budget_skips": collision_audio_snapshot["layered_sample_budget_skips"],
+		"collision_audio_fallback_count": collision_audio_snapshot["fallback_to_sampled_count"],
+		"collision_audio_last_strength": collision_audio_snapshot["last_normalized_impact_strength"],
+		"collision_audio_last_band": collision_audio_snapshot["last_selected_band"],
+		"collision_audio_last_variant": collision_audio_snapshot["last_selected_variant"],
+		"collision_audio_last_volume_db": collision_audio_snapshot["last_collision_playback_volume_db"],
+		"collision_audio_bank_generation_ms": collision_audio_snapshot["bank_generation_duration_ms"],
+		"collision_audio_bank_generation_count": collision_audio_snapshot["bank_generation_count"],
 		"pocket_streak_audio_pool_size": streak_audio_snapshot["pool_size"],
 		"pocket_streak_audio_playing_players": streak_audio_snapshot["playing_players"],
 		"pocket_streak_audio_max_playing_players": streak_audio_snapshot["max_playing_players"],

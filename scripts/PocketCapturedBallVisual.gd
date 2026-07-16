@@ -5,8 +5,10 @@ signal capture_animation_finished
 
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const DEFAULT_RADIUS := 14.0
-const SETTLED_TINT := Color(0.66, 0.68, 0.70, 0.80)
-const DROP_TINT := Color(0.72, 0.74, 0.76, 0.88)
+const DEFAULT_SETTLED_SCALE := Vector2(0.92, 0.92)
+const DROP_COMPRESSED_SCALE := Vector2(0.80, 0.76)
+const SETTLED_TINT := Color(0.88, 0.88, 0.88, 1.0)
+const DROP_TINT := Color(0.72, 0.74, 0.76, 0.98)
 
 var appearance: Dictionary = {}
 var pocket_index: int = -1
@@ -20,6 +22,7 @@ var settled_modulate: Color = SETTLED_TINT
 
 var capture_tween: Tween
 var reaction_tween: Tween
+var depth_tween: Tween
 
 
 func configure(snapshot: Dictionary, captured_pocket_index: int, serial: int) -> void:
@@ -48,25 +51,23 @@ func play_capture(
 	settled_position = target_position
 	settled_scale = target_scale
 	settled_rotation = target_rotation
-	settled_modulate = SETTLED_TINT
 
 	var safe_inward: Vector2 = inward_direction.normalized()
 	if safe_inward.is_zero_approx():
 		safe_inward = Vector2.DOWN
 	var drop_position: Vector2 = pocket_position + safe_inward * 8.0
-	var drop_scale: Vector2 = Vector2(0.84, 0.58)
 	var approach_rotation: float = lerpf(rotation, target_rotation * 0.35, 0.55)
 
 	capture_tween = create_tween()
 	capture_tween.tween_property(self, "position", pocket_position, approach_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	capture_tween.parallel().tween_property(self, "rotation", approach_rotation, approach_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 	capture_tween.tween_property(self, "position", drop_position, drop_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
-	capture_tween.parallel().tween_property(self, "scale", drop_scale, drop_duration).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+	capture_tween.parallel().tween_property(self, "scale", DROP_COMPRESSED_SCALE, drop_duration).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
 	capture_tween.parallel().tween_property(self, "modulate", DROP_TINT, drop_duration)
 	capture_tween.tween_property(self, "position", target_position, roll_duration).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	capture_tween.parallel().tween_property(self, "scale", target_scale, roll_duration).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	capture_tween.parallel().tween_property(self, "rotation", target_rotation, roll_duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	capture_tween.parallel().tween_property(self, "modulate", SETTLED_TINT, roll_duration)
+	capture_tween.parallel().tween_property(self, "modulate", settled_modulate, roll_duration)
 	if should_persist:
 		capture_tween.tween_callback(_finish_persistent_capture)
 	else:
@@ -85,7 +86,7 @@ func restore_settled(state: Dictionary) -> void:
 	capture_serial = int(state.get("capture_serial", 0))
 	persistent_collection_visual = true
 	settled_position = _get_vector2(state, "settled_position", Vector2.ZERO)
-	settled_scale = _get_vector2(state, "settled_scale", Vector2(0.82, 0.72))
+	settled_scale = _get_vector2(state, "settled_scale", DEFAULT_SETTLED_SCALE)
 	settled_rotation = float(state.get("settled_rotation", 0.0))
 	var modulate_value: Variant = state.get("settled_modulate", SETTLED_TINT)
 	settled_modulate = modulate_value if modulate_value is Color else SETTLED_TINT
@@ -141,6 +142,20 @@ func reflow_settled(target_position: Vector2, duration: float = 0.18) -> void:
 	reaction_tween.tween_property(self, "position", settled_position, duration).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 
 
+func apply_collection_depth_tint(tint: Color, duration: float = 0.14) -> void:
+	settled_modulate = tint
+	if not settled:
+		return
+	if depth_tween != null and depth_tween.is_running():
+		depth_tween.kill()
+	depth_tween = null
+	if duration <= 0.0:
+		modulate = settled_modulate
+		return
+	depth_tween = create_tween()
+	depth_tween.tween_property(self, "modulate", settled_modulate, duration).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+
+
 func fade_deeper_and_free(deeper_position: Vector2, duration: float) -> void:
 	cancel_animation()
 	settled = false
@@ -158,8 +173,11 @@ func cancel_animation() -> void:
 		capture_tween.kill()
 	if reaction_tween != null and reaction_tween.is_running():
 		reaction_tween.kill()
+	if depth_tween != null and depth_tween.is_running():
+		depth_tween.kill()
 	capture_tween = null
 	reaction_tween = null
+	depth_tween = null
 
 
 func _finish_persistent_capture() -> void:

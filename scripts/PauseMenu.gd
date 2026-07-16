@@ -251,7 +251,9 @@ var dev_options_button: Button
 var dev_options_panel: DevOptionsPanel
 var dev_option_registry: DevOptionRegistry
 var debug_overlay_bridge: DebugOverlay
+var ball_audio_system_bridge: BallAudioSystem
 var _external_dev_options_registered := false
+var _ball_audio_dev_options_registered := false
 var options_button: Button
 var options_panel: OptionsMenu
 var end_run_button: Button
@@ -463,6 +465,15 @@ func configure_dev_options_debug_overlay(overlay: DebugOverlay) -> void:
 	if not debug_overlay_bridge.dev_option_state_changed.is_connected(_on_debug_overlay_dev_option_changed):
 		debug_overlay_bridge.dev_option_state_changed.connect(_on_debug_overlay_dev_option_changed)
 	_register_external_dev_options()
+	if dev_options_panel != null:
+		dev_options_panel.rebuild_options()
+	if dev_option_registry != null:
+		dev_option_registry.refresh_all()
+
+
+func configure_dev_options_ball_audio(system: BallAudioSystem) -> void:
+	ball_audio_system_bridge = system
+	_register_ball_audio_dev_options()
 	if dev_options_panel != null:
 		dev_options_panel.rebuild_options()
 	if dev_option_registry != null:
@@ -1299,6 +1310,7 @@ func _register_local_dev_options() -> void:
 		"Clears the cloned predictor's bounded timing history and profiler counters. It does not change prediction settings or gameplay.",
 		["clear timings", "profile history", "performance baseline"]
 	)
+	_register_ball_audio_dev_options()
 
 	_register_bool_control(
 		"events.show_wayfinder_current_button",
@@ -1461,6 +1473,7 @@ func _register_external_dev_options() -> void:
 		_register_panel_option(panel_definition, "Performance Panels")
 
 	var system_panels: Array[Dictionary] = [
+		{"id": "shot_ledger", "label": "Shot Ledger Diagnostics", "description": "Shows the active and last completed semantic shot ledger, causal pocket facts, tags, and collector warnings."},
 		{"id": "treasure", "label": "Treasure", "description": "Shows Treasure Ball perception, hide-target, and movement diagnostics."},
 		{"id": "embezzler", "label": "Embezzler", "description": "Shows Embezzler value, movement, escape, and capture state."},
 		{"id": "anchor", "label": "Anchor", "description": "Shows Anchor curse-seed chain, tightening, warning, spread, and collapse diagnostics."},
@@ -1470,6 +1483,32 @@ func _register_external_dev_options() -> void:
 	]
 	for panel_definition in system_panels:
 		_register_panel_option(panel_definition, "System Panels")
+
+	var shot_ledger_locations: Array = [
+		_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Shot Ledger"),
+		_dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Shot Ledger"),
+	]
+	_register_overlay_action(
+		"shot_ledger.copy_summary",
+		"Copy Last Shot Ledger Summary",
+		shot_ledger_locations,
+		"Copies a concise value-only summary of the last completed authoritative shot ledger.",
+		["shot facts", "copy ledger", "semantic events"]
+	)
+	_register_overlay_action(
+		"shot_ledger.copy_json",
+		"Copy Last Shot Ledger JSON",
+		shot_ledger_locations,
+		"Copies the complete last ledger as JSON, converting Vector2 values into readable x/y objects.",
+		["export ledger", "raw events", "json"]
+	)
+	_register_overlay_action(
+		"shot_ledger.run_self_test",
+		"Run Shot Ledger Self-Test",
+		shot_ledger_locations,
+		"Runs pure synthetic semantic-analysis cases without spawning balls or changing gameplay.",
+		["direct pot", "bank", "combination", "re-contact", "causality"]
+	)
 
 	_register_overlay_bool("overlay.performance", "Full Performance Overlay", [_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Testing"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Performance Panels")], "Shows the original full-screen performance text overlay. It is denser and more expensive to format than the focused modular panels.", "The full performance overlay is visible.", "The full performance overlay is hidden.", ["f3", "all performance", "legacy diagnostics"])
 	_register_overlay_bool("overlay.physics_debug", "Physics Debug", [_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Testing"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Performance Panels")], "Shows the legacy on-screen physics debug text for moving balls and collision state.", "Physics debug text is visible.", "Physics debug text is hidden.", ["ball velocity", "collision state", "legacy overlay"])
@@ -1483,6 +1522,300 @@ func _register_external_dev_options() -> void:
 	_register_overlay_bool("powder.particles", "Powder Keg Particles", [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Powder Keg Presentation")], "Enables normal Powder Keg explosion particles. This affects presentation workload, not explosion force.", "Powder Keg explosion particles are allowed.", "Powder Keg explosion particles are suppressed.", ["explosion vfx", "powder presentation"])
 	_register_overlay_bool("powder.reduced_particles", "Reduced Powder Keg Particles", [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Powder Keg Presentation")], "Uses a reduced Powder Keg particle count to compare presentation cost while retaining the effect.", "Reduced particle density is used.", "Normal particle density is used when particles are enabled.", ["low particles", "vfx cost"])
 	_register_overlay_bool("powder.suppress_trails", "Suppress Powder Keg Trails", [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Powder Keg Presentation")], "Hides Powder Keg trails for visual-cost testing without changing ball movement.", "Powder Keg trails are hidden.", "Powder Keg trails use their normal presentation.", ["trail vfx", "visual cost"])
+
+
+func _register_ball_audio_dev_options() -> void:
+	if (
+		dev_option_registry == null
+		or ball_audio_system_bridge == null
+		or _ball_audio_dev_options_registered
+	):
+		return
+	_ball_audio_dev_options_registered = true
+	var locations: Array = [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Ball Audio")]
+	dev_option_registry.register_option({
+		"id": "audio.ball_collision_mode",
+		"label": "Ball Collision Sound",
+		"kind": "select",
+		"locations": locations,
+		"description": "Switches only ordinary ball-collision presentation. Sampled is the original safe path; Procedural uses cached generated one-shots; Layered combines both at restrained gain.",
+		"keywords": ["sampled", "procedural", "layered", "collision sound"],
+		"choices": [
+			{"label": "Sampled", "value": BallAudioSystem.MODE_SAMPLED, "description": "Uses the original recorded collision WAV path exactly as before."},
+			{"label": "Procedural", "value": BallAudioSystem.MODE_PROCEDURAL, "description": "Uses only cached generated collision one-shots."},
+			{"label": "Layered", "value": BallAudioSystem.MODE_LAYERED, "description": "Adds a quiet sampled layer beneath generated collision detail."},
+		],
+		"getter": ball_audio_system_bridge.get_collision_audio_mode,
+		"setter": ball_audio_system_bridge.set_collision_audio_mode,
+	})
+	dev_option_registry.register_option({
+		"id": "audio.procedural_collision_material",
+		"label": "Procedural Collision Material",
+		"kind": "select",
+		"locations": locations,
+		"description": "Selects a cached synthesis recipe. Solid Phenolic B is the default audition candidate; every earlier material experiment remains available.",
+		"keywords": ["solid phenolic", "audition candidate", "resin", "bright prototype", "material profile", "collision voice"],
+		"choices": [
+			{"label": "Solid Phenolic A - Dry", "value": BallAudioSystem.MATERIAL_SOLID_PHENOLIC_A_DRY, "description": "Shortest cluster, nearly no table coupling, and the least low-mid content."},
+			{"label": "Solid Phenolic B - Balanced", "value": BallAudioSystem.MATERIAL_SOLID_PHENOLIC_B_BALANCED, "description": "Balanced contact texture with subtle compression and table coupling. Current default."},
+			{"label": "Solid Phenolic C - Full", "value": BallAudioSystem.MATERIAL_SOLID_PHENOLIC_C_FULL, "description": "Strongest permitted compression and slate coupling without sustained low resonance."},
+			{"label": "Solid Phenolic D - Sharp", "value": BallAudioSystem.MATERIAL_SOLID_PHENOLIC_D_SHARP, "description": "Shortest bright-edged candidate with minimal table coupling and stronger upper contact detail."},
+			{"label": "Dense Phenolic", "value": BallAudioSystem.MATERIAL_DENSE_PHENOLIC, "description": "Very short inharmonic modal clusters with dense contact texture and minimal hollow body."},
+			{"label": "Resonant Resin Prototype", "value": BallAudioSystem.MATERIAL_RESONANT_RESIN_PROTOTYPE, "description": "The previous lower resin recipe retained as the hollow/resonant comparison reference."},
+			{"label": "Bright Prototype", "value": BallAudioSystem.MATERIAL_BRIGHT_PROTOTYPE, "description": "The original brighter, longer, more resonant generated recipe."},
+		],
+		"getter": ball_audio_system_bridge.get_procedural_material_profile,
+		"setter": ball_audio_system_bridge.set_procedural_material_profile,
+	})
+	_register_ball_audio_number(
+		"audio.procedural_collision_hardness",
+		"Procedural Collision Hardness",
+		ball_audio_system_bridge.get_procedural_hardness,
+		ball_audio_system_bridge.set_procedural_hardness,
+		0.5,
+		1.5,
+		0.05,
+		1.0,
+		"Balances the short contact transient against the impact body. It does not change collision response or simply boost treble.",
+		"Rounder contact with a little more body.",
+		"Denser, firmer contact edge with restrained body."
+	)
+	_register_ball_audio_number(
+		"audio.procedural_collision_brightness",
+		"Procedural Collision Brightness",
+		ball_audio_system_bridge.get_procedural_brightness,
+		ball_audio_system_bridge.set_procedural_brightness,
+		0.5,
+		1.5,
+		0.05,
+		1.0,
+		"Adjusts the bounded secondary resonance and first-millisecond upper tick without changing collision behavior.",
+		"Darker, rounder generated collision tone.",
+		"More upper definition while retaining the selected material identity."
+	)
+	_register_ball_audio_number(
+		"audio.procedural_collision_body",
+		"Procedural Collision Body",
+		ball_audio_system_bridge.get_procedural_body,
+		ball_audio_system_bridge.set_procedural_body,
+		0.5,
+		1.5,
+		0.05,
+		1.0,
+		"Controls the selected profile's restrained mass component. Solid Phenolic uses only short 700-1500 Hz compression and quiet slate coupling.",
+		"Lighter generated impacts.",
+		"Weightier generated impacts without a long sub-bass tail."
+	)
+	_register_ball_audio_number(
+		"audio.procedural_collision_decay",
+		"Procedural Collision Decay",
+		ball_audio_system_bridge.get_procedural_decay,
+		ball_audio_system_bridge.set_procedural_decay,
+		0.65,
+		1.4,
+		0.05,
+		1.0,
+		"Scales the selected profile's compact authored decay range. It never changes gameplay timing.",
+		"Shorter, drier generated clacks.",
+		"Modestly longer impact body within the profile's hard duration cap."
+	)
+	_register_ball_audio_number(
+		"audio.procedural_collision_variation",
+		"Procedural Collision Variation",
+		ball_audio_system_bridge.get_procedural_variation,
+		ball_audio_system_bridge.set_procedural_variation,
+		0.0,
+		1.5,
+		0.05,
+		1.0,
+		"Scales narrow bank-frequency, decay, texture, and playback-pitch variation using audio-only random sources.",
+		"More uniform generated collisions.",
+		"More variation while retaining one billiard-ball material identity."
+	)
+	_register_ball_audio_number(
+		"audio.procedural_collision_voice_limit",
+		"Procedural Collision Voice Limit",
+		ball_audio_system_bridge.get_procedural_voice_limit,
+		ball_audio_system_bridge.set_procedural_voice_limit,
+		4.0,
+		32.0,
+		1.0,
+		24,
+		"Caps simultaneous generated collision voices. Stronger impacts can replace weaker voices when this presentation budget is full.",
+		"More aggressive culling during dense collision chains.",
+		"More simultaneous generated collision voices."
+	)
+	_register_direct_action_option(
+		"audio.procedural_collision_reset",
+		"Reset Collision Audio Settings",
+		locations,
+		"Restores Sampled collision audio plus the default procedural audition profile, tuning, and 24-voice limit.",
+		_reset_collision_audio_settings,
+		["audio defaults", "reset collision sound"]
+	)
+	_register_direct_action_option(
+		"audio.play_soft_collision",
+		"Play Soft Collision",
+		locations,
+		"Auditions a soft impact through the currently selected collision-audio mode without touching gameplay balls.",
+		ball_audio_system_bridge.debug_play_soft_collision,
+		["audio test", "graze"]
+	)
+	_register_direct_action_option(
+		"audio.play_medium_collision",
+		"Play Medium Collision",
+		locations,
+		"Auditions a medium impact through the currently selected collision-audio mode without touching gameplay balls.",
+		ball_audio_system_bridge.debug_play_medium_collision,
+		["audio test", "clack"]
+	)
+	_register_direct_action_option(
+		"audio.play_hard_collision",
+		"Play Hard Collision",
+		locations,
+		"Auditions a hard impact through the currently selected collision-audio mode without touching gameplay balls.",
+		ball_audio_system_bridge.debug_play_hard_collision,
+		["audio test", "crack"]
+	)
+	_register_direct_action_option(
+		"audio.play_collision_burst",
+		"Play Collision Burst",
+		locations,
+		"Auditions a mixed-strength burst against the real bounded audio pools and priority rules without spawning or colliding balls.",
+		ball_audio_system_bridge.debug_play_collision_burst,
+		["audio stress", "voice budget", "chain"]
+	)
+	_register_direct_action_option(
+		"audio.compare_solid_phenolic_candidates",
+		"Compare Solid Phenolic Candidates",
+		locations,
+		"Auditions A, B, C, and D in order at identical soft, medium, and hard strengths with clear pauses between candidates.",
+		ball_audio_system_bridge.debug_compare_solid_phenolic_candidates,
+		["phenolic audition pack", "candidate comparison", "audio ab"]
+	)
+	_register_direct_action_option(
+		"audio.play_solid_phenolic_a_sequence",
+		"Play Solid Phenolic A Sequence",
+		locations,
+		"Auditions the Dry candidate at fixed soft, medium, and hard strengths without changing the selected profile.",
+		ball_audio_system_bridge.debug_play_solid_phenolic_a_sequence,
+		["candidate a", "dry collision", "audio sequence"]
+	)
+	_register_direct_action_option(
+		"audio.play_solid_phenolic_b_sequence",
+		"Play Solid Phenolic B Sequence",
+		locations,
+		"Auditions the Balanced candidate at fixed soft, medium, and hard strengths without changing the selected profile.",
+		ball_audio_system_bridge.debug_play_solid_phenolic_b_sequence,
+		["candidate b", "balanced collision", "audio sequence"]
+	)
+	_register_direct_action_option(
+		"audio.play_solid_phenolic_c_sequence",
+		"Play Solid Phenolic C Sequence",
+		locations,
+		"Auditions the Full candidate at fixed soft, medium, and hard strengths without changing the selected profile.",
+		ball_audio_system_bridge.debug_play_solid_phenolic_c_sequence,
+		["candidate c", "full collision", "audio sequence"]
+	)
+	_register_direct_action_option(
+		"audio.play_solid_phenolic_d_sequence",
+		"Play Solid Phenolic D Sequence",
+		locations,
+		"Auditions the Sharp candidate at fixed soft, medium, and hard strengths without changing the selected profile.",
+		ball_audio_system_bridge.debug_play_solid_phenolic_d_sequence,
+		["candidate d", "sharp collision", "audio sequence"]
+	)
+	_register_direct_action_option(
+		"audio.cycle_solid_phenolic_candidate",
+		"Cycle Solid Phenolic Candidate",
+		locations,
+		"Selects and caches the next live candidate in A to B to C to D order. Diagnostics immediately show the active candidate.",
+		_cycle_solid_phenolic_candidate,
+		["next candidate", "in-game audio cycle", "phenolic quick test"]
+	)
+	_register_direct_action_option(
+		"audio.play_dense_phenolic_sequence",
+		"Play Dense Phenolic Collision Sequence",
+		locations,
+		"Auditions Dense Phenolic at fixed soft, medium, and hard strengths followed by a short mixed burst without changing the saved material selection.",
+		ball_audio_system_bridge.debug_play_dense_phenolic_collision_sequence,
+		["phenolic test", "audio sequence", "soft medium hard", "mixed burst"]
+	)
+	_register_direct_action_option(
+		"audio.compare_collision_material_profiles",
+		"Compare Material Profiles",
+		locations,
+		"Plays Dense Phenolic, Resonant Resin Prototype, then Bright Prototype at identical soft, medium, and hard authored strengths using cached comparison banks.",
+		ball_audio_system_bridge.debug_compare_material_profiles,
+		["audio ab", "resin versus bright", "material comparison"]
+	)
+	_register_direct_action_option(
+		"audio.regenerate_collision_bank",
+		"Regenerate Procedural Collision Bank",
+		locations,
+		"Explicitly rebuilds the 32 cached generated one-shots using current presentation tuning.",
+		ball_audio_system_bridge.regenerate_procedural_bank,
+		["rebuild sounds", "cached wav"]
+	)
+
+
+func _register_ball_audio_number(
+	option_id: String,
+	label: String,
+	getter: Callable,
+	setter: Callable,
+	minimum: float,
+	maximum: float,
+	step: float,
+	default_value: Variant,
+	description: String,
+	low_effect: String,
+	high_effect: String
+) -> void:
+	if dev_option_registry.has_option(option_id):
+		return
+	dev_option_registry.register_option({
+		"id": option_id,
+		"label": label,
+		"kind": "number",
+		"locations": [_dev_location(DevOptionsPanel.TAB_BALLS_EVENTS, "Ball Audio")],
+		"description": description,
+		"minimum": minimum,
+		"maximum": maximum,
+		"step": step,
+		"default": default_value,
+		"low_effect": low_effect,
+		"high_effect": high_effect,
+		"keywords": ["ball audio", "procedural collision", "presentation only"],
+		"getter": getter,
+		"setter": setter,
+	})
+
+
+func _cycle_solid_phenolic_candidate() -> void:
+	if ball_audio_system_bridge == null:
+		return
+	ball_audio_system_bridge.cycle_solid_phenolic_candidate()
+	if dev_option_registry != null:
+		dev_option_registry.refresh_option("audio.procedural_collision_material")
+
+
+func _reset_collision_audio_settings() -> void:
+	if ball_audio_system_bridge == null:
+		return
+	ball_audio_system_bridge.reset_collision_audio_settings()
+	if dev_option_registry != null:
+		for option_id in [
+			"audio.ball_collision_mode",
+			"audio.procedural_collision_material",
+			"audio.procedural_collision_hardness",
+			"audio.procedural_collision_brightness",
+			"audio.procedural_collision_body",
+			"audio.procedural_collision_decay",
+			"audio.procedural_collision_variation",
+			"audio.procedural_collision_voice_limit",
+		]:
+			dev_option_registry.refresh_option(option_id)
 
 
 func _register_panel_option(panel_definition: Dictionary, section: String) -> void:

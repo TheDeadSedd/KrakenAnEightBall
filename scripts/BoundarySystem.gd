@@ -16,6 +16,8 @@ class BoundaryHit:
 	var incoming_velocity := Vector2.ZERO
 	var outgoing_velocity := Vector2.ZERO
 	var normal := Vector2.ZERO
+	var boundary_id := ""
+	var boundary_kind := "rail"
 
 var table
 var boundaries_root: Node
@@ -25,6 +27,7 @@ var prediction_geometry_snapshot: Array[Dictionary] = []
 var prediction_geometry_revision := 0
 var checks_this_frame := 0
 var collisions_this_frame := 0
+var clamps_without_bounce_this_frame := 0
 
 const MOTION_SWEEP_EPSILON := 0.000001
 
@@ -53,6 +56,7 @@ func cache_boundaries() -> void:
 func reset_frame_stats() -> void:
 	checks_this_frame = 0
 	collisions_this_frame = 0
+	clamps_without_bounce_this_frame = 0
 
 
 func has_boundaries() -> bool:
@@ -147,6 +151,10 @@ func get_checks_this_frame() -> int:
 
 func get_collisions_this_frame() -> int:
 	return collisions_this_frame
+
+
+func get_clamps_without_bounce_this_frame() -> int:
+	return clamps_without_bounce_this_frame
 
 
 func get_inner_rect() -> Rect2:
@@ -386,6 +394,7 @@ func _make_inner_rect_from_edges(inner: Dictionary) -> Rect2:
 
 func _resolve_ball_against_boundary_shape(ball: Ball, collision_shape: CollisionShape2D, rail_restitution: float):
 	var incoming_velocity: Vector2 = ball.velocity
+	var incoming_position: Vector2 = ball.global_position
 	var step_result: BoundaryMotionState = BoundaryMotionState.new()
 	step_result.position = ball.global_position
 	step_result.velocity = ball.velocity
@@ -394,6 +403,8 @@ func _resolve_ball_against_boundary_shape(ball: Ball, collision_shape: Collision
 	ball.velocity = step_result.velocity
 
 	if not step_result.hit_rail:
+		if ball.global_position.distance_squared_to(incoming_position) > MOTION_SWEEP_EPSILON:
+			clamps_without_bounce_this_frame += 1
 		return null
 
 	var hit_event: BoundaryHit = BoundaryHit.new()
@@ -401,7 +412,18 @@ func _resolve_ball_against_boundary_shape(ball: Ball, collision_shape: Collision
 	hit_event.incoming_velocity = incoming_velocity
 	hit_event.outgoing_velocity = ball.velocity
 	hit_event.normal = step_result.rail_normal
+	hit_event.boundary_id = _get_boundary_id(collision_shape)
+	hit_event.boundary_kind = _get_prediction_boundary_kind(hit_event.boundary_id)
 	return hit_event
+
+
+func _get_boundary_id(collision_shape: CollisionShape2D) -> String:
+	if collision_shape == null:
+		return "unknown_boundary"
+	var parent_node: Node = collision_shape.get_parent()
+	if parent_node == null:
+		return str(collision_shape.name)
+	return str(parent_node.name)
 
 
 func _apply_boundary_response_to_state(

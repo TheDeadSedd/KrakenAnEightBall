@@ -4,6 +4,7 @@ class_name DebugOverlay
 signal reset_table_requested
 signal reset_last_shot_requested
 signal dev_option_state_changed(option_id: String, value: Variant)
+signal debug_notification_requested(text: String, category: String)
 
 # Owns debug UI state, text formatting, and movable overlay behavior.
 # Table.gd still owns the gameplay counters/data that this panel displays.
@@ -29,6 +30,7 @@ const PANEL_AIM_CONTACT_ORDER := "aim_contact_order"
 const PANEL_AIM_SIMULATION := "aim_simulation"
 const PANEL_AIM_PROFILER := "aim_profiler"
 const PANEL_AIM_EVENT_CHAIN := "aim_event_chain"
+const PANEL_SHOT_LEDGER := "shot_ledger"
 const PANEL_AIM_COMPARE_GROUP := "aim_compare_panels"
 const DEBUG_AIM_PANEL_LOG_MAX_ENTRIES := 16
 const DEBUG_AIM_CANDIDATE_VERBOSE_MAX_ENTRIES := 64
@@ -140,6 +142,8 @@ var aim_profiler_panel: DebugPanel
 var aim_profiler_label: Label
 var aim_event_chain_panel: DebugPanel
 var aim_event_chain_label: Label
+var shot_ledger_panel: DebugPanel
+var shot_ledger_label: Label
 var verbose_aim_candidates := false
 var developer_preferences: DeveloperPreferences
 var fps_label: Label
@@ -157,6 +161,7 @@ func setup(table_ref: BilliardsTable) -> void:
 	physics_debug_panel.visible = false
 	performance_overlay_panel.visible = false
 	_ensure_aim_compare_panels()
+	_ensure_shot_ledger_panel()
 	_configure_resizable_debug_panels()
 	_capture_default_debug_panel_layout()
 	_set_all_modular_debug_panels_visible(false)
@@ -311,6 +316,18 @@ func _ensure_aim_compare_panels() -> void:
 	_add_scroll_label_to_runtime_panel(aim_event_chain_panel, aim_event_chain_label)
 
 
+func _ensure_shot_ledger_panel() -> void:
+	if shot_ledger_panel != null:
+		return
+	shot_ledger_panel = _make_runtime_debug_panel(
+		"ShotLedgerPanel",
+		Vector2(1320.0, 48.0),
+		Vector2(500.0, 620.0)
+	)
+	shot_ledger_label = _make_runtime_debug_label("ShotLedgerPanelLabel", "SHOT LEDGER")
+	_add_scroll_label_to_runtime_panel(shot_ledger_panel, shot_ledger_label)
+
+
 func _configure_resizable_debug_panels() -> void:
 	for panel_id in _get_positionable_panel_ids():
 		var panel: DebugPanel = _get_modular_debug_panel(panel_id) as DebugPanel
@@ -318,7 +335,7 @@ func _configure_resizable_debug_panels() -> void:
 		if panel == null or label == null:
 			continue
 		var minimum_size := Vector2(240.0, 130.0)
-		if panel_id in [PANEL_AIM_CANDIDATES, PANEL_AIM_COLLISIONS, PANEL_AIM_CONTACT_ORDER, PANEL_AIM_SIMULATION, PANEL_AIM_PROFILER, PANEL_AIM_EVENT_CHAIN]:
+		if panel_id in [PANEL_AIM_CANDIDATES, PANEL_AIM_COLLISIONS, PANEL_AIM_CONTACT_ORDER, PANEL_AIM_SIMULATION, PANEL_AIM_PROFILER, PANEL_AIM_EVENT_CHAIN, PANEL_SHOT_LEDGER]:
 			minimum_size = Vector2(260.0, 160.0)
 		panel.set_minimum_resize_size(minimum_size)
 		panel.configure_adaptive_label(label, true, 7)
@@ -434,6 +451,9 @@ func _process(delta: float) -> void:
 			var snapshot: Dictionary = _get_performance_snapshot_with_debug_overlay_metrics(requested_sections)
 			_refresh_visible_modular_debug_panels(snapshot)
 			refreshed_debug_text = true
+	if shot_ledger_panel != null and shot_ledger_panel.visible:
+		_refresh_modular_debug_panel(PANEL_SHOT_LEDGER, {})
+		refreshed_debug_text = true
 
 	last_debug_overlay_refresh_ms = _elapsed_ms_since(refresh_start_usec) if refreshed_debug_text else 0.0
 
@@ -509,12 +529,22 @@ func set_dev_option_state(option_id: String, value: Variant) -> void:
 			_set_quick_toggle(powder_keg_suppress_trails_check_box, enabled, option_id)
 
 
-func trigger_dev_option_action(option_id: String) -> void:
+func trigger_dev_option_action(option_id: String) -> bool:
 	match option_id:
 		"panels.hide_all":
 			hide_all_debug_panels()
 		"panels.reset_layout":
 			reset_debug_panel_layout()
+		"shot_ledger.copy_summary":
+			_copy_last_shot_ledger_summary()
+		"shot_ledger.copy_json":
+			_copy_last_shot_ledger_json()
+		"shot_ledger.run_self_test":
+			_run_shot_ledger_self_test()
+		_:
+			_report_debug_action_error("Dev Options action callback missing: %s" % option_id)
+			return false
+	return true
 
 
 func hide_all_debug_panels() -> void:
@@ -686,6 +716,7 @@ func get_modular_debug_panel_states() -> Dictionary:
 		PANEL_AIM_SIMULATION: aim_simulation_panel != null and aim_simulation_panel.visible,
 		PANEL_AIM_PROFILER: aim_profiler_panel != null and aim_profiler_panel.visible,
 		PANEL_AIM_EVENT_CHAIN: aim_event_chain_panel != null and aim_event_chain_panel.visible,
+		PANEL_SHOT_LEDGER: shot_ledger_panel != null and shot_ledger_panel.visible,
 		PANEL_AIM_COMPARE_GROUP: _are_aim_compare_panels_visible(),
 	}
 
@@ -814,6 +845,7 @@ func _get_positionable_panel_ids() -> Array[String]:
 		PANEL_AIM_SIMULATION,
 		PANEL_AIM_PROFILER,
 		PANEL_AIM_EVENT_CHAIN,
+		PANEL_SHOT_LEDGER,
 	]
 
 
@@ -829,6 +861,8 @@ func _set_all_modular_debug_panels_visible(visible_value: bool) -> void:
 	visual_effects_panel.visible = visible_value
 	physics_performance_panel.visible = visible_value
 	_set_aim_compare_panels_visible(visible_value)
+	if shot_ledger_panel != null:
+		shot_ledger_panel.visible = visible_value
 
 
 func _has_visible_modular_debug_panels() -> bool:
@@ -844,6 +878,7 @@ func _has_visible_modular_debug_panels() -> bool:
 		or visual_effects_panel.visible
 		or physics_performance_panel.visible
 		or _are_aim_compare_panels_visible()
+		or (shot_ledger_panel != null and shot_ledger_panel.visible)
 	)
 
 
@@ -877,6 +912,7 @@ func _get_visible_modular_debug_panel_count() -> int:
 	count += 1 if aim_simulation_panel != null and aim_simulation_panel.visible else 0
 	count += 1 if aim_profiler_panel != null and aim_profiler_panel.visible else 0
 	count += 1 if aim_event_chain_panel != null and aim_event_chain_panel.visible else 0
+	count += 1 if shot_ledger_panel != null and shot_ledger_panel.visible else 0
 	return count
 
 
@@ -1055,6 +1091,8 @@ func _refresh_modular_debug_panel(panel_id: String, snapshot: Dictionary) -> voi
 			panel_text = _make_titled_panel_text("AIM PROFILER", _make_aim_profiler_lines(snapshot))
 		PANEL_AIM_EVENT_CHAIN:
 			panel_text = _make_titled_panel_text("AIM EVENT CHAIN", _make_aim_event_chain_lines(snapshot))
+		PANEL_SHOT_LEDGER:
+			panel_text = _make_shot_ledger_panel_text()
 	panel.set_adaptive_text(label, panel_text)
 
 
@@ -1100,6 +1138,8 @@ func _get_modular_debug_panel(panel_id: String) -> Control:
 			return aim_profiler_panel
 		PANEL_AIM_EVENT_CHAIN:
 			return aim_event_chain_panel
+		PANEL_SHOT_LEDGER:
+			return shot_ledger_panel
 	return null
 
 
@@ -1145,7 +1185,273 @@ func _get_modular_debug_label(panel_id: String) -> Label:
 			return aim_profiler_label
 		PANEL_AIM_EVENT_CHAIN:
 			return aim_event_chain_label
+		PANEL_SHOT_LEDGER:
+			return shot_ledger_label
 	return null
+
+
+func _copy_last_shot_ledger_summary() -> void:
+	if table == null or table.shot_ledger_system == null:
+		return
+	var summary: String = table.shot_ledger_system.get_last_completed_summary()
+	DisplayServer.clipboard_set(summary)
+	print("Shot Ledger summary copied to clipboard.")
+
+
+func _copy_last_shot_ledger_json() -> void:
+	if table == null or table.shot_ledger_system == null:
+		return
+	var ledger_json: String = table.shot_ledger_system.get_last_completed_json()
+	DisplayServer.clipboard_set(ledger_json)
+	print("Shot Ledger JSON copied to clipboard.")
+
+
+func _run_shot_ledger_self_test() -> void:
+	if table == null:
+		_report_debug_action_error("Shot Ledger Self-Test: table unavailable.")
+		return
+	if table.shot_ledger_system == null:
+		_report_debug_action_error("Shot Ledger Self-Test: analyzer unavailable.")
+		return
+	var result: Dictionary = table.shot_ledger_system.run_self_tests()
+	if result.is_empty():
+		_report_debug_action_error("Shot Ledger Self-Test: empty test result.")
+		return
+
+	var summary: String = _make_shot_ledger_self_test_summary(result)
+	print(summary)
+	var failures: Array = _debug_array(result, "failures")
+	if not failures.is_empty():
+		print("Failures:")
+		for failure_value in failures:
+			print("- %s" % str(failure_value))
+	debug_notification_requested.emit(summary, "event")
+
+	if shot_ledger_panel == null:
+		print("Shot Ledger Self-Test presentation warning: diagnostics panel unavailable.")
+		return
+	set_modular_debug_panel_visible(PANEL_SHOT_LEDGER, true)
+
+
+func _make_shot_ledger_self_test_summary(result: Dictionary) -> String:
+	var status: String = str(result.get("status", "ERROR"))
+	var total_count: int = int(result.get("total_count", 0))
+	var passed_count: int = int(result.get("passed_count", 0))
+	var failed_count: int = int(result.get("failed_count", 0))
+	if status == "ERROR":
+		return "Shot Ledger Self-Test: ERROR - %s" % str(result.get("error_message", "unknown test runner error"))
+	if failed_count > 0:
+		return "Shot Ledger Self-Test: %d/%d passed, %d failed" % [passed_count, total_count, failed_count]
+	return "Shot Ledger Self-Test: %d/%d passed" % [passed_count, total_count]
+
+
+func _report_debug_action_error(message: String) -> void:
+	push_error(message)
+	print(message)
+	debug_notification_requested.emit(message, "event")
+
+
+func _make_shot_ledger_panel_text() -> String:
+	if table == null or table.shot_ledger_system == null:
+		return "SHOT LEDGER\nSystem unavailable."
+	var snapshot: Dictionary = table.shot_ledger_system.get_debug_snapshot()
+	var lines: PackedStringArray = PackedStringArray(["SHOT LEDGER"])
+	var active: bool = bool(snapshot.get("active", false))
+	lines.append("")
+	lines.append("SHOT")
+	if active:
+		var active_shot: Dictionary = _debug_dictionary(snapshot, "active_shot")
+		lines.append("#%d  %s / %s  ACTIVE" % [
+			int(active_shot.get("shot_id", -1)),
+			str(active_shot.get("source", "")),
+			str(active_shot.get("mode_id", "")),
+		])
+		lines.append("%.3f sec  |  %d raw events" % [
+			float(active_shot.get("duration_sec", 0.0)),
+			int(active_shot.get("raw_event_count", 0)),
+		])
+	else:
+		lines.append("No active authoritative shot.")
+
+	var ledger: Dictionary = _debug_dictionary(snapshot, "last_completed")
+	if ledger.is_empty():
+		lines.append("")
+		lines.append("LAST COMPLETED")
+		lines.append("No completed ledger yet.")
+		_append_shot_ledger_self_test_lines(
+			lines,
+			_debug_dictionary(snapshot, "last_self_test_result"),
+			int(snapshot.get("self_test_case_count", 0))
+		)
+		return "\n".join(lines)
+
+	var derived: Dictionary = _debug_dictionary(ledger, "derived")
+	var diagnostics: Dictionary = _debug_dictionary(ledger, "diagnostics")
+	lines.append("")
+	lines.append("LAST COMPLETED")
+	lines.append("#%d  %s / %s  %.3f sec" % [
+		int(ledger.get("shot_id", -1)),
+		str(ledger.get("source", "")),
+		str(ledger.get("mode_id", "")),
+		float(ledger.get("duration_sec", 0.0)),
+	])
+	lines.append("Raw events: %d  |  %d bytes  |  analysis %d usec" % [
+		_debug_array(ledger, "raw_events").size(),
+		int(diagnostics.get("completed_ledger_approximate_size_bytes", 0)),
+		int(diagnostics.get("analysis_duration_usec", 0)),
+	])
+
+	lines.append("")
+	lines.append("FIRST CONTACT")
+	lines.append("Ball %d at event %d  |  cue rails first: %d" % [
+		int(derived.get("first_object_contact_ball_id", -1)),
+		int(derived.get("first_object_contact_event_index", -1)),
+		int(derived.get("cue_rails_before_first_object_contact", 0)),
+	])
+
+	lines.append("")
+	lines.append("CONTACTS")
+	lines.append("Ball: %d  |  Rail: %d  |  Unique pairs: %d" % [
+		int(derived.get("semantic_ball_contact_count", 0)),
+		int(derived.get("semantic_rail_contact_count", 0)),
+		_debug_array(derived, "unique_ball_contact_pairs").size(),
+	])
+	lines.append("Suppressed: separation %d / overlap %d / rail clamp %d" % [
+		int(diagnostics.get("suppressed_separation_only_ball_contacts", 0)),
+		int(diagnostics.get("suppressed_sustained_ball_overlaps", 0)),
+		int(diagnostics.get("suppressed_rail_clamps_without_bounce", 0)),
+	])
+
+	lines.append("")
+	lines.append("POCKETS")
+	lines.append("Objects: %s  |  order: %s" % [
+		str(derived.get("object_balls_pocketed", [])),
+		str(derived.get("pocket_order", [])),
+	])
+	lines.append("Same-pocket max: %d  |  Scratch: %s" % [
+		int(derived.get("largest_same_pocket_count", 0)),
+		"yes" if bool(derived.get("scratch_occurred", false)) else "no",
+	])
+
+	lines.append("")
+	lines.append("CAUSALITY")
+	lines.append("Maximum depth: %d  |  Ambiguous balls: %s" % [
+		int(derived.get("maximum_causal_depth", 0)),
+		str(derived.get("ambiguous_causality_ball_ids", [])),
+	])
+
+	lines.append("")
+	lines.append("POCKET FACTS")
+	var pocket_facts: Array = _debug_array(derived, "pocket_facts")
+	if pocket_facts.is_empty():
+		lines.append("None")
+	for fact_value in pocket_facts:
+		if not fact_value is Dictionary:
+			continue
+		var fact: Dictionary = fact_value
+		lines.append("#%d / ball %d: depth %d, rails %d, %s" % [
+			int(fact.get("ball_number", -1)),
+			int(fact.get("ball_id", -1)),
+			int(fact.get("causal_depth", -1)),
+			int(fact.get("bank_count", 0)),
+			str(fact.get("bank_class", "none")),
+		])
+		lines.append("  parent %d | direct %s | combo %s | %.1f px" % [
+			int(fact.get("causal_parent_ball_id", -1)),
+			"yes" if bool(fact.get("is_direct_pot", false)) else "no",
+			"yes" if bool(fact.get("is_combination_pot", false)) else "no",
+			float(fact.get("travel_distance", 0.0)),
+		])
+
+	lines.append("")
+	lines.append("TAGS")
+	lines.append(_debug_shot_ledger_tag_list(_debug_array(derived, "tags")))
+	lines.append(str(derived.get("tag_counts", {})))
+
+	lines.append("")
+	lines.append("END STATE")
+	lines.append("Active: %d  |  Objects: %d" % [
+		int(derived.get("balls_remaining_at_end", 0)),
+		int(derived.get("active_object_balls_remaining", 0)),
+	])
+	lines.append("Cue travel: %.1f px  |  Object travel: %.1f px" % [
+		float(derived.get("cue_ball_travel_distance", 0.0)),
+		float(derived.get("total_object_ball_travel_distance", 0.0)),
+	])
+
+	lines.append("")
+	lines.append("WARNINGS")
+	lines.append("Invalid events/snapshots/travel: %d / %d / %d" % [
+		int(diagnostics.get("invalid_events", 0)),
+		int(diagnostics.get("invalid_ball_snapshots", 0)),
+		int(diagnostics.get("invalid_travel_samples", 0)),
+	])
+	lines.append("Duplicate pockets: %d  |  Travel teleports: %d" % [
+		int(diagnostics.get("suppressed_duplicate_pocket_attempts", 0)),
+		int(diagnostics.get("suppressed_travel_teleports", 0)),
+	])
+	lines.append("Lifecycle misuse: %d  |  Canceled shots: %d" % [
+		int(snapshot.get("lifecycle_misuse_count", 0)),
+		int(snapshot.get("total_canceled_shots", 0)),
+	])
+	_append_shot_ledger_self_test_lines(
+		lines,
+		_debug_dictionary(snapshot, "last_self_test_result"),
+		int(snapshot.get("self_test_case_count", 0))
+	)
+	return "\n".join(lines)
+
+
+func _append_shot_ledger_self_test_lines(
+	lines: PackedStringArray,
+	result: Dictionary,
+	expected_test_count: int
+) -> void:
+	lines.append("")
+	lines.append("SELF-TEST")
+	if result.is_empty():
+		lines.append("Last run: Not run")
+		lines.append("Status: NOT RUN")
+		lines.append("Total: %d  |  Passed: -  |  Failed: -" % expected_test_count)
+		lines.append("Failures: none")
+		return
+
+	var total_count: int = int(result.get("total_count", 0))
+	if total_count <= 0:
+		total_count = int(result.get("expected_test_count", expected_test_count))
+	var passed_count: int = int(result.get("passed_count", 0))
+	var failed_count: int = int(result.get("failed_count", 0))
+	lines.append("Last run: %s" % str(result.get("last_run_timestamp", "Unknown")))
+	lines.append("Status: %s" % str(result.get("status", "ERROR")))
+	lines.append("Total: %d  |  Passed: %d  |  Failed: %d" % [total_count, passed_count, failed_count])
+	var failures: Array = _debug_array(result, "failures")
+	if failures.is_empty():
+		lines.append("Failures: none")
+		return
+	lines.append("Failures:")
+	for failure_value in failures:
+		lines.append("- %s" % str(failure_value))
+
+
+func _debug_shot_ledger_tag_list(tags: Array) -> String:
+	if tags.is_empty():
+		return "none"
+	var values: PackedStringArray = PackedStringArray()
+	for tag_value in tags:
+		if tag_value is Dictionary:
+			var tag: Dictionary = tag_value
+			values.append("%s@%d" % [str(tag.get("tag_id", "")), int(tag.get("event_index", -1))])
+	return ", ".join(values)
+
+
+func _debug_dictionary(container: Dictionary, key: String) -> Dictionary:
+	var value: Variant = container.get(key, {})
+	return value if value is Dictionary else {}
+
+
+func _debug_array(container: Dictionary, key: String) -> Array:
+	var value: Variant = container.get(key, [])
+	return value if value is Array else []
 
 
 func _toggle_debug_menu() -> void:
@@ -1611,7 +1917,121 @@ func _make_ball_drop_performance_lines(snapshot: Dictionary) -> Array:
 
 
 func _make_audio_debug_lines(snapshot: Dictionary) -> Array:
+	var sampled_wav_silence: Dictionary = snapshot.get(
+		"collision_audio_sampled_wav_leading_silence_msec",
+		{}
+	)
+	var sampled_wav_onsets: Dictionary = snapshot.get(
+		"collision_audio_sampled_wav_strong_transient_msec",
+		{}
+	)
+	var sampled_wav_trimmed: Dictionary = snapshot.get(
+		"collision_audio_sampled_wav_trimmed_msec",
+		{}
+	)
 	return [
+		"Collision audio mode: %s (default %s / effective %s) / bank %s / %s Hz / %sx%s = %s streams / %.2f ms" % [
+			snapshot["collision_audio_mode"],
+			snapshot["collision_audio_default_mode"],
+			snapshot["collision_audio_effective_mode"],
+			_debug_bool_text(bool(snapshot["collision_audio_generated_bank_ready"])),
+			snapshot["collision_audio_sample_rate"],
+			snapshot["collision_audio_strength_band_count"],
+			snapshot["collision_audio_variants_per_band"],
+			snapshot["collision_audio_generated_stream_count"],
+			float(snapshot["collision_audio_bank_generation_ms"]),
+		],
+		"Sampled path: pool %s (%s/%s) / %s requests > %s plays / accepted-to-play request %sus" % [
+			_debug_bool_text(bool(snapshot["collision_audio_sampled_pool_ready"])),
+			snapshot["collision_audio_pool_size"],
+			snapshot["collision_audio_sampled_pool_target_size"],
+			snapshot["collision_audio_sampled_requests"],
+			snapshot["collision_audio_sampled_playbacks"],
+			snapshot["collision_audio_last_request_delay_usec"],
+		],
+		"Sampled guards: deferred %s / impact allocations %s / first-hit init %s" % [
+			snapshot["collision_audio_deferred_sampled_plays"],
+			snapshot["collision_audio_impact_time_allocations"],
+			snapshot["collision_audio_first_hit_initializations"],
+		],
+		"Sampled WAV: silence %.2f/%.2fms / strong onset %.2f/%.2fms / trimmed %.2f/%.2fms" % [
+			float(sampled_wav_silence.get("ball_hit_01", 0.0)),
+			float(sampled_wav_silence.get("ball_hit_02", 0.0)),
+			float(sampled_wav_onsets.get("ball_hit_01", 0.0)),
+			float(sampled_wav_onsets.get("ball_hit_02", 0.0)),
+			float(sampled_wav_trimmed.get("ball_hit_01", 0.0)),
+			float(sampled_wav_trimmed.get("ball_hit_02", 0.0)),
+		],
+		"Collision material: %s / main %.0f-%.0f Hz / secondary %.0f-%.0f Hz / body %.0f-%.0f Hz" % [
+			str(snapshot["collision_audio_material_profile"]).replace("_", " ").capitalize(),
+			float(snapshot["collision_audio_primary_frequency_min_hz"]),
+			float(snapshot["collision_audio_primary_frequency_max_hz"]),
+			float(snapshot["collision_audio_secondary_frequency_min_hz"]),
+			float(snapshot["collision_audio_secondary_frequency_max_hz"]),
+			float(snapshot["collision_audio_body_frequency_min_hz"]),
+			float(snapshot["collision_audio_body_frequency_max_hz"]),
+		],
+		"Collision cluster: %s modes / %.0f-%.0f Hz / modal decay %.2f-%.2f ms" % [
+			snapshot["collision_audio_modal_count"],
+			float(snapshot["collision_audio_modal_frequency_min_hz"]),
+			float(snapshot["collision_audio_modal_frequency_max_hz"]),
+			float(snapshot["collision_audio_modal_decay_min_ms"]),
+			float(snapshot["collision_audio_modal_decay_max_ms"]),
+		],
+		"Collision contact: body %.0f-%.0f Hz @ %.2f-%.2f / micro spacing %.2f-%.2f ms" % [
+			float(snapshot["collision_audio_low_body_frequency_min_hz"]),
+			float(snapshot["collision_audio_low_body_frequency_max_hz"]),
+			float(snapshot["collision_audio_low_body_amplitude_min"]),
+			float(snapshot["collision_audio_low_body_amplitude_max"]),
+			float(snapshot["collision_audio_micro_impulse_separation_min_ms"]),
+			float(snapshot["collision_audio_micro_impulse_separation_max_ms"]),
+		],
+		"Collision candidate: %s / centers %s / secondary pulse %s" % [
+			str(snapshot["collision_audio_candidate_name"]),
+			str(snapshot["collision_audio_modal_centers_hz"]),
+			_debug_bool_text(bool(snapshot["collision_audio_secondary_pulse_enabled"])),
+		],
+		"Collision shaping: compression %.3f / table coupling %.3f / high-pass %.0f Hz / saturation %.2f" % [
+			float(snapshot["collision_audio_compression_impulse_level"]),
+			float(snapshot["collision_audio_table_coupling_level"]),
+			float(snapshot["collision_audio_highpass_cutoff_hz"]),
+			float(snapshot["collision_audio_saturation_amount"]),
+		],
+		"Collision envelope: generated %.1f-%.1f ms (authored %.1f-%.1f) / transient %.1f-%.1f ms (authored %.1f-%.1f) / body:main %.2f / tail %s" % [
+			float(snapshot["collision_audio_generated_duration_min_ms"]),
+			float(snapshot["collision_audio_generated_duration_max_ms"]),
+			float(snapshot["collision_audio_authored_duration_min_ms"]),
+			float(snapshot["collision_audio_authored_duration_max_ms"]),
+			float(snapshot["collision_audio_generated_transient_min_ms"]),
+			float(snapshot["collision_audio_generated_transient_max_ms"]),
+			float(snapshot["collision_audio_authored_transient_min_ms"]),
+			float(snapshot["collision_audio_authored_transient_max_ms"]),
+			float(snapshot["collision_audio_body_primary_ratio"]),
+			_debug_bool_text(bool(snapshot["collision_audio_material_tail_retained"])),
+		],
+		"Collision audio voices: proc %s/%s (max %s) / sampled %s / layer plays %s proc + %s sampled" % [
+			snapshot["collision_audio_active_procedural_voices"],
+			snapshot["collision_audio_procedural_voice_limit"],
+			snapshot["collision_audio_max_procedural_voices"],
+			snapshot["collision_audio_active_sampled_voices"],
+			snapshot["collision_audio_procedural_layer_plays"],
+			snapshot["collision_audio_sampled_layer_plays"],
+		],
+		"Collision audio proc guards: weak %s / repeat pair %s / voice reject %s / proc steals %s / layered skips %s / fallback %s" % [
+			snapshot["collision_audio_suppressed_weak"],
+			snapshot["collision_audio_suppressed_repeated_pair"],
+			snapshot["collision_audio_voice_budget_rejections"],
+			snapshot["collision_audio_procedural_pool_steals"],
+			snapshot["collision_audio_layered_sample_budget_skips"],
+			snapshot["collision_audio_fallback_count"],
+		],
+		"Collision audio last: strength %.3f / band %s / variant %s / %.1f dB / bank builds %s" % [
+			float(snapshot["collision_audio_last_strength"]),
+			snapshot["collision_audio_last_band"],
+			snapshot["collision_audio_last_variant"],
+			float(snapshot["collision_audio_last_volume_db"]),
+			snapshot["collision_audio_bank_generation_count"],
+		],
 		"Collision audio: %s/%s playing / max %s / frame %s req>%s plays / total %s>%s" % [
 			snapshot["collision_audio_playing_players"],
 			snapshot["collision_audio_pool_size"],

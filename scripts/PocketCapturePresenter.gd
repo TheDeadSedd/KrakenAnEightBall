@@ -14,15 +14,48 @@ const OVERFLOW_FADE_DURATION := 0.16
 const REFLOW_DURATION := 0.18
 const COLLECTION_ANCHOR_NAME := "CollectionAnchor"
 const FALLBACK_ANCHOR_DISTANCE := 43.0
-const CORNER_BASIN_HALF_EXTENTS := Vector2(23.0, 18.0)
-const SIDE_BASIN_HALF_EXTENTS := Vector2(23.0, 22.0)
-const BASIN_EDGE_PADDING := 1.0
-const NOMINAL_SETTLED_RADIUS := 11.5
-const INWARD_SLOT_PATTERN := [-0.70, -0.10, 0.35, 0.78, -0.48, 0.05, 0.50, 0.92]
-const SIDE_SLOT_PATTERN := [-0.70, 0.22, -0.12, 0.68, 0.48, -0.52, 0.08, -0.25]
+const CORNER_BASIN_HALF_EXTENTS := Vector2(33.0, 26.0)
+const SIDE_BASIN_HALF_EXTENTS := Vector2(34.0, 27.0)
+const CORNER_BASIN_EDGE_PADDING := 3.0
+const SIDE_BASIN_EDGE_PADDING := 2.5
+const BEST_FIT_CANDIDATE_COUNT := 16
+const MIN_POPULATION_SPREAD := 0.30
+const MAX_POPULATION_SPREAD := 0.82
+const POPULATION_SPREAD_DIVISOR := 7.0
+const MAX_SAFE_BASIN_USAGE := 0.94
+const CANDIDATE_SEED_SALT := 32452843
+const CANDIDATE_SCORE_JITTER := 0.20
+const CANDIDATE_POSITION_JITTER := 0.035
+const CENTRAL_BIAS_WEIGHT := 0.28
+const BEST_FIT_CANDIDATE_PATTERN := [
+	Vector2(0.00, 0.00),
+	Vector2(1.00, 0.00),
+	Vector2(-1.00, 0.00),
+	Vector2(0.00, 1.00),
+	Vector2(0.00, -1.00),
+	Vector2(0.70, 0.70),
+	Vector2(0.70, -0.70),
+	Vector2(-0.70, 0.70),
+	Vector2(-0.70, -0.70),
+	Vector2(0.50, 0.00),
+	Vector2(-0.50, 0.00),
+	Vector2(0.00, 0.50),
+	Vector2(0.00, -0.50),
+	Vector2(0.85, 0.35),
+	Vector2(-0.85, -0.35),
+	Vector2(0.85, -0.35),
+]
+const SETTLED_SCALE_BASE := 0.92
+const SETTLED_SCALE_VARIATION := 0.03
+const NOMINAL_SETTLED_RADIUS := 12.9
+const PILE_NEWEST_BRIGHTNESS := 0.88
+const PILE_OLDEST_BRIGHTNESS := 0.40
+const PILE_TINT_ALPHA := 1.0
+const PILE_DEPTH_TWEEN_DURATION := 0.14
 const DEBUG_ANCHOR_COLOR := Color(0.96, 0.76, 0.28, 0.95)
 const DEBUG_BASIN_COLOR := Color(0.24, 0.92, 0.82, 0.78)
 const DEBUG_MOUTH_COLOR := Color(0.96, 0.42, 0.30, 0.68)
+const DEBUG_PROXY_COLOR := Color(0.46, 0.84, 1.0, 0.68)
 
 @export var enabled: bool = true
 
@@ -92,18 +125,14 @@ func present_capture(
 	var inward_direction: Vector2 = _get_layout_vector2(layout, "inward_local", Vector2.DOWN).normalized()
 	if inward_direction.is_zero_approx():
 		inward_direction = Vector2.DOWN
-	var is_corner: bool = bool(layout.get("is_corner", false))
 	var variation: Dictionary = _get_capture_variation(
 		pocket_index,
 		pocket_total,
 		ball.ball_number,
-		should_persist,
-		is_corner
+		should_persist
 	)
-	var target_scale: Vector2 = Vector2(
-		float(variation.get("scale", 1.0)) * 0.82,
-		float(variation.get("scale", 1.0)) * 0.72
-	)
+	var settled_scale: float = float(variation.get("scale", SETTLED_SCALE_BASE))
+	var target_scale: Vector2 = Vector2.ONE * settled_scale
 	var target_rotation: float = float(variation.get("rotation", 0.0))
 	var inward_offset: float = float(variation.get("inward_offset", 0.0))
 	var lateral_offset: float = float(variation.get("lateral_offset", 0.0))
@@ -126,12 +155,18 @@ func present_capture(
 	appearance_snapshot["collection_layout_revision"] = collection_layout_revision
 	appearance_snapshot["collection_anchor_name"] = str(layout.get("pocket_name", "Pocket %s" % pocket_index))
 	visual.configure(appearance_snapshot, pocket_index, capture_serial_counter)
+	visual.settled_scale = target_scale
+	visual.settled_rotation = target_rotation
 	visual.capture_animation_finished.connect(_on_capture_animation_finished.bind(visual))
 
 	if should_persist:
 		var pile: Array = _get_pocket_visuals(pocket_index)
 		pile.append(visual)
 		pocket_visuals[pocket_index] = pile
+		_enforce_pocket_limit(pocket_index)
+		_enforce_total_limit()
+		_layout_pocket_visuals(pocket_index, layout, true, visual)
+		target_position = visual.settled_position
 	active_capture_visuals.append(visual)
 	visual.play_capture(
 		pocket_local_position,
@@ -145,11 +180,6 @@ func present_capture(
 		UNDER_TABLE_ROLL_DURATION,
 		TRANSIENT_FADE_DURATION
 	)
-
-	if should_persist:
-		_enforce_pocket_limit(pocket_index)
-		_enforce_total_limit()
-
 
 func react_to_pocket_streak(pocket_global_position: Vector2, multiplier: int) -> void:
 	if not enabled or multiplier < 2:
@@ -206,12 +236,8 @@ func reflow_collections(
 	for pocket_index_value in pocket_visuals.keys():
 		var pocket_index: int = int(pocket_index_value)
 		var layout: Dictionary = _get_collection_layout(pocket_index)
-		for visual_value in _get_pocket_visuals(pocket_index):
-			var visual: PocketCapturedBallVisual = visual_value as PocketCapturedBallVisual
-			if visual == null or not is_instance_valid(visual) or not visual.settled:
-				continue
-			var target_position: Vector2 = _get_visual_resting_position(visual, layout)
-			visual.reflow_settled(target_position, REFLOW_DURATION if animate else 0.0)
+		_layout_pocket_visuals(pocket_index, layout, animate)
+		_refresh_pile_depth_appearance(pocket_index, animate)
 	collection_reflow_count += 1
 	last_reflow_reason = reason
 	queue_redraw()
@@ -312,6 +338,10 @@ func restore_rewind_state(state: Dictionary) -> void:
 		var pile: Array = _get_pocket_visuals(pocket_index)
 		pile.append(visual)
 		pocket_visuals[pocket_index] = pile
+	for pocket_index_value in pocket_visuals.keys():
+		var pocket_index: int = int(pocket_index_value)
+		_layout_pocket_visuals(pocket_index, _get_collection_layout(pocket_index), false)
+		_refresh_pile_depth_appearance(pocket_index, false)
 
 
 func get_debug_snapshot() -> Dictionary:
@@ -334,6 +364,11 @@ func get_debug_snapshot() -> Dictionary:
 		"proxies_removed_by_visible_cap": proxies_removed_by_visible_cap,
 		"maximum_visible_per_pocket": MAX_VISIBLE_PER_POCKET,
 		"maximum_visible_total": MAX_VISIBLE_TOTAL,
+		"best_fit_candidate_count": BEST_FIT_CANDIDATE_COUNT,
+		"central_bias_weight": CENTRAL_BIAS_WEIGHT,
+		"maximum_safe_basin_usage": MAX_SAFE_BASIN_USAGE,
+		"corner_safety_padding": CORNER_BASIN_EDGE_PADDING,
+		"side_safety_padding": SIDE_BASIN_EDGE_PADDING,
 		"mode_persistence_policy": _get_mode_persistence_policy(),
 		"show_collection_anchor_debug": show_collection_anchor_debug,
 		"collection_layout_revision": collection_layout_revision,
@@ -400,8 +435,7 @@ func _get_capture_variation(
 	pocket_index: int,
 	pocket_total: int,
 	ball_number: int,
-	should_persist: bool,
-	is_corner: bool
+	should_persist: bool
 ) -> Dictionary:
 	var visual_rng: RandomNumberGenerator = RandomNumberGenerator.new()
 	visual_rng.seed = int(
@@ -413,18 +447,17 @@ func _get_capture_variation(
 		return {
 			"inward_offset": visual_rng.randf_range(-3.0, 1.5),
 			"lateral_offset": visual_rng.randf_range(-2.5, 2.5),
-			"scale": visual_rng.randf_range(0.90, 0.97),
+			"scale": visual_rng.randf_range(
+				SETTLED_SCALE_BASE - SETTLED_SCALE_VARIATION,
+				SETTLED_SCALE_BASE + SETTLED_SCALE_VARIATION
+			),
 			"rotation": visual_rng.randf_range(-0.15, 0.15),
 		}
-	var slot: int = (pocket_total - 1) % MAX_VISIBLE_PER_POCKET
-	var inward_amplitude: float = 8.5
-	var sideways_amplitude: float = 5.2 if is_corner else 8.8
-	var inward_jitter: float = visual_rng.randf_range(-1.3, 1.3)
-	var sideways_jitter_limit: float = 0.8 if is_corner else 1.3
 	return {
-		"inward_offset": float(INWARD_SLOT_PATTERN[slot]) * inward_amplitude + inward_jitter,
-		"lateral_offset": float(SIDE_SLOT_PATTERN[slot]) * sideways_amplitude + visual_rng.randf_range(-sideways_jitter_limit, sideways_jitter_limit),
-		"scale": visual_rng.randf_range(0.92, 1.03),
+		"scale": visual_rng.randf_range(
+			SETTLED_SCALE_BASE - SETTLED_SCALE_VARIATION,
+			SETTLED_SCALE_BASE + SETTLED_SCALE_VARIATION
+		),
 		"rotation": visual_rng.randf_range(-0.18, 0.18),
 	}
 
@@ -540,10 +573,15 @@ func _get_safe_center_extents(layout: Dictionary, visual_radius: float) -> Vecto
 		"basin_half_extents",
 		CORNER_BASIN_HALF_EXTENTS
 	)
+	var safety_padding: float = _get_basin_safety_padding(layout)
 	return Vector2(
-		maxf(basin_half_extents.x - visual_radius - BASIN_EDGE_PADDING, 1.0),
-		maxf(basin_half_extents.y - visual_radius - BASIN_EDGE_PADDING, 1.0)
+		maxf(basin_half_extents.x - visual_radius - safety_padding, 1.0),
+		maxf(basin_half_extents.y - visual_radius - safety_padding, 1.0)
 	)
+
+
+func _get_basin_safety_padding(layout: Dictionary) -> float:
+	return CORNER_BASIN_EDGE_PADDING if bool(layout.get("is_corner", false)) else SIDE_BASIN_EDGE_PADDING
 
 
 func _clamp_resting_position(
@@ -573,24 +611,214 @@ func _clamp_resting_position(
 	return anchor_local + inward_local * inward_amount + side_local * side_amount
 
 
-func _get_visual_resting_position(
+func _layout_pocket_visuals(
+	pocket_index: int,
+	layout: Dictionary,
+	animate: bool,
+	force_visual: PocketCapturedBallVisual = null
+) -> void:
+	var pile: Array = _get_pocket_visuals(pocket_index)
+	var visible_count: int = pile.size()
+	if visible_count <= 0:
+		return
+	var spread_factor: float = _get_population_spread_factor(visible_count)
+	var occupied_positions: Array[Vector2] = []
+	for visual_value in pile:
+		var visual: PocketCapturedBallVisual = visual_value as PocketCapturedBallVisual
+		if visual == null or not is_instance_valid(visual):
+			continue
+		if not visual.settled and visual != force_visual:
+			occupied_positions.append(visual.settled_position)
+			continue
+		var target_position: Vector2 = _select_best_fit_resting_position(
+			visual,
+			layout,
+			spread_factor,
+			occupied_positions
+		)
+		_store_collection_offsets(visual, layout, target_position)
+		visual.settled_position = target_position
+		if visual.settled:
+			visual.reflow_settled(target_position, REFLOW_DURATION if animate else 0.0)
+		occupied_positions.append(target_position)
+	if show_collection_anchor_debug:
+		queue_redraw()
+
+
+func _select_best_fit_resting_position(
 	visual: PocketCapturedBallVisual,
-	layout: Dictionary
+	layout: Dictionary,
+	spread_factor: float,
+	occupied_positions: Array[Vector2]
 ) -> Vector2:
 	var anchor_local: Vector2 = _get_layout_vector2(layout, "anchor_local", visual.settled_position)
 	var inward_local: Vector2 = _get_layout_vector2(layout, "inward_local", Vector2.DOWN).normalized()
 	if inward_local.is_zero_approx():
 		inward_local = Vector2.DOWN
-	var inward_offset: float = float(visual.appearance.get("collection_inward_offset", 0.0))
-	var lateral_offset: float = float(visual.appearance.get("collection_lateral_offset", 0.0))
-	var proposed_position: Vector2 = anchor_local + inward_local * inward_offset
-	proposed_position += inward_local.orthogonal() * lateral_offset
-	return _clamp_resting_position(
-		proposed_position,
+	var side_local: Vector2 = inward_local.orthogonal()
+	var base_radius: float = maxf(float(visual.appearance.get("radius", 14.0)), 1.0)
+	var visual_radius: float = base_radius * maxf(absf(visual.settled_scale.x), absf(visual.settled_scale.y))
+	var safe_extents: Vector2 = _get_safe_center_extents(layout, visual_radius)
+	var basin_half_extents: Vector2 = _get_layout_vector2(
 		layout,
-		float(visual.appearance.get("radius", 14.0)),
-		visual.settled_scale
+		"basin_half_extents",
+		CORNER_BASIN_HALF_EXTENTS
 	)
+	var population_extents: Vector2 = basin_half_extents * spread_factor
+	var inset_safe_extents: Vector2 = safe_extents * MAX_SAFE_BASIN_USAGE
+	var active_extents: Vector2 = Vector2(
+		minf(population_extents.x, inset_safe_extents.x),
+		minf(population_extents.y, inset_safe_extents.y)
+	)
+	var visual_rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	var capture_ordinal: int = int(visual.appearance.get("collection_capture_ordinal", visual.capture_serial))
+	var ball_number: int = int(visual.appearance.get("ball_number", 0))
+	visual_rng.seed = int(
+		(visual.pocket_index + 1) * 1000003
+		+ capture_ordinal * 9176
+		+ (ball_number + 17) * 131
+		+ CANDIDATE_SEED_SALT
+	)
+
+	var best_position: Vector2 = anchor_local
+	var best_score: float = -INF
+	for candidate_index in range(BEST_FIT_CANDIDATE_COUNT):
+		var pattern_value: Variant = BEST_FIT_CANDIDATE_PATTERN[candidate_index]
+		var pattern_position: Vector2 = pattern_value if pattern_value is Vector2 else Vector2.ZERO
+		pattern_position += Vector2(
+			visual_rng.randf_range(-CANDIDATE_POSITION_JITTER, CANDIDATE_POSITION_JITTER),
+			visual_rng.randf_range(-CANDIDATE_POSITION_JITTER, CANDIDATE_POSITION_JITTER)
+		)
+		if pattern_position.length_squared() > 1.0:
+			pattern_position = pattern_position.normalized()
+		var proposed_position: Vector2 = (
+			anchor_local
+			+ inward_local * pattern_position.x * active_extents.x
+			+ side_local * pattern_position.y * active_extents.y
+		)
+		var candidate_position: Vector2 = _clamp_resting_position(
+			proposed_position,
+			layout,
+			base_radius,
+			visual.settled_scale
+		)
+		var open_space_score: float
+		if occupied_positions.is_empty():
+			open_space_score = -candidate_position.distance_to(anchor_local)
+		else:
+			open_space_score = INF
+			for occupied_position in occupied_positions:
+				open_space_score = minf(
+					open_space_score,
+					candidate_position.distance_to(occupied_position)
+				)
+		var normalized_edge_distance: float = _get_normalized_edge_distance(
+			candidate_position,
+			anchor_local,
+			inward_local,
+			side_local,
+			safe_extents
+		)
+		var edge_penalty: float = 0.0
+		if not occupied_positions.is_empty():
+			edge_penalty = (
+				open_space_score
+				* CENTRAL_BIAS_WEIGHT
+				* normalized_edge_distance
+				* normalized_edge_distance
+			)
+		var score: float = open_space_score - edge_penalty
+		score += visual_rng.randf_range(-CANDIDATE_SCORE_JITTER, CANDIDATE_SCORE_JITTER)
+		if score > best_score:
+			best_score = score
+			best_position = candidate_position
+	return best_position
+
+
+func _store_collection_offsets(
+	visual: PocketCapturedBallVisual,
+	layout: Dictionary,
+	target_position: Vector2
+) -> void:
+	var anchor_local: Vector2 = _get_layout_vector2(layout, "anchor_local", target_position)
+	var inward_local: Vector2 = _get_layout_vector2(layout, "inward_local", Vector2.DOWN).normalized()
+	if inward_local.is_zero_approx():
+		inward_local = Vector2.DOWN
+	var offset: Vector2 = target_position - anchor_local
+	visual.appearance["collection_inward_offset"] = offset.dot(inward_local)
+	visual.appearance["collection_lateral_offset"] = offset.dot(inward_local.orthogonal())
+
+
+func _get_population_spread_factor(visible_count: int) -> float:
+	var population_ratio: float = clampf(
+		float(maxi(visible_count - 1, 0)) / POPULATION_SPREAD_DIVISOR,
+		0.0,
+		1.0
+	)
+	return lerpf(MIN_POPULATION_SPREAD, MAX_POPULATION_SPREAD, population_ratio)
+
+
+func _get_normalized_edge_distance(
+	position: Vector2,
+	anchor_position: Vector2,
+	inward_axis: Vector2,
+	side_axis: Vector2,
+	safe_extents: Vector2
+) -> float:
+	var offset: Vector2 = position - anchor_position
+	var normalized_inward: float = offset.dot(inward_axis) / maxf(safe_extents.x, 1.0)
+	var normalized_side: float = offset.dot(side_axis) / maxf(safe_extents.y, 1.0)
+	return clampf(
+		sqrt(normalized_inward * normalized_inward + normalized_side * normalized_side),
+		0.0,
+		1.0
+	)
+
+
+func _get_minimum_center_spacing(pile: Array) -> float:
+	var positions: Array[Vector2] = []
+	for visual_value in pile:
+		var visual: PocketCapturedBallVisual = visual_value as PocketCapturedBallVisual
+		if visual != null and is_instance_valid(visual):
+			positions.append(visual.settled_position)
+	if positions.size() < 2:
+		return INF
+	var minimum_spacing: float = INF
+	for first_index in range(positions.size() - 1):
+		for second_index in range(first_index + 1, positions.size()):
+			minimum_spacing = minf(
+				minimum_spacing,
+				positions[first_index].distance_to(positions[second_index])
+			)
+	return minimum_spacing
+
+
+func _get_outermost_normalized_edge_distance(pile: Array, layout: Dictionary) -> float:
+	var anchor_local: Vector2 = _get_layout_vector2(layout, "anchor_local", Vector2.ZERO)
+	var inward_local: Vector2 = _get_layout_vector2(layout, "inward_local", Vector2.DOWN).normalized()
+	if inward_local.is_zero_approx():
+		inward_local = Vector2.DOWN
+	var side_local: Vector2 = inward_local.orthogonal()
+	var outermost_distance: float = 0.0
+	for visual_value in pile:
+		var visual: PocketCapturedBallVisual = visual_value as PocketCapturedBallVisual
+		if visual == null or not is_instance_valid(visual):
+			continue
+		var proxy_radius: float = (
+			maxf(float(visual.appearance.get("radius", 14.0)), 1.0)
+			* maxf(absf(visual.settled_scale.x), absf(visual.settled_scale.y))
+		)
+		outermost_distance = maxf(
+			outermost_distance,
+			_get_normalized_edge_distance(
+				visual.settled_position,
+				anchor_local,
+				inward_local,
+				side_local,
+				_get_safe_center_extents(layout, proxy_radius)
+			)
+		)
+	return outermost_distance
 
 
 func _get_rewind_resting_position(state: Dictionary, layout: Dictionary) -> Vector2:
@@ -598,8 +826,9 @@ func _get_rewind_resting_position(state: Dictionary, layout: Dictionary) -> Vect
 	var appearance: Dictionary = {}
 	if appearance_value is Dictionary:
 		appearance = appearance_value as Dictionary
-	var scale_value: Variant = state.get("settled_scale", Vector2(0.82, 0.72))
-	var target_scale: Vector2 = scale_value if scale_value is Vector2 else Vector2(0.82, 0.72)
+	var default_scale: Vector2 = Vector2.ONE * SETTLED_SCALE_BASE
+	var scale_value: Variant = state.get("settled_scale", default_scale)
+	var target_scale: Vector2 = scale_value if scale_value is Vector2 else default_scale
 	var stored_position_value: Variant = state.get("settled_position", Vector2.ZERO)
 	var stored_position: Vector2 = stored_position_value if stored_position_value is Vector2 else Vector2.ZERO
 	var proposed_position: Vector2 = stored_position
@@ -625,6 +854,7 @@ func _get_collection_layout_debug_snapshot() -> Dictionary:
 		var layout: Dictionary = _get_collection_layout(pocket_index)
 		var mouth_local: Vector2 = _get_layout_vector2(layout, "mouth_local", Vector2.ZERO)
 		var anchor_local: Vector2 = _get_layout_vector2(layout, "anchor_local", mouth_local)
+		var pile: Array = _get_pocket_visuals(pocket_index)
 		snapshot[pocket_index] = {
 			"name": str(layout.get("pocket_name", "Pocket %s" % pocket_index)),
 			"is_corner": bool(layout.get("is_corner", false)),
@@ -635,6 +865,12 @@ func _get_collection_layout_debug_snapshot() -> Dictionary:
 			"inward_local": _get_layout_vector2(layout, "inward_local", Vector2.DOWN),
 			"basin_half_extents": _get_layout_vector2(layout, "basin_half_extents", CORNER_BASIN_HALF_EXTENTS),
 			"safe_center_extents": _get_safe_center_extents(layout, NOMINAL_SETTLED_RADIUS),
+			"visible_proxy_count": pile.size(),
+			"population_spread_factor": _get_population_spread_factor(pile.size()),
+			"minimum_center_spacing": _get_minimum_center_spacing(pile),
+			"safety_padding": _get_basin_safety_padding(layout),
+			"central_bias_weight": CENTRAL_BIAS_WEIGHT,
+			"outermost_normalized_edge_distance": _get_outermost_normalized_edge_distance(pile, layout),
 		}
 	return snapshot
 
@@ -668,6 +904,12 @@ func _draw() -> void:
 			inward_local = Vector2.DOWN
 		var side_local: Vector2 = inward_local.orthogonal()
 		var safe_extents: Vector2 = _get_safe_center_extents(layout, NOMINAL_SETTLED_RADIUS)
+		var pile: Array = _get_pocket_visuals(pocket_index)
+		var visible_count: int = pile.size()
+		var spread_factor: float = _get_population_spread_factor(visible_count)
+		var minimum_spacing: float = _get_minimum_center_spacing(pile)
+		var safety_padding: float = _get_basin_safety_padding(layout)
+		var outermost_edge_distance: float = _get_outermost_normalized_edge_distance(pile, layout)
 		var basin_points: PackedVector2Array = _make_oriented_ellipse_points(
 			anchor_local,
 			inward_local,
@@ -688,8 +930,28 @@ func _draw() -> void:
 		draw_line(anchor_local, arrow_end, anchor_color, 2.0, true)
 		draw_line(arrow_end, arrow_end - inward_local * 6.0 + side_local * 3.5, anchor_color, 1.6, true)
 		draw_line(arrow_end, arrow_end - inward_local * 6.0 - side_local * 3.5, anchor_color, 1.6, true)
+		for visual_value in pile:
+			var visual: PocketCapturedBallVisual = visual_value as PocketCapturedBallVisual
+			if visual == null or not is_instance_valid(visual):
+				continue
+			var proxy_radius: float = (
+				maxf(float(visual.appearance.get("radius", 14.0)), 1.0)
+				* maxf(absf(visual.settled_scale.x), absf(visual.settled_scale.y))
+			)
+			draw_arc(visual.settled_position, proxy_radius, 0.0, TAU, 24, DEBUG_PROXY_COLOR, 1.0, true)
+			draw_circle(visual.settled_position, 2.0, DEBUG_PROXY_COLOR)
 		var label_position: Vector2 = anchor_local + side_local * (safe_extents.y + 10.0) - inward_local * 5.0
-		var label_text: String = "%s: %s" % [pocket_index, str(layout.get("pocket_name", "Pocket"))]
+		var spacing_text: String = "--" if minimum_spacing == INF else "%.1f" % minimum_spacing
+		var label_text: String = "%s: %s | n %d | spread %.2f | min %s | pad %.1f | edge %.2f | bias %.2f" % [
+			pocket_index,
+			str(layout.get("pocket_name", "Pocket")),
+			visible_count,
+			spread_factor,
+			spacing_text,
+			safety_padding,
+			outermost_edge_distance,
+			CENTRAL_BIAS_WEIGHT,
+		]
 		draw_string(UI_FONT, label_position, label_text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 12, anchor_color)
 
 
@@ -731,6 +993,7 @@ func _enforce_pocket_limit(pocket_index: int) -> void:
 		var oldest: PocketCapturedBallVisual = pile.pop_front() as PocketCapturedBallVisual
 		_retire_visual_for_cap(oldest)
 	pocket_visuals[pocket_index] = pile
+	_refresh_pile_depth_appearance(pocket_index, true)
 
 
 func _enforce_total_limit() -> void:
@@ -743,6 +1006,12 @@ func _enforce_total_limit() -> void:
 		pile.erase(oldest)
 		pocket_visuals[old_pocket_index] = pile
 		_retire_visual_for_cap(oldest)
+		_layout_pocket_visuals(
+			old_pocket_index,
+			_get_collection_layout(old_pocket_index),
+			true
+		)
+		_refresh_pile_depth_appearance(old_pocket_index, true)
 
 
 func _retire_visual_for_cap(visual: PocketCapturedBallVisual) -> void:
@@ -776,6 +1045,36 @@ func _on_capture_animation_finished(visual: PocketCapturedBallVisual) -> void:
 		return
 	if not visual.persistent_collection_visual:
 		visual.queue_free()
+		return
+	_layout_pocket_visuals(
+		visual.pocket_index,
+		_get_collection_layout(visual.pocket_index),
+		true
+	)
+	_refresh_pile_depth_appearance(visual.pocket_index, true)
+
+
+func _refresh_pile_depth_appearance(pocket_index: int, animate: bool) -> void:
+	var pile: Array = _get_pocket_visuals(pocket_index)
+	var pile_count: int = pile.size()
+	if pile_count <= 0:
+		return
+	var denominator: float = float(maxi(pile_count - 1, 1))
+	for visual_index in range(pile_count):
+		var visual: PocketCapturedBallVisual = pile[visual_index] as PocketCapturedBallVisual
+		if visual == null or not is_instance_valid(visual):
+			continue
+		var newest_fraction: float = 1.0 if pile_count == 1 else float(visual_index) / denominator
+		var brightness: float = lerpf(
+			PILE_OLDEST_BRIGHTNESS,
+			PILE_NEWEST_BRIGHTNESS,
+			newest_fraction
+		)
+		var depth_tint: Color = Color(brightness, brightness, brightness, PILE_TINT_ALPHA)
+		visual.apply_collection_depth_tint(
+			depth_tint,
+			PILE_DEPTH_TWEEN_DURATION if animate else 0.0
+		)
 
 
 func _initialize_pocket_state() -> void:

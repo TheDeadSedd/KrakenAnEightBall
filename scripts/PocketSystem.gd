@@ -11,6 +11,7 @@ var table
 var pockets_root: Node
 var pocket_positions: Array[Vector2] = []
 var pocket_radii: Array[float] = []
+var pocket_names: Array[String] = []
 var prediction_geometry_snapshot: Array[Dictionary] = []
 var prediction_geometry_revision := 0
 var last_captured_pocket_index := -1
@@ -26,6 +27,7 @@ func setup(table_ref) -> void:
 func cache_pockets() -> void:
 	pocket_positions.clear()
 	pocket_radii.clear()
+	pocket_names.clear()
 	prediction_geometry_snapshot = []
 	if pockets_root == null and table != null:
 		pockets_root = table.get_node_or_null("Pockets")
@@ -149,6 +151,12 @@ func get_last_captured_pocket_radius() -> float:
 	return pocket_radii[last_captured_pocket_index]
 
 
+func get_last_captured_pocket_name() -> String:
+	if last_captured_pocket_index < 0 or last_captured_pocket_index >= pocket_names.size():
+		return ""
+	return pocket_names[last_captured_pocket_index]
+
+
 func get_first_capture_fraction_for_motion(
 	start_position: Vector2,
 	displacement: Vector2,
@@ -216,6 +224,7 @@ func _cache_pocket_node(node: Node) -> void:
 
 	pocket_positions.append(collision_shape.global_position)
 	pocket_radii.append(circle_shape.radius)
+	pocket_names.append(str(pocket_node.name))
 
 
 func _get_capturing_pocket_index(ball: Ball) -> int:

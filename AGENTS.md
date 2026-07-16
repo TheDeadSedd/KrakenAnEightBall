@@ -267,6 +267,18 @@ Current implemented event tiers:
 
 Does not award Doubloons, show UI, change gameplay outcomes, or alter physics. It stores causal shot history per ball so sunk-ball scoring can consume it later. Detection should remain event-driven through shot lifecycle, rail/contact/pocket events, and anomaly reports rather than full-table frame-loop scans.
 
+### `scripts/ShotLedgerSystem.gd`
+
+Owns the value-only authoritative Shot Ledger lifecycle: start snapshots at the committed-shot edge, accepted ball/rail/pocket event collection, lightweight travel accumulation, one frozen completed ledger, completion signaling, diagnostics, and rewind-safe current/last state.
+
+Does not calculate score, classify rewards, mutate physics, inspect aim-preview simulations, or retain live Ball/Node references in completed snapshots. `Table.gd` forwards canonical accepted events and lifecycle boundaries only.
+
+### `scripts/ShotLedgerAnalyzer.gd`
+
+Owns pure semantic transformation of schema-versioned raw shot ledgers into conservative causal activation, pocket facts, shot facts, and structured tags. The same analyzer is intended for authoritative and future predicted ledgers.
+
+Contains no scene references or gameplay mutation. Ambiguous collision direction must remain explicit rather than receiving an invented causal parent.
+
 ### `scripts/ScoreSystem.gd`
 
 Owns Doubloons reward values for all implemented shot-event tiers, Treasure claim payout routing, running Doubloons total, scoring breakdown debug logs, HUD total signal, and pocket-side score popup presentation.

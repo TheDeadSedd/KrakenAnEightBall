@@ -71,6 +71,7 @@ func request_rewind() -> bool:
 
 	var system_states: Dictionary = checkpoint.get("system_states", {})
 	table.prepare_for_shot_rewind()
+	table.shot_ledger_system.restore_rewind_state(_get_state(system_states, "shot_ledger"))
 	table.score_system.restore_rewind_state(_get_state(system_states, "score"))
 	table.ball_drop_system.restore_rewind_state(_get_state(system_states, "ball_drop"))
 	table.table_event_system.restore_rewind_state(_get_state(system_states, "table_event"))
@@ -177,6 +178,7 @@ func _get_capture_blocker() -> String:
 
 func _capture_system_states() -> Dictionary:
 	var states := {
+		"shot_ledger": table.shot_ledger_system.capture_rewind_state(),
 		"score": table.score_system.get_rewind_state(),
 		"ball_drop": table.ball_drop_system.get_rewind_state(),
 		"table_event": table.table_event_system.get_rewind_state(),
