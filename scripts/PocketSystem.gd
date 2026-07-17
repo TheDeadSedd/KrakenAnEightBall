@@ -76,6 +76,10 @@ func get_pocket_radii() -> Array[float]:
 	return pocket_radii
 
 
+func get_pocket_names() -> Array[String]:
+	return pocket_names
+
+
 func get_prediction_geometry_snapshot() -> Array[Dictionary]:
 	# Read-only cached records. Rebuilds replace the array atomically.
 	return prediction_geometry_snapshot

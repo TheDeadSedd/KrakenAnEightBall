@@ -34,6 +34,7 @@ var subtitle_label: Label
 var status_label: Label
 var kraken_favor_label: Label
 var start_button: Button
+var shot_lab_button: Button
 var passage_mode_button: Button
 var roguelite_mode_button: Button
 var mode_select_back_button: Button
@@ -196,6 +197,7 @@ func _build_interface() -> void:
 	quit_button.pressed.connect(_on_quit_pressed)
 
 	_build_credits_block()
+	_build_shot_lab_button()
 	_create_mode_select_panel()
 
 	options_panel = OPTIONS_MENU_SCRIPT.new()
@@ -256,6 +258,17 @@ func _make_description_label(text: String) -> Label:
 	label.add_theme_color_override("font_outline_color", Color(0.0, 0.0, 0.0, 0.68))
 	label.add_theme_constant_override("outline_size", 2)
 	return label
+
+
+func _build_shot_lab_button() -> void:
+	shot_lab_button = _make_menu_button("SHOT LAB")
+	shot_lab_button.name = "ShotLabButton"
+	shot_lab_button.custom_minimum_size = Vector2(176.0, 40.0)
+	shot_lab_button.add_theme_font_size_override("font_size", 18)
+	shot_lab_button.tooltip_text = "Developer testing environment"
+	shot_lab_button.visible = GAME_MODE_SCRIPT.is_debug_tooling_available()
+	shot_lab_button.pressed.connect(_on_shot_lab_pressed)
+	add_child(shot_lab_button)
 
 
 func _make_panel_style() -> StyleBoxFlat:
@@ -463,6 +476,16 @@ func _update_menu_layout() -> void:
 		credits_panel.offset_top = -CREDITS_MARGIN.y - CREDITS_HEIGHT
 		credits_panel.offset_bottom = -CREDITS_MARGIN.y
 
+	if shot_lab_button != null:
+		shot_lab_button.anchor_left = 1.0
+		shot_lab_button.anchor_right = 1.0
+		shot_lab_button.anchor_top = 1.0
+		shot_lab_button.anchor_bottom = 1.0
+		shot_lab_button.offset_left = -210.0
+		shot_lab_button.offset_right = -34.0
+		shot_lab_button.offset_top = -76.0
+		shot_lab_button.offset_bottom = -36.0
+
 	if options_panel != null:
 		var options_width: float = clampf(viewport_size.x * 0.34, 560.0, 700.0)
 		var options_height: float = clampf(viewport_size.y * 0.48, 430.0, 560.0)
@@ -507,6 +530,8 @@ func _set_menu_chrome_visible(is_visible: bool) -> void:
 		menu_panel.visible = is_visible
 	if credits_panel != null:
 		credits_panel.visible = is_visible
+	if shot_lab_button != null:
+		shot_lab_button.visible = is_visible and GAME_MODE_SCRIPT.is_debug_tooling_available()
 
 
 func _on_start_pressed() -> void:
@@ -515,6 +540,8 @@ func _on_start_pressed() -> void:
 
 func _start_game(mode_id: String, travel_message: String) -> void:
 	start_button.disabled = true
+	if shot_lab_button != null:
+		shot_lab_button.disabled = true
 	if passage_mode_button != null:
 		passage_mode_button.disabled = true
 	if roguelite_mode_button != null:
@@ -525,6 +552,8 @@ func _start_game(mode_id: String, travel_message: String) -> void:
 	var error_code: int = get_tree().change_scene_to_file(GAMEPLAY_SCENE_PATH)
 	if error_code != OK:
 		start_button.disabled = false
+		if shot_lab_button != null:
+			shot_lab_button.disabled = false
 		if passage_mode_button != null:
 			passage_mode_button.disabled = false
 		if roguelite_mode_button != null:
@@ -557,6 +586,14 @@ func _on_passage_mode_pressed() -> void:
 
 func _on_roguelite_mode_pressed() -> void:
 	_start_game(GAME_MODE_SCRIPT.MODE_ROGUELITE, "The table sinks...")
+
+
+func _on_shot_lab_pressed() -> void:
+	GAME_MODE_SCRIPT.set_pending_shot_lab_session(get_tree(), {
+		"auto_load": true,
+		"run_suite": false,
+	})
+	_start_game(GAME_MODE_SCRIPT.MODE_SHOT_LAB, "Opening the laboratory...")
 
 
 func _on_mode_select_back_pressed() -> void:

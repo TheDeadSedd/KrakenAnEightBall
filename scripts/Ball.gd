@@ -120,6 +120,7 @@ const VISUAL_SPIN_REDRAW_MIN_DELTA := 0.018
 @onready var number_label: Label = $NumberLabel
 
 var velocity := Vector2.ZERO
+var run_ball_id := -1
 var visual_spin_angle := 0.0
 var gameplay_enabled := true
 # Wayfinder state stays intentionally small: anomaly identity plus current activation.

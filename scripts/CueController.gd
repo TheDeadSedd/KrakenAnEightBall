@@ -75,7 +75,7 @@ func setup() -> void:
 
 
 func update_cue(
-	cue_ball: Ball,
+	cue_ball_value: Variant,
 	can_shoot: bool,
 	is_dragging: bool,
 	shot_drag_vector: Vector2,
@@ -83,8 +83,14 @@ func update_cue(
 	game_over: bool,
 	delta: float
 ) -> void:
-	if not is_instance_valid(cue_ball) or not cue_ball.visible or game_over:
-		visible = false
+	# Keep this boundary tolerant of a stale Object long enough to hide safely.
+	# Table still owns authoritative cue validation before calling this method.
+	if not is_instance_valid(cue_ball_value) or not cue_ball_value is Ball:
+		clear_cue()
+		return
+	var cue_ball: Ball = cue_ball_value as Ball
+	if cue_ball.is_queued_for_deletion() or not cue_ball.visible or not cue_ball.gameplay_enabled or game_over:
+		clear_cue()
 		return
 
 	var should_show: bool = is_dragging or release_animation_timer > 0.0
@@ -93,6 +99,12 @@ func update_cue(
 		return
 
 	_update_cue_transform(cue_ball, can_shoot, is_dragging, shot_drag_vector, max_drag_distance, delta)
+
+
+func clear_cue() -> void:
+	release_animation_timer = 0.0
+	cue_visual_pullback = 0.0
+	visible = false
 
 
 func is_point_over_grab_zone(world_position: Vector2, cue_ball: Ball, max_drag_distance: float) -> bool:

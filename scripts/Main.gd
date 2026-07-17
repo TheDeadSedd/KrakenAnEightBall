@@ -6,6 +6,7 @@ const MAIN_MENU_SCENE_PATH := "res://scenes/MainMenu.tscn"
 const GAMEPLAY_SCENE_PATH := "res://scenes/Main.tscn"
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const GAME_MODE_SCRIPT := preload("res://scripts/GameModeSystem.gd")
+const SHOT_LAB_HUD_SCRIPT := preload("res://scripts/ShotLabHUD.gd")
 const COMPLETION_PANEL_SIZE := Vector2(620.0, 710.0)
 const BACK_ROOM_PANEL_VIEWPORT_MARGIN := 24.0
 
@@ -17,6 +18,7 @@ const BACK_ROOM_PANEL_VIEWPORT_MARGIN := 24.0
 @onready var pause_menu: PauseMenu = $CanvasLayer/HUD/PauseMenu
 @onready var hud_feed: HudFeed = $CanvasLayer/HUD/HudFeed
 @onready var result_label: Label = $CanvasLayer/HUD/ResultLabel
+@onready var title_label: Label = $CanvasLayer/HUD/TitleLabel
 @onready var doubloons_label: Label = $CanvasLayer/HUD/DoubloonsLabel
 @onready var run_ledger_hud: RunLedgerHUD = $CanvasLayer/HUD/RunLedgerHUD
 @onready var run_stats_hud: RunStatsHUD = $CanvasLayer/HUD/RunStatsHUD
@@ -48,18 +50,22 @@ var sunken_spoils_hud: SunkenSpoilsHUD
 var roguelite_hud: RogueliteHUD
 var roguelite_round_panel: RogueliteRoundPanel
 var roguelite_reward_panel: RogueliteRewardPanel
+var shot_lab_hud: ShotLabHUD
 var game_mode_id: String = GAME_MODE_SCRIPT.MODE_PASSAGE
 var pending_debug_session_snapshot: Dictionary = {}
+var pending_shot_lab_session_config: Dictionary = {}
 var reset_table_in_progress := false
 
 
 func _enter_tree() -> void:
 	game_mode_id = GAME_MODE_SCRIPT.consume_pending_mode(get_tree())
 	pending_debug_session_snapshot = GAME_MODE_SCRIPT.consume_pending_debug_session(get_tree())
+	pending_shot_lab_session_config = GAME_MODE_SCRIPT.consume_pending_shot_lab_session(get_tree())
 
 	var table_node: BilliardsTable = get_node_or_null("Table") as BilliardsTable
 	if table_node != null:
 		table_node.set_game_mode_id(game_mode_id)
+		table_node.set_shot_lab_session_config(pending_shot_lab_session_config)
 
 
 func get_game_mode_id() -> String:
@@ -120,6 +126,8 @@ func _connect_pause_menu_signals() -> void:
 		pause_menu.resume_requested.connect(_on_pause_resume_requested)
 	if not pause_menu.end_run_requested.is_connected(_on_pause_end_run_requested):
 		pause_menu.end_run_requested.connect(_on_pause_end_run_requested)
+	if not pause_menu.shot_lab_session_requested.is_connected(_on_pause_shot_lab_session_requested):
+		pause_menu.shot_lab_session_requested.connect(_on_pause_shot_lab_session_requested)
 	if not pause_menu.debug_panel_toggled.is_connected(_on_pause_debug_panel_toggled):
 		pause_menu.debug_panel_toggled.connect(_on_pause_debug_panel_toggled)
 	if not pause_menu.debug_wayfinder_current_test_button_toggled.is_connected(_on_pause_wayfinder_current_test_button_toggled):
@@ -259,11 +267,27 @@ func _setup_hud_presenters() -> void:
 	reserve_deployment_presenter.setup(table.reserve_system, reserve_slots_ui)
 	table.emit_ready_status_if_needed("")
 	debug_overlay.setup(table)
+	_build_shot_lab_hud()
 	pause_menu.configure_dev_options_debug_overlay(debug_overlay)
 	pause_menu.configure_dev_options_ball_audio(table.ball_audio_system)
 	table.shot_rewind_system.set_ui_bridge(self)
 	debug_overlay.set_shot_rewind_state(table.shot_rewind_system.get_state_snapshot())
 	_apply_mode_visibility()
+
+
+func _build_shot_lab_hud() -> void:
+	if not _is_shot_lab_mode() or shot_lab_hud != null:
+		return
+	shot_lab_hud = SHOT_LAB_HUD_SCRIPT.new() as ShotLabHUD
+	shot_lab_hud.name = "ShotLabHUD"
+	shot_lab_hud.process_mode = Node.PROCESS_MODE_ALWAYS
+	debug_overlay.add_child(shot_lab_hud)
+	shot_lab_hud.setup(table.shot_lab_system)
+	shot_lab_hud.inspect_result_requested.connect(_on_shot_lab_inspect_result_requested)
+	shot_lab_hud.inspect_score_requested.connect(_on_shot_lab_inspect_score_requested)
+	shot_lab_hud.raw_events_requested.connect(_on_shot_lab_raw_events_requested)
+	shot_lab_hud.exit_lab_requested.connect(_on_shot_lab_exit_requested)
+	shot_lab_hud.set_hover_ui_suppressed(table.should_suppress_hover_ui())
 
 
 func _build_back_room_deal_panel() -> void:
@@ -391,7 +415,7 @@ func _build_roguelite_reward_panel() -> void:
 
 func _set_sunken_spoils_snapshot(snapshot: Dictionary) -> void:
 	latest_sunken_spoils_snapshot = snapshot.duplicate(true)
-	if _is_roguelite_mode():
+	if _is_roguelite_mode() or _is_shot_lab_mode():
 		if sunken_spoils_hud != null:
 			sunken_spoils_hud.visible = false
 		if sunken_spoils_panel != null:
@@ -451,29 +475,49 @@ func _is_roguelite_mode() -> bool:
 	return table != null and table.is_roguelite_mode()
 
 
+func _is_shot_lab_mode() -> bool:
+	return table != null and table.is_shot_lab_mode()
+
+
 func _apply_mode_visibility() -> void:
-	var roguelite_active := _is_roguelite_mode()
+	var roguelite_active: bool = _is_roguelite_mode()
+	var shot_lab_active: bool = _is_shot_lab_mode()
+	var passage_active: bool = not roguelite_active and not shot_lab_active
+	if title_label != null:
+		title_label.visible = not shot_lab_active
+	if doubloons_label != null:
+		doubloons_label.visible = not shot_lab_active
+	if result_label != null:
+		result_label.visible = not shot_lab_active
+	if run_ledger_hud != null:
+		run_ledger_hud.visible = not shot_lab_active
+	if run_stats_hud != null:
+		run_stats_hud.visible = not shot_lab_active
+		if shot_lab_active:
+			run_stats_hud.close_panel()
+	if cue_start_selector_hud != null:
+		cue_start_selector_hud.visible = not shot_lab_active
 	if passage_hud != null:
-		passage_hud.visible = not roguelite_active
+		passage_hud.visible = passage_active
 	if oath_hud != null:
-		oath_hud.visible = not roguelite_active
+		oath_hud.visible = passage_active
 	if kraken_boon_hud != null:
-		kraken_boon_hud.visible = not roguelite_active
+		kraken_boon_hud.visible = passage_active
 	if table_event_meter != null:
-		table_event_meter.visible = not roguelite_active
-	if table_event_menu != null and roguelite_active:
+		table_event_meter.visible = passage_active
+	if table_event_menu != null and not passage_active:
 		table_event_menu.close_menu()
 	if reserve_slots_ui != null:
-		reserve_slots_ui.visible = not roguelite_active
+		reserve_slots_ui.visible = passage_active
 	if reserve_deployment_presenter != null:
-		reserve_deployment_presenter.visible = not roguelite_active
+		reserve_deployment_presenter.visible = passage_active
 	if quartermaster_hud != null:
-		quartermaster_hud.visible = not roguelite_active
-	if back_room_panel != null and roguelite_active:
+		quartermaster_hud.visible = passage_active
+	if back_room_panel != null and not passage_active:
 		back_room_panel.close_panel()
 	if sunken_spoils_hud != null:
-		sunken_spoils_hud.visible = not roguelite_active
-	if sunken_spoils_panel != null and roguelite_active:
+		sunken_spoils_hud.visible = passage_active
+	if sunken_spoils_panel != null and not passage_active:
 		sunken_spoils_panel.close_panel()
 	if roguelite_hud != null:
 		roguelite_hud.set_visible_for_roguelite(roguelite_active)
@@ -481,6 +525,8 @@ func _apply_mode_visibility() -> void:
 		roguelite_round_panel.close_panel()
 	if roguelite_reward_panel != null and not roguelite_active:
 		roguelite_reward_panel.close_panel()
+	if shot_lab_hud != null:
+		shot_lab_hud.visible = shot_lab_active
 
 
 func _setup_cue_progression_runtime_bridge() -> void:
@@ -764,10 +810,46 @@ func _on_gameplay_mouse_lock_changed(locked: bool) -> void:
 		sunken_spoils_hud.set_hover_ui_suppressed(locked)
 	if sunken_spoils_panel != null:
 		sunken_spoils_panel.set_hover_ui_suppressed(locked)
+	if shot_lab_hud != null:
+		shot_lab_hud.set_hover_ui_suppressed(locked)
 
 
 func _on_cue_start_selection_changed(snapshot: Dictionary) -> void:
 	cue_start_selector_hud.set_cue_start_snapshot(snapshot)
+
+
+func _on_shot_lab_inspect_result_requested() -> void:
+	if debug_overlay != null:
+		debug_overlay.open_shot_lab_inspector()
+
+
+func _on_shot_lab_inspect_score_requested() -> void:
+	if debug_overlay != null:
+		debug_overlay.open_shot_lab_scoring_inspector()
+
+
+func _on_shot_lab_raw_events_requested() -> void:
+	if debug_overlay != null:
+		debug_overlay.open_shot_lab_raw_events()
+
+
+func _on_shot_lab_exit_requested() -> void:
+	if end_run_in_progress:
+		return
+	end_run_in_progress = true
+	if debug_overlay != null:
+		debug_overlay.close_shot_lab_inspectors()
+	if table != null and table.shot_lab_system != null:
+		table.shot_lab_system.clear_shot_lab()
+	elif table != null and table.shot_ledger_system != null:
+		table.shot_ledger_system.cancel_active_shot("exit_shot_lab")
+	if pause_menu != null:
+		pause_menu.set_pause_visible(false)
+	get_tree().paused = false
+	var error_code: int = get_tree().change_scene_to_file(MAIN_MENU_SCENE_PATH)
+	if error_code != OK:
+		end_run_in_progress = false
+		hud_feed.add_message("Shot Lab exit failed. Error %s." % error_code, "event")
 
 
 func _on_table_event_icon_clicked() -> void:
@@ -853,8 +935,48 @@ func _on_pause_resume_requested() -> void:
 	_set_game_paused(false)
 
 
+func _on_pause_shot_lab_session_requested(run_suite: bool) -> void:
+	_transition_to_shot_lab_session(run_suite)
+
+
+func _transition_to_shot_lab_session(run_suite: bool) -> void:
+	if end_run_in_progress:
+		return
+	end_run_in_progress = true
+	var selected_preset_id := "direct_pot"
+	if table != null and table.shot_lab_system != null:
+		selected_preset_id = table.shot_lab_system.get_selected_preset_id()
+		if table.shot_lab_system.is_active():
+			table.shot_lab_system.clear_shot_lab()
+	if table != null and table.shot_ledger_system != null:
+		table.shot_ledger_system.cancel_active_shot("enter_dedicated_shot_lab")
+	if table_event_menu != null:
+		table_event_menu.close_menu()
+	if table != null and table.is_ball_placement_active():
+		table.cancel_active_ball_placement()
+	if pause_menu != null:
+		pause_menu.set_pause_visible(false)
+	get_tree().paused = false
+	GAME_MODE_SCRIPT.set_pending_shot_lab_session(get_tree(), {
+		"selected_preset_id": selected_preset_id,
+		"auto_load": true,
+		"run_suite": run_suite,
+	})
+	GAME_MODE_SCRIPT.set_pending_mode(get_tree(), GAME_MODE_SCRIPT.MODE_SHOT_LAB)
+	var error_code: int = get_tree().change_scene_to_file(GAMEPLAY_SCENE_PATH)
+	if error_code != OK:
+		end_run_in_progress = false
+		get_tree().paused = true
+		if pause_menu != null:
+			pause_menu.set_pause_visible(true)
+		hud_feed.add_message("Shot Lab could not open. Error %s." % error_code, "event")
+
+
 func _on_pause_end_run_requested() -> void:
 	if end_run_in_progress:
+		return
+	if _is_shot_lab_mode():
+		_on_shot_lab_exit_requested()
 		return
 
 	end_run_in_progress = true

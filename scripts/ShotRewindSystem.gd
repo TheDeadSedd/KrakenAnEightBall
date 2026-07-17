@@ -58,7 +58,7 @@ func capture_pre_shot_checkpoint() -> bool:
 	return true
 
 
-func request_rewind() -> bool:
+func request_rewind(preserve_last_completed_ledger: bool = false) -> bool:
 	var blocker: String = get_rewind_blocker()
 	if not blocker.is_empty():
 		last_blocker_reason = blocker
@@ -68,10 +68,22 @@ func request_rewind() -> bool:
 	restoring = true
 	last_blocker_reason = "Restoring checkpoint"
 	_emit_state()
+	var preserved_completed_ledger: Dictionary = {}
+	var preserved_scoring_result: Dictionary = {}
+	var preserved_shot_lab_state: Dictionary = {}
+	if preserve_last_completed_ledger:
+		preserved_completed_ledger = table.shot_ledger_system.get_last_completed_ledger()
+		preserved_scoring_result = table.roguelite_scoring_system.get_last_score_result()
+		if table.is_shot_lab_mode():
+			preserved_shot_lab_state = table.shot_lab_system.capture_rewind_state()
 
 	var system_states: Dictionary = checkpoint.get("system_states", {})
 	table.prepare_for_shot_rewind()
 	table.shot_ledger_system.restore_rewind_state(_get_state(system_states, "shot_ledger"))
+	table.roguelite_scoring_system.restore_rewind_state(_get_state(system_states, "roguelite_scoring"))
+	if table.is_shot_lab_mode():
+		table.shot_lab_system.restore_rewind_state(_get_state(system_states, "shot_lab"))
+	table.run_ball_identity_system.restore_rewind_state(_get_state(system_states, "run_ball_identity"))
 	table.score_system.restore_rewind_state(_get_state(system_states, "score"))
 	table.ball_drop_system.restore_rewind_state(_get_state(system_states, "ball_drop"))
 	table.table_event_system.restore_rewind_state(_get_state(system_states, "table_event"))
@@ -92,6 +104,12 @@ func request_rewind() -> bool:
 	table.restore_shot_rewind_state(_get_state(checkpoint, "table_state"))
 	table.run_stats_system.restore_rewind_state(_get_state(system_states, "run_stats"))
 	_restore_ui_state(_get_state(checkpoint, "ui_state"))
+	if preserve_last_completed_ledger and not preserved_completed_ledger.is_empty():
+		table.shot_ledger_system.restore_completed_observation_after_rewind(preserved_completed_ledger)
+		if not preserved_scoring_result.is_empty():
+			table.roguelite_scoring_system.restore_completed_observation_after_rewind(preserved_scoring_result)
+		if table.is_shot_lab_mode() and not preserved_shot_lab_state.is_empty():
+			table.shot_lab_system.restore_completed_observation_after_rewind(preserved_shot_lab_state)
 
 	restoring = false
 	last_blocker_reason = ""
@@ -178,7 +196,9 @@ func _get_capture_blocker() -> String:
 
 func _capture_system_states() -> Dictionary:
 	var states := {
+		"run_ball_identity": table.run_ball_identity_system.get_rewind_state(),
 		"shot_ledger": table.shot_ledger_system.capture_rewind_state(),
+		"roguelite_scoring": table.roguelite_scoring_system.capture_rewind_state(),
 		"score": table.score_system.get_rewind_state(),
 		"ball_drop": table.ball_drop_system.get_rewind_state(),
 		"table_event": table.table_event_system.get_rewind_state(),
@@ -189,6 +209,8 @@ func _capture_system_states() -> Dictionary:
 		"pocket_streak": table.pocket_streak_system.get_rewind_state(),
 		"pocket_capture": table.pocket_capture_presenter.get_rewind_state(),
 	}
+	if table.is_shot_lab_mode():
+		states["shot_lab"] = table.shot_lab_system.capture_rewind_state()
 	if table.is_passage_mode():
 		states["passage"] = table.passage_system.get_rewind_state()
 		states["sunken_spoils"] = table.sunken_spoils_system.get_rewind_state()

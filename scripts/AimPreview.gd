@@ -334,6 +334,7 @@ var _debug_first_hit_candidate_log: Array[Dictionary] = []
 var _debug_first_hit_selected_ball_id := -1
 var _debug_first_hit_selected_ball_number := -1
 var trajectory_predictor: AimTrajectoryPredictor
+var shot_lab_reference_predictor: AimTrajectoryPredictor
 var trajectory_profiler: AimTrajectoryProfiler
 var benchmark_session: AimBenchmarkSession
 var cloned_trajectory_configuration: Dictionary = {}
@@ -454,6 +455,7 @@ var _deep_first_visible_latency_samples := 0
 func setup(table_ref) -> void:
 	table = table_ref
 	trajectory_predictor = AIM_TRAJECTORY_PREDICTOR_SCRIPT.new()
+	shot_lab_reference_predictor = AIM_TRAJECTORY_PREDICTOR_SCRIPT.new()
 	trajectory_profiler = AIM_TRAJECTORY_PROFILER_SCRIPT.new()
 	benchmark_session = AIM_BENCHMARK_SESSION_SCRIPT.new()
 	cloned_trajectory_configuration = AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_default_configuration(
@@ -465,6 +467,40 @@ func setup(table_ref) -> void:
 	benchmark_session.set_staging_configuration(staged_prediction_configuration)
 	_observed_table_prediction_revision = int(table.get_aim_prediction_state_revision())
 	cloned_prediction_availability = _make_default_cloned_prediction_availability()
+
+
+func simulate_shot_lab_reference(origin: Vector2, launch_velocity: Vector2) -> Dictionary:
+	# Reference preflight uses the same cloned input and deterministic physics as
+	# player aim, but owns a separate predictor/cache and neutral effect snapshot.
+	if table == null or shot_lab_reference_predictor == null:
+		return {
+			"valid": false,
+			"stop_reason": "shot_lab_reference_predictor_unavailable",
+			"events": [],
+			"balls": [],
+		}
+	shot_lab_reference_predictor.clear_cache()
+	var input_snapshot: Dictionary = _build_cloned_trajectory_input(origin, launch_velocity)
+	input_snapshot["effect_snapshot"] = {}
+	var configuration: Dictionary = AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_benchmark_preset_configuration(
+		AimTrajectoryPredictor.BENCHMARK_PRESET_DEEP_DEBUG,
+		int(table.PHYSICS_SUBSTEPS)
+	)
+	configuration["profile_enabled"] = false
+	configuration["max_processing_time_ms"] = 1000.0
+	configuration["max_simulated_seconds"] = 30.0
+	configuration["max_physics_frames"] = 1800
+	configuration = AIM_TRAJECTORY_PREDICTOR_SCRIPT.normalize_configuration(
+		configuration,
+		int(table.PHYSICS_SUBSTEPS)
+	)
+	var result: Dictionary = shot_lab_reference_predictor.simulate(
+		input_snapshot,
+		configuration
+	)
+	result["shot_lab_reference_preflight"] = true
+	result["modifiers_bypassed"] = true
+	return result
 
 
 func notify_table_prediction_revision_changed(
@@ -4478,6 +4514,7 @@ func _draw_cloned_debug_prediction(
 	draw_events: bool = true
 ) -> void:
 	var configuration: Dictionary = result.get("configuration", {})
+	var cue_source_id: int = _get_cloned_cue_source_id(result)
 	var draw_cue_continuation: bool = bool(configuration.get("draw_cue_continuation", true))
 	var draw_child_paths: bool = bool(configuration.get("draw_child_ball_paths", true))
 	_deep_reveal_visible_branches = 0
@@ -4526,7 +4563,7 @@ func _draw_cloned_debug_prediction(
 			if not event_value is Dictionary:
 				continue
 			var event: Dictionary = event_value
-			_draw_cloned_debug_event(event, configuration, base_alpha)
+			_draw_cloned_debug_event(event, configuration, base_alpha, cue_source_id)
 
 	if (
 		bool(result.get("truncated", false))
@@ -4540,7 +4577,8 @@ func _draw_cloned_debug_prediction(
 func _draw_cloned_debug_event(
 	event: Dictionary,
 	configuration: Dictionary,
-	alpha_multiplier: float = 1.0
+	alpha_multiplier: float = 1.0,
+	cue_source_id: int = -1
 ) -> void:
 	var drew_event_marker := false
 	var event_type: String = str(event.get("event_type", ""))
@@ -4553,19 +4591,19 @@ func _draw_cloned_debug_event(
 		_draw_debug_ghost_ball(
 			event.get("source_center", position),
 			float(event.get("source_radius", _get_debug_cue_ball_radius())),
-			_get_cloned_ball_color(int(event.get("source_ball_id", -1))) * Color(1.0, 1.0, 1.0, alpha_multiplier)
+			_get_cloned_ball_color(int(event.get("source_ball_id", -1)), cue_source_id) * Color(1.0, 1.0, 1.0, alpha_multiplier)
 		)
 		_draw_debug_ghost_ball(
 			event.get("target_center", position),
 			float(event.get("target_radius", _get_debug_cue_ball_radius())),
-			_get_cloned_ball_color(int(event.get("target_ball_id", -1))) * Color(1.0, 1.0, 1.0, alpha_multiplier)
+			_get_cloned_ball_color(int(event.get("target_ball_id", -1)), cue_source_id) * Color(1.0, 1.0, 1.0, alpha_multiplier)
 		)
 	elif bool(configuration.get("draw_ghost_balls", true)):
 		drew_event_marker = true
 		_draw_debug_ghost_ball(
 			event.get("source_center", position),
 			float(event.get("source_radius", _get_debug_cue_ball_radius())),
-			_get_cloned_ball_color(int(event.get("source_ball_id", -1))) * Color(1.0, 1.0, 1.0, alpha_multiplier)
+			_get_cloned_ball_color(int(event.get("source_ball_id", -1)), cue_source_id) * Color(1.0, 1.0, 1.0, alpha_multiplier)
 		)
 	if bool(configuration.get("draw_stop_pocket_markers", true)):
 		if event_type == AimTrajectoryPredictor.EVENT_POCKET:
@@ -4579,7 +4617,7 @@ func _draw_cloned_debug_event(
 			draw_line(position + Vector2(-4.0, 4.0), position + Vector2(4.0, -4.0), marker_color, 1.0)
 	if bool(configuration.get("draw_event_numbers", true)):
 		drew_event_marker = true
-		var prefix: String = "C" if int(event.get("source_ball_id", -1)) == table.cue_ball.get_instance_id() else "E"
+		var prefix: String = "C" if int(event.get("source_ball_id", -1)) == cue_source_id else "E"
 		_draw_cloned_text(position + Vector2(5.0, -7.0), "%s%s" % [prefix, int(event.get("event_index", 0)) + 1], marker_color)
 	if (
 		not supported
@@ -4620,8 +4658,10 @@ func _to_vector2_points(points_value: Variant) -> Array[Vector2]:
 	return points
 
 
-func _get_cloned_ball_color(source_id: int) -> Color:
-	if table != null and table.cue_ball != null and source_id == table.cue_ball.get_instance_id():
+func _get_cloned_ball_color(source_id: int, cue_source_id: int = -1) -> Color:
+	if cue_source_id >= 0 and source_id == cue_source_id:
+		return DEBUG_AIM_LINE_COLOR
+	if table != null and is_instance_valid(table.cue_ball) and source_id == table.cue_ball.get_instance_id():
 		return DEBUG_AIM_LINE_COLOR
 	var color_index: int = posmod(source_id, DEBUG_CLONED_PATH_COLORS.size())
 	return DEBUG_CLONED_PATH_COLORS[color_index]
@@ -4632,6 +4672,11 @@ func _get_cloned_cue_result(result: Dictionary) -> Dictionary:
 		if ball_value is Dictionary and bool(ball_value.get("is_cue_ball", false)):
 			return ball_value
 	return {}
+
+
+func _get_cloned_cue_source_id(result: Dictionary) -> int:
+	var cue_result: Dictionary = _get_cloned_cue_result(result)
+	return int(cue_result.get("source_ball_id", -1))
 
 
 func _draw_debug_prediction_data(
@@ -5005,7 +5050,9 @@ func _draw_cloned_long_sight_paths() -> void:
 	var visible_depth: int = _get_active_aim_chain_depth()
 	if visible_depth <= 0:
 		return
-	var cue_id: int = table.cue_ball.get_instance_id()
+	var cue_id: int = _get_cloned_cue_source_id(current_cloned_prediction)
+	if cue_id < 0:
+		return
 	var first_cue_contact: Vector2 = current_player_cloned_view.get(
 		"cue_endpoint_center",
 		_get_first_cloned_cue_contact(current_cloned_prediction)
@@ -5072,9 +5119,9 @@ func _draw_cloned_long_sight_paths() -> void:
 
 
 func _get_first_cloned_cue_contact(result: Dictionary) -> Vector2:
-	if table == null or table.cue_ball == null:
+	var cue_id: int = _get_cloned_cue_source_id(result)
+	if cue_id < 0:
 		return Vector2.ZERO
-	var cue_id: int = table.cue_ball.get_instance_id()
 	for event_value in result.get("events", []):
 		if not event_value is Dictionary:
 			continue

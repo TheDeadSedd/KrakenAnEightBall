@@ -80,6 +80,7 @@ const TABLE_FRAME_VISIBLE_BOUNDS := Rect2(311, 130, 1294, 794)
 const KRAKEN_ART_ALPHA := 0.18
 const READY_STATUS_TEXT := "The Kraken waits with payment."
 const ROGUELITE_READY_STATUS_TEXT := "The Long Sink begins."
+const SHOT_LAB_READY_STATUS_TEXT := "Shot Lab ready."
 const LOADING_STATUS_TEXT := "Loading table..."
 
 # Legacy pre-BallDrop reward triggers. Keep disabled for normal gameplay.
@@ -141,7 +142,10 @@ const CUE_BALL_CANNON_WAKE_DEFAULT_RETENTION := 0.22
 @onready var pocket_system: PocketSystem = $PocketSystem
 @onready var boundary_system: BoundarySystem = $BoundarySystem
 @onready var shot_event_system: ShotEventSystem = $ShotEventSystem
+@onready var run_ball_identity_system: RunBallIdentitySystem = $RunBallIdentitySystem
 @onready var shot_ledger_system: ShotLedgerSystem = $ShotLedgerSystem
+@onready var roguelite_scoring_system: Node = $RogueliteScoringSystem
+@onready var shot_lab_system: ShotLabSystem = $ShotLabSystem
 @onready var score_system: ScoreSystem = $ScoreSystem
 @onready var pocket_streak_system: PocketStreakSystem = $PocketStreakSystem
 @onready var ball_drop_system: BallDropSystem = $BallDropSystem
@@ -181,6 +185,12 @@ var callout_spawn_cooldown := 0.0
 var cue_ball: Ball
 var eight_ball: Ball
 var eight_start := Vector2.ZERO
+var cue_reference_invalidations := 0
+var skipped_cue_updates_invalid := 0
+var cue_update_invalid_latched := false
+var last_cue_unavailable_reason := "Not initialized"
+var shot_lab_reference_commit_active := false
+var last_manual_aim_authoring_snapshot: Dictionary = {}
 var drag_start_mouse_position := Vector2.ZERO
 var drag_start_drag_vector := Vector2.ZERO
 var drag_aim_direction := Vector2.RIGHT
@@ -253,6 +263,7 @@ var perf_pocket_check_ms := 0.0
 var cue_modifier_snapshot: Dictionary = {}
 var kraken_boon_effect_snapshot: Dictionary = {}
 var game_mode_id: String = GAME_MODE_SCRIPT.MODE_PASSAGE
+var shot_lab_session_config: Dictionary = {}
 var roguelite_run_system: RogueliteRunSystem
 var roguelite_reward_system: RogueliteRewardSystem
 #endregion
@@ -266,7 +277,9 @@ func _ready() -> void:
 	pocket_system.setup(self)
 	boundary_system.setup(self)
 	shot_event_system.setup(self)
+	run_ball_identity_system.setup(self)
 	shot_ledger_system.setup(self)
+	roguelite_scoring_system.setup(self)
 	score_system.setup(self)
 	pocket_streak_system.setup(self)
 	ball_drop_system.setup(self)
@@ -277,7 +290,7 @@ func _ready() -> void:
 	table_event_system.setup(self)
 	if table_event_system.should_disable_automatic_ball_drops():
 		ball_drop_system.enabled = false
-	if is_roguelite_mode():
+	if is_roguelite_mode() or is_shot_lab_mode():
 		table_event_system.enabled = false
 	if is_passage_mode():
 		passage_system.setup(self)
@@ -288,6 +301,7 @@ func _ready() -> void:
 	_connect_score_drop_events()
 	aim_preview.setup(self)
 	spawn_system.setup(self)
+	shot_lab_system.setup(self)
 	ball_placement_system.setup(self)
 	wayfinder_system.setup(self)
 	powder_keg_system.setup(self)
@@ -308,7 +322,7 @@ func _ready() -> void:
 	pocket_capture_presenter.setup(self)
 	cue_controller.setup()
 	if Engine.is_editor_hint():
-		cue_controller.update_cue(cue_ball, false, is_dragging, Vector2.ZERO, MAX_DRAG_DISTANCE, game_over, 0.0)
+		cue_controller.clear_cue()
 		queue_redraw()
 		return
 
@@ -316,7 +330,17 @@ func _ready() -> void:
 	cue_ball = starting_balls.cue_ball
 	eight_ball = starting_balls.eight_ball
 	eight_start = starting_balls.eight_start
-	_activate_initial_cue_start_selection()
+	if is_shot_lab_mode():
+		if not shot_lab_system.enter_dedicated_session(shot_lab_session_config):
+			push_warning("Shot Lab preset load failed; using a safe fallback rack.")
+			starting_balls = spawn_system.spawn_starting_balls()
+			cue_ball = starting_balls.cue_ball
+			eight_ball = starting_balls.eight_ball
+			eight_start = starting_balls.eight_start
+			cue_start_selection_active = false
+			cue_start_selection_locked = true
+	else:
+		_activate_initial_cue_start_selection()
 	_queue_run_ball_count_update()
 	status_text_changed.emit(_get_ready_status_text())
 	queue_redraw()
@@ -324,6 +348,10 @@ func _ready() -> void:
 
 func set_game_mode_id(mode_id: String) -> void:
 	game_mode_id = GAME_MODE_SCRIPT.normalize_mode_id(mode_id)
+
+
+func set_shot_lab_session_config(configuration: Dictionary) -> void:
+	shot_lab_session_config = configuration.duplicate(true)
 
 
 func get_game_mode_id() -> String:
@@ -338,12 +366,17 @@ func is_roguelite_mode() -> bool:
 	return GAME_MODE_SCRIPT.is_roguelite(game_mode_id)
 
 
+func is_shot_lab_mode() -> bool:
+	return GAME_MODE_SCRIPT.is_shot_lab(game_mode_id)
+
+
 func get_game_mode_snapshot() -> Dictionary:
 	return {
 		"mode_id": game_mode_id,
 		"label": GAME_MODE_SCRIPT.get_mode_label(game_mode_id),
 		"is_passage": is_passage_mode(),
 		"is_roguelite": is_roguelite_mode(),
+		"is_shot_lab": is_shot_lab_mode(),
 	}
 
 
@@ -402,6 +435,8 @@ func _spawn_initial_balls_for_mode():
 		if roguelite_run_system != null:
 			object_ball_count = maxi(int(roguelite_run_system.get_current_round_setup().get("object_balls", 0)), 0)
 		return spawn_system.spawn_roguelite_round_balls(object_ball_count)
+	if is_shot_lab_mode():
+		return spawn_system.make_empty_starting_ball_data()
 
 	return spawn_system.spawn_starting_balls()
 
@@ -557,6 +592,7 @@ func _is_roguelite_scoreable_ball(ball: Ball) -> bool:
 func _reset_roguelite_table_for_current_round() -> void:
 	shot_rewind_system.invalidate_checkpoint("Reset unavailable: the table changed rounds.")
 	shot_ledger_system.cancel_active_shot("roguelite_round_transition")
+	roguelite_scoring_system.handle_round_transition()
 	aim_preview.clear_for_authoritative_table_reset("roguelite_round_transition")
 	pocket_capture_presenter.clear_collections("roguelite_round_transition")
 	game_over = false
@@ -598,13 +634,13 @@ func _reset_roguelite_table_for_current_round() -> void:
 
 
 func _clear_roguelite_table_balls() -> void:
+	_clear_authoritative_cue_reference("Roguelite round reconstruction")
 	for child in balls.get_children():
 		var ball: Ball = child as Ball
 		if ball == null:
 			continue
 		balls.remove_child(ball)
 		ball.queue_free()
-	cue_ball = null
 	eight_ball = null
 	eight_start = Vector2.ZERO
 
@@ -629,6 +665,8 @@ func get_run_ball_counts_snapshot() -> Dictionary:
 
 
 func get_kraken_boon_effects_snapshot() -> Dictionary:
+	if shot_lab_reference_commit_active:
+		return {}
 	return kraken_boon_effect_snapshot.duplicate(true)
 
 
@@ -761,6 +799,8 @@ func can_start_manual_ball_placement() -> bool:
 
 
 func _get_ready_status_text() -> String:
+	if is_shot_lab_mode():
+		return SHOT_LAB_READY_STATUS_TEXT
 	return ROGUELITE_READY_STATUS_TEXT if is_roguelite_mode() else READY_STATUS_TEXT
 
 
@@ -838,7 +878,7 @@ func _physics_process(delta: float) -> void:
 	var can_use_cue: bool = _can_release_current_shot() if is_dragging else _can_start_aiming()
 	var can_run_anchor_warning_timer: bool = can_use_cue and not shot_active
 	anchor_ball_system.update_curse_warning_timers(delta, can_run_anchor_warning_timer)
-	cue_controller.update_cue(cue_ball, can_use_cue, is_dragging, _get_current_shot_drag_vector(), MAX_DRAG_DISTANCE, game_over, delta)
+	_update_cue_controller(can_use_cue, delta)
 	if is_dragging:
 		_mark_aim_preview_dirty()
 	_flush_aim_preview_refresh()
@@ -1586,8 +1626,8 @@ func _resolve_ball_contact_response(
 	if shot_active:
 		if collision_response_applied and collision_impact_speed > ShotLedgerSystem.MEANINGFUL_IMPACT_EPSILON:
 			shot_ledger_system.record_ball_contact({
-				"ball_a_id": ball_a.get_instance_id(),
-				"ball_b_id": ball_b.get_instance_id(),
+				"ball_a_id": get_run_ball_id(ball_a),
+				"ball_b_id": get_run_ball_id(ball_b),
 				"contact_point": ball_a.global_position + normal * ball_a.radius,
 				"contact_normal": normal,
 				"pre_velocity_a": pre_collision_velocity_a,
@@ -1600,8 +1640,8 @@ func _resolve_ball_contact_response(
 			})
 		else:
 			shot_ledger_system.record_suppressed_ball_contact(
-				ball_a.get_instance_id(),
-				ball_b.get_instance_id(),
+				get_run_ball_id(ball_a),
+				get_run_ball_id(ball_b),
 				"separation_only" if not collision_response_applied else "below_impact_epsilon"
 			)
 	return collision_response_applied
@@ -1703,6 +1743,8 @@ func _is_cue_ball_cannon_wake_target(ball: Ball) -> bool:
 
 
 func _is_cue_ball_cannon_wake_enabled() -> bool:
+	if shot_lab_reference_commit_active:
+		return false
 	return bool(kraken_boon_effect_snapshot.get(KrakenBoonSystem.EFFECT_CUE_BALL_CANNON_WAKE_ENABLED, false))
 
 
@@ -1775,7 +1817,7 @@ func _resolve_rail_collisions() -> void:
 		for hit_event in hit_events:
 			if shot_active:
 				shot_ledger_system.record_rail_contact({
-					"ball_id": ball.get_instance_id(),
+					"ball_id": get_run_ball_id(ball),
 					"rail_id": str(hit_event.boundary_id),
 					"rail_kind": str(hit_event.boundary_kind),
 					"contact_point": hit_event.position - hit_event.normal * ball.radius,
@@ -1815,7 +1857,7 @@ func _handle_pocket_checks() -> bool:
 	var captured_pocket_radius: float = pocket_system.get_last_captured_pocket_radius()
 	if shot_active:
 		shot_ledger_system.record_pocket({
-			"ball_id": pocketed_ball.get_instance_id(),
+			"ball_id": get_run_ball_id(pocketed_ball),
 			"pocket_index": captured_pocket_index,
 			"pocket_name": pocket_system.get_last_captured_pocket_name(),
 			"pocket_center": captured_pocket_position,
@@ -1902,6 +1944,86 @@ func cancel_active_cue_drag_for_pause() -> void:
 	queue_redraw()
 
 
+func _update_cue_controller(can_use_cue: bool, delta: float) -> void:
+	var active_cue: Ball = _get_authoritative_cue_ball()
+	if active_cue == null:
+		skipped_cue_updates_invalid += 1
+		if not cue_update_invalid_latched:
+			cue_update_invalid_latched = true
+			last_cue_unavailable_reason = _get_cue_unavailable_reason()
+			cue_controller.clear_cue()
+		return
+	cue_update_invalid_latched = false
+	cue_controller.update_cue(
+		active_cue,
+		can_use_cue,
+		is_dragging,
+		_get_current_shot_drag_vector(),
+		MAX_DRAG_DISTANCE,
+		game_over,
+		delta
+	)
+
+
+func _get_authoritative_cue_ball() -> Ball:
+	if cue_ball == null or not is_instance_valid(cue_ball):
+		return null
+	if cue_ball.is_queued_for_deletion() or cue_ball.get_parent() != balls:
+		return null
+	if cue_ball.ball_type != Ball.BallType.CUE:
+		return null
+	if not cue_ball.visible or not cue_ball.gameplay_enabled:
+		return null
+	return cue_ball
+
+
+func _get_cue_unavailable_reason() -> String:
+	if cue_ball == null:
+		return "No cue assigned"
+	if not is_instance_valid(cue_ball):
+		return "Cue reference was freed"
+	if cue_ball.is_queued_for_deletion():
+		return "Cue queued for deletion"
+	if cue_ball.get_parent() != balls:
+		return "Cue left authoritative ball container"
+	if cue_ball.ball_type != Ball.BallType.CUE:
+		return "Assigned cue has the wrong ball type"
+	if not cue_ball.visible or not cue_ball.gameplay_enabled:
+		return "Cue pocketed or inactive"
+	return "Cue unavailable"
+
+
+func _clear_authoritative_cue_reference(reason: String) -> int:
+	var cue_run_ball_id: int = get_run_ball_id(cue_ball) if is_instance_valid(cue_ball) else -1
+	var had_reference: bool = cue_ball != null
+	_end_cue_drag()
+	cue_controller.clear_cue()
+	cue_toi_first_contact_pending = false
+	_reset_cue_toi_substep_context()
+	cue_control_reclaimed = false
+	cue_reclaim_eligible = false
+	cue_reclaim_blocker_reason = "Cue unavailable"
+	cue_ball = null
+	cue_update_invalid_latched = false
+	last_cue_unavailable_reason = reason if not reason.is_empty() else "Cue reference cleared"
+	if had_reference:
+		cue_reference_invalidations += 1
+	_clear_aim_preview_now()
+	return cue_run_ball_id
+
+
+func get_cue_lifecycle_debug_snapshot() -> Dictionary:
+	var cue_instance_valid: bool = cue_ball != null and is_instance_valid(cue_ball)
+	return {
+		"cue_reference_invalidations": cue_reference_invalidations,
+		"skipped_cue_updates_invalid": skipped_cue_updates_invalid,
+		"current_cue_run_ball_id": get_run_ball_id(cue_ball) if cue_instance_valid else -1,
+		"current_cue_instance_valid": cue_instance_valid,
+		"current_cue_authoritative": _get_authoritative_cue_ball() != null,
+		"last_cue_unavailable_reason": last_cue_unavailable_reason,
+	}
+
+
 func is_cue_drag_active() -> bool:
 	return is_dragging
 
@@ -1959,6 +2081,23 @@ func set_cue_modifier_snapshot(snapshot: Dictionary) -> void:
 
 func get_effective_shot_power() -> float:
 	return SHOT_POWER * _get_cue_shot_power_multiplier()
+
+
+func get_shot_lab_reference_power_profile(power_normalized: float) -> Dictionary:
+	var normalized_power: float = clampf(power_normalized, 0.0, 1.0)
+	var drag_magnitude: float = normalized_power * MAX_DRAG_DISTANCE
+	return {
+		"power_normalized": normalized_power,
+		"drag_magnitude": drag_magnitude,
+		"baseline_shot_power": SHOT_POWER,
+		"launch_speed": drag_magnitude * SHOT_POWER,
+		"minimum_drag_distance": MIN_SHOT_DISTANCE,
+		"modifiers_bypassed": true,
+	}
+
+
+func get_last_manual_aim_authoring_snapshot() -> Dictionary:
+	return last_manual_aim_authoring_snapshot.duplicate(true)
 
 
 func get_cue_shot_power_modifier_snapshot() -> Dictionary:
@@ -2027,19 +2166,68 @@ func _release_shot(_mouse_position: Vector2) -> void:
 		queue_redraw()
 		return
 
+	var release_rotation: float = release_direction.angle() if release_direction != Vector2.ZERO else cue_controller.get_rotation_angle()
+	_commit_authoritative_shot(
+		drag_vector,
+		release_pullback,
+		release_rotation,
+		release_position,
+		"player_release"
+	)
+
+
+func commit_debug_reference_shot(direction: Vector2, power_normalized: float) -> bool:
+	var active_cue: Ball = _get_authoritative_cue_ball()
+	if active_cue == null or game_over or shot_active or not _all_balls_stopped():
+		return false
+	var normalized_direction: Vector2 = direction.normalized()
+	var profile: Dictionary = get_shot_lab_reference_power_profile(power_normalized)
+	var drag_magnitude: float = float(profile.get("drag_magnitude", 0.0))
+	if normalized_direction == Vector2.ZERO or drag_magnitude < MIN_SHOT_DISTANCE:
+		return false
+	var drag_vector: Vector2 = normalized_direction * drag_magnitude
+	var pullback: float = cue_controller.get_pullback_for_drag_vector(drag_vector, MAX_DRAG_DISTANCE)
+	return _commit_authoritative_shot(
+		drag_vector,
+		pullback,
+		normalized_direction.angle(),
+		active_cue.global_position - drag_vector,
+		"shot_lab_reference",
+		float(profile.get("baseline_shot_power", SHOT_POWER))
+	)
+
+
+func _commit_authoritative_shot(
+	drag_vector: Vector2,
+	release_pullback: float,
+	release_rotation: float,
+	release_position: Vector2,
+	commit_source: String,
+	shot_power_override: float = -1.0
+) -> bool:
+	if not is_instance_valid(cue_ball) or drag_vector.length() < MIN_SHOT_DISTANCE:
+		return false
+	shot_lab_reference_commit_active = commit_source == "shot_lab_reference"
 	shot_rewind_system.capture_pre_shot_checkpoint()
-	var effective_shot_power := get_effective_shot_power()
+	var effective_shot_power: float = (
+		shot_power_override
+		if shot_power_override > 0.0
+		else get_effective_shot_power()
+	)
+	var release_direction: Vector2 = drag_vector.normalized()
 	if release_direction != Vector2.ZERO:
 		aim_preview.start_path_comparison(cue_ball.global_position, drag_vector * effective_shot_power)
 	cue_ball.velocity = drag_vector * effective_shot_power
 	aim_preview.report_debug_actual_launch(cue_ball.global_position, cue_ball.velocity)
-	var release_rotation: float = release_direction.angle() if release_direction != Vector2.ZERO else cue_controller.get_rotation_angle()
 	cue_controller.begin_recoil(cue_ball.global_position, release_rotation, release_pullback)
 	_print_shot_power_debug(drag_vector, release_position)
 	_start_shot_tracking()
 	status_text_changed.emit("Shot taken. Wait for the balls to settle before shooting again.")
 	_clear_aim_preview_now()
 	queue_redraw()
+	if commit_source.is_empty():
+		push_warning("Authoritative shot committed without a source label.")
+	return true
 
 
 func _get_drag_vector(mouse_position: Vector2) -> Vector2:
@@ -2239,6 +2427,15 @@ func _refresh_aim_preview() -> void:
 
 	var drag_vector: Vector2 = _get_drag_vector(drag_mouse_position)
 	var power_ratio: float = clamp(drag_vector.length() / MAX_DRAG_DISTANCE, 0.0, 1.0)
+	var aim_direction: Vector2 = drag_vector.normalized()
+	last_manual_aim_authoring_snapshot = {
+		"valid": aim_direction != Vector2.ZERO,
+		"cue_world_position": cue_ball.global_position,
+		"aim_world_position": cue_ball.global_position + aim_direction * 250.0,
+		"world_direction": aim_direction,
+		"power_normalized": power_ratio,
+		"drag_magnitude": drag_vector.length(),
+	}
 	aim_preview.update_preview(true, cue_ball.global_position, drag_vector, effective_shot_power, power_ratio, boon_effects)
 	treasure_ball_system.handle_aim_perception_snapshot(aim_preview.get_treasure_perception_snapshot())
 	embezzler_system.handle_aim_perception_snapshot(aim_preview.get_embezzler_perception_snapshot())
@@ -2331,6 +2528,14 @@ func _can_release_current_shot() -> bool:
 
 func _handle_pocketed_ball(ball: Ball) -> void:
 	_note_actual_cue_pocketed(ball)
+	if is_shot_lab_consequence_freeze_active():
+		if ball == cue_ball:
+			_handle_shot_lab_cue_ball_pocketed(ball)
+			return
+		ball.sink()
+		ball.queue_free()
+		status_text_changed.emit("Shot Lab pocket recorded; run consequences frozen.")
+		return
 
 	if ball == cue_ball:
 		if is_roguelite_mode():
@@ -2367,6 +2572,16 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 		pocket_streak_result = pocket_streak_system.record_object_ball_sink(score_context, scored_amount)
 	_handle_pocket_streak_result(pocket_streak_result)
 	status_text_changed.emit("Ball %s sunk." % ball.ball_number)
+
+
+func _handle_shot_lab_cue_ball_pocketed(ball: Ball) -> void:
+	var cue_run_ball_id: int = get_run_ball_id(ball)
+	if shot_lab_system != null:
+		shot_lab_system.note_cue_ball_scratched(cue_run_ball_id)
+	ball.sink()
+	_clear_authoritative_cue_reference("Shot Lab cue scratch")
+	ball.queue_free()
+	status_text_changed.emit("Shot Lab scratch recorded; cue will restore after evaluation.")
 
 
 func _apply_roguelite_sink_reward_quota_bonus(score_snapshot: Dictionary, scored_amount: int) -> void:
@@ -2534,9 +2749,12 @@ func _start_shot_tracking() -> void:
 	_deactivate_initial_cue_start_selection()
 	shot_active = true
 	shot_ledger_system.begin_shot(_make_shot_ledger_start_context())
+	if shot_lab_system != null and shot_lab_system.is_active():
+		shot_lab_system.notify_authoritative_shot_started()
 	_reset_cue_toi_for_committed_shot()
-	shots_taken_count += 1
-	shot_taken.emit(shots_taken_count)
+	if not is_shot_lab_consequence_freeze_active():
+		shots_taken_count += 1
+		shot_taken.emit(shots_taken_count)
 	shot_elapsed_time = 0.0
 	cue_control_reclaimed = false
 	cue_reclaim_eligible = false
@@ -2553,8 +2771,9 @@ func _start_shot_tracking() -> void:
 	aim_contact_order_diagnostics.reset_for_committed_shot()
 	shot_event_system.start_shot(cue_ball.global_position)
 	pocket_streak_system.start_shot()
-	table_event_system.start_shot()
-	embezzler_system.handle_shot_started()
+	if not is_shot_lab_consequence_freeze_active():
+		table_event_system.start_shot()
+		embezzler_system.handle_shot_started()
 	shot_rewind_system.notify_table_state_changed()
 
 
@@ -2566,7 +2785,7 @@ func _make_shot_ledger_start_context() -> Dictionary:
 			continue
 		if not ball.is_gameplay_active():
 			continue
-		var ball_id: int = ball.get_instance_id()
+		var ball_id: int = get_run_ball_id(ball)
 		starting_balls[str(ball_id)] = {
 			"ball_id": ball_id,
 			"ball_number": ball.ball_number,
@@ -2577,10 +2796,26 @@ func _make_shot_ledger_start_context() -> Dictionary:
 			"start_position": ball.global_position,
 			"start_velocity": ball.velocity,
 		}
+	var round_index: int = -1
+	var round_number: int = -1
+	if is_roguelite_mode() and roguelite_run_system != null:
+		var roguelite_snapshot: Dictionary = roguelite_run_system.get_snapshot()
+		round_index = int(roguelite_snapshot.get("round_index", -1))
+		round_number = int(roguelite_snapshot.get("round_number", -1))
+	var passage_index: int = -1
+	if is_passage_mode() and passage_system != null:
+		passage_index = int(passage_system.get_passage_snapshot().get("request_index", -1))
+	var shot_lab_active: bool = shot_lab_system != null and shot_lab_system.is_active()
 	return {
+		"run_generation": run_ball_identity_system.get_run_generation(),
 		"mode_id": game_mode_id,
-		"cue_ball_id": cue_ball.get_instance_id() if is_instance_valid(cue_ball) else -1,
-		"ball_id_strategy": "runtime_instance_id",
+		"round_index": round_index,
+		"round_number": round_number,
+		"passage_index": passage_index,
+		"shot_lab_active": shot_lab_active,
+		"shot_lab_preset_id": shot_lab_system.get_active_preset_id() if shot_lab_active else "",
+		"cue_ball_id": get_run_ball_id(cue_ball),
+		"ball_id_strategy": "run_local_monotonic",
 		"starting_balls": starting_balls,
 	}
 
@@ -2591,7 +2826,7 @@ func _make_shot_ledger_final_state() -> Dictionary:
 		var ball: Ball = child as Ball
 		if ball == null or not is_instance_valid(ball) or ball.is_queued_for_deletion():
 			continue
-		var ball_id: int = ball.get_instance_id()
+		var ball_id: int = get_run_ball_id(ball)
 		ending_balls[str(ball_id)] = {
 			"ball_id": ball_id,
 			"ball_number": ball.ball_number,
@@ -2614,7 +2849,17 @@ func _record_shot_ledger_travel_step() -> void:
 			continue
 		if not ball.is_gameplay_active():
 			continue
-		shot_ledger_system.record_ball_position(ball.get_instance_id(), ball.global_position)
+		shot_ledger_system.record_ball_position(get_run_ball_id(ball), ball.global_position)
+
+
+func get_run_ball_id(ball: Ball) -> int:
+	if run_ball_identity_system == null:
+		return -1
+	return run_ball_identity_system.get_ball_id(ball)
+
+
+func get_shot_ledger_ball_kind_for_debug(ball: Ball) -> String:
+	return _get_shot_ledger_ball_kind(ball)
 
 
 func _get_shot_ledger_ball_kind(ball: Ball) -> String:
@@ -2863,14 +3108,79 @@ func _try_finish_shot() -> void:
 	aim_preview.stop_debug_aim_actual_trace()
 	shot_event_system.finish_shot()
 	pocket_streak_system.finish_shot()
-	table_event_system.finish_shot()
+	var consequences_frozen: bool = is_shot_lab_consequence_freeze_active()
+	if not consequences_frozen:
+		table_event_system.finish_shot()
 	shot_ledger_system.finalize_shot(_make_shot_ledger_final_state())
-	shot_finished.emit(shots_taken_count)
-	if should_advance_anchor_chains:
-		_handle_cue_control_regained_after_shot()
-	if is_passage_mode():
-		sunken_spoils_system.handle_shot_resolved()
+	shot_lab_reference_commit_active = false
+	if not consequences_frozen:
+		shot_finished.emit(shots_taken_count)
+		if should_advance_anchor_chains:
+			_handle_cue_control_regained_after_shot()
+		if is_passage_mode():
+			sunken_spoils_system.handle_shot_resolved()
 	shot_rewind_system.notify_table_state_changed()
+
+
+func is_shot_lab_consequence_freeze_active() -> bool:
+	return shot_lab_system != null and shot_lab_system.is_consequence_freeze_enabled()
+
+
+func prepare_for_shot_lab_setup(reason: String) -> void:
+	if shot_active and not is_shot_lab_consequence_freeze_active():
+		table_event_system.finish_shot()
+	shot_ledger_system.cancel_active_shot(reason)
+	roguelite_scoring_system.clear_transient_state(reason)
+	shot_active = false
+	shot_lab_reference_commit_active = false
+	cue_toi_first_contact_pending = false
+	_reset_cue_toi_shot_counters()
+	_reset_cue_toi_substep_context()
+	_end_cue_drag()
+	cue_controller.stop_recoil()
+	aim_preview.clear_for_authoritative_table_reset(reason)
+	shot_event_system.clear_shot_events()
+	pocket_streak_system.reset_shot()
+	pocket_streak_presenter.clear_for_rewind()
+	spawn_system.clear_pending_shot_lab_work()
+	ball_placement_system.cancel_placement()
+	_clear_authoritative_cue_reference("Shot Lab setup reset: %s" % reason)
+	for child in balls.get_children():
+		var existing_ball: Ball = child as Ball
+		if existing_ball == null:
+			continue
+		balls.remove_child(existing_ball)
+		existing_ball.free()
+	eight_ball = null
+	game_over = false
+	cue_start_selection_active = false
+	cue_start_selection_locked = true
+	pocket_capture_presenter.clear_collections("shot_lab_setup")
+	shot_rewind_system.invalidate_checkpoint("Reset unavailable: Shot Lab setup changed.")
+	_clear_rewind_callout_presentation()
+	notify_aim_prediction_state_changed(reason, "reset")
+	_queue_run_ball_count_update()
+
+
+func finish_shot_lab_setup(new_cue_ball: Ball, new_eight_ball: Ball = null) -> void:
+	cue_ball = new_cue_ball
+	cue_update_invalid_latched = false
+	eight_ball = new_eight_ball
+	if is_instance_valid(cue_ball):
+		cue_ball.velocity = Vector2.ZERO
+		cue_ball.visible = true
+		cue_ball.gameplay_enabled = true
+	shot_active = false
+	game_over = false
+	shot_elapsed_time = 0.0
+	cue_control_reclaimed = false
+	cue_reclaim_eligible = false
+	cue_reclaim_blocker_reason = "No active shot"
+	cue_start_selection_active = false
+	cue_start_selection_locked = true
+	_mark_aim_preview_dirty()
+	_queue_run_ball_count_update()
+	queue_redraw()
 
 
 func _handle_cue_control_regained_after_shot() -> void:
@@ -2936,6 +3246,7 @@ func capture_shot_rewind_ball_states() -> Array[Dictionary]:
 			continue
 		states.append({
 			"role": "cue" if ball == cue_ball else ("eight" if ball == eight_ball else "object"),
+			"run_ball_id": run_ball_identity_system.get_ball_id(ball),
 			"ball_type": ball.ball_type,
 			"ball_number": ball.ball_number,
 			"ball_color": ball.ball_color,
@@ -3010,6 +3321,7 @@ func reflow_pocket_capture_collections(reason: String = "manual") -> void:
 
 func restore_shot_rewind_balls(ball_states_value: Variant) -> void:
 	var ball_states: Array = ball_states_value if ball_states_value is Array else []
+	_clear_authoritative_cue_reference("Shot rewind reconstruction")
 	for child in balls.get_children():
 		var existing_ball: Ball = child as Ball
 		if existing_ball == null:
@@ -3017,7 +3329,6 @@ func restore_shot_rewind_balls(ball_states_value: Variant) -> void:
 		balls.remove_child(existing_ball)
 		existing_ball.free()
 
-	cue_ball = null
 	eight_ball = null
 	for state_value in ball_states:
 		if not state_value is Dictionary:
@@ -3031,12 +3342,14 @@ func restore_shot_rewind_balls(ball_states_value: Variant) -> void:
 				cue_ball = restored_ball
 			"eight":
 				eight_ball = restored_ball
+	cue_update_invalid_latched = false
 	notify_aim_prediction_state_changed("shot_rewind_restore_complete", "reset")
 
 
 func restore_shot_rewind_state(state: Dictionary) -> void:
 	game_over = bool(state.get("game_over", false))
 	shot_active = false
+	shot_lab_reference_commit_active = false
 	cue_toi_first_contact_pending = bool(state.get("cue_toi_first_contact_pending", false))
 	_reset_cue_toi_shot_counters()
 	_reset_cue_toi_substep_context()
@@ -4215,17 +4528,19 @@ func _get_cue_control_base_blocker() -> String:
 		return "Table Event menu open"
 	if ball_placement_system.is_placement_active():
 		return "Placement active"
-	if not is_instance_valid(cue_ball) or not cue_ball.visible or not cue_ball.gameplay_enabled:
+	var active_cue: Ball = _get_authoritative_cue_ball()
+	if active_cue == null:
 		return "Cue unavailable"
 	if spawn_system.has_pending_spawns():
 		return "Pending drops"
-	if cue_ball.is_moving():
+	if active_cue.is_moving():
 		return "Cue ball moving"
 	return ""
 
 
 func _is_ball_likely_to_hit_cue_soon(ball: Ball) -> bool:
-	if not is_instance_valid(cue_ball) or cue_ball.is_moving():
+	var active_cue: Ball = _get_authoritative_cue_ball()
+	if active_cue == null or active_cue.is_moving():
 		return false
 
 	var velocity: Vector2 = ball.velocity
@@ -4233,15 +4548,15 @@ func _is_ball_likely_to_hit_cue_soon(ball: Ball) -> bool:
 	if speed_squared <= 0.001:
 		return false
 
-	var ball_to_cue: Vector2 = cue_ball.global_position - ball.global_position
+	var ball_to_cue: Vector2 = active_cue.global_position - ball.global_position
 	var time_to_closest: float = clamp(
 		ball_to_cue.dot(velocity) / speed_squared,
 		0.0,
 		EARLY_CUE_RECLAIM_THREAT_LOOKAHEAD
 	)
 	var closest_position: Vector2 = ball.global_position + velocity * time_to_closest
-	var threat_radius: float = ball.radius + cue_ball.radius + BALL_COLLISION_SKIN + EARLY_CUE_RECLAIM_THREAT_MARGIN
-	return closest_position.distance_squared_to(cue_ball.global_position) <= threat_radius * threat_radius
+	var threat_radius: float = ball.radius + active_cue.radius + BALL_COLLISION_SKIN + EARLY_CUE_RECLAIM_THREAT_MARGIN
+	return closest_position.distance_squared_to(active_cue.global_position) <= threat_radius * threat_radius
 
 
 func _all_balls_stopped() -> bool:

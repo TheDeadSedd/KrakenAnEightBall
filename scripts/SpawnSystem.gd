@@ -132,15 +132,21 @@ func spawn_starting_balls() -> StartingBallData:
 	var data: StartingBallData = StartingBallData.new()
 	data.cue_ball = CUE_BALL_SCENE.instantiate() as Ball
 	table.balls.add_child(data.cue_ball)
+	table.run_ball_identity_system.assign_ball_id(data.cue_ball)
 	data.cue_ball.global_position = get_selected_cue_start()
 	_spawn_starting_rack(data, data.cue_ball.radius)
 	return data
+
+
+func make_empty_starting_ball_data() -> StartingBallData:
+	return StartingBallData.new()
 
 
 func spawn_roguelite_round_balls(object_ball_count: int) -> StartingBallData:
 	var data: StartingBallData = StartingBallData.new()
 	data.cue_ball = CUE_BALL_SCENE.instantiate() as Ball
 	table.balls.add_child(data.cue_ball)
+	table.run_ball_identity_system.assign_ball_id(data.cue_ball)
 	data.cue_ball.global_position = get_selected_cue_start()
 
 	var spawn_count: int = maxi(object_ball_count, 0)
@@ -500,6 +506,37 @@ func spawn_manual_plain_object_ball(position: Vector2) -> Ball:
 	return ball
 
 
+func spawn_controlled_shot_lab_ball(ball_kind: String, ball_number: int, position: Vector2) -> Ball:
+	var ball: Ball
+	match ball_kind:
+		"cue":
+			ball = CUE_BALL_SCENE.instantiate() as Ball
+			if ball == null:
+				return null
+			table.balls.add_child(ball)
+			table.run_ball_identity_system.assign_ball_id(ball)
+		"eight":
+			ball = _create_ball(Ball.BallType.EIGHT, 8, _ball_color(8), position)
+		_:
+			var safe_number: int = clampi(ball_number, 1, 15)
+			ball = _create_ball(Ball.BallType.OBJECT, safe_number, _ball_color(safe_number), position)
+	if ball == null:
+		return null
+	ball.global_position = position
+	ball.velocity = Vector2.ZERO
+	ball.visible = true
+	ball.gameplay_enabled = true
+	ball.scale = Vector2.ONE
+	ball.modulate = Color.WHITE
+	return ball
+
+
+func clear_pending_shot_lab_work() -> void:
+	pending_spawn_requests.clear()
+	pending_landing_callbacks.clear()
+	spawn_drop_cooldown = 0.0
+
+
 func spawn_manual_wayfinder_ball(position: Vector2) -> Ball:
 	var ball_number: int = _get_next_spawn_ball_number()
 	var ball := _create_wayfinder_ball(ball_number, _ball_color(ball_number), position)
@@ -570,6 +607,11 @@ func restore_ball_from_rewind_state(state: Dictionary) -> Ball:
 	if ball == null:
 		return null
 	table.balls.add_child(ball)
+	table.run_ball_identity_system.assign_ball_id(
+		ball,
+		int(state.get("run_ball_id", -1)),
+		true
+	)
 
 	var ball_type: int = int(state.get("ball_type", Ball.BallType.OBJECT))
 	var ball_number: int = int(state.get("ball_number", 1))
@@ -752,6 +794,7 @@ func _create_ball(
 	var is_embezzler: bool = effective_anomaly_kind == "embezzler"
 	var ball := BALL_SCENE.instantiate() as Ball
 	table.balls.add_child(ball)
+	table.run_ball_identity_system.assign_ball_id(ball)
 	ball.global_position = position
 	ball.setup(
 		ball_type,

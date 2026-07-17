@@ -144,6 +144,8 @@ var aim_event_chain_panel: DebugPanel
 var aim_event_chain_label: Label
 var shot_ledger_panel: DebugPanel
 var shot_ledger_label: Label
+var shot_lab_panel: ShotLabPanel
+var shot_ledger_raw_events_panel: ShotLedgerRawEventsPanel
 var verbose_aim_candidates := false
 var developer_preferences: DeveloperPreferences
 var fps_label: Label
@@ -183,6 +185,8 @@ func setup(table_ref: BilliardsTable) -> void:
 	if not table.debug_aim_mode_changed.is_connected(_on_debug_aim_mode_changed):
 		table.debug_aim_mode_changed.connect(_on_debug_aim_mode_changed)
 	_on_debug_aim_mode_changed(table.get_debug_aim_mode_snapshot())
+	if table.shot_lab_system != null and not table.shot_lab_system.status_changed.is_connected(_on_shot_lab_status_changed):
+		table.shot_lab_system.status_changed.connect(_on_shot_lab_status_changed)
 	developer_preferences = DEVELOPER_PREFERENCES_SCRIPT.new() as DeveloperPreferences
 	developer_preferences.load_preferences()
 	_set_show_fps(developer_preferences.show_fps, false)
@@ -328,6 +332,51 @@ func _ensure_shot_ledger_panel() -> void:
 	_add_scroll_label_to_runtime_panel(shot_ledger_panel, shot_ledger_label)
 
 
+func _ensure_shot_lab_panels() -> void:
+	if shot_lab_panel != null:
+		return
+	shot_lab_panel = ShotLabPanel.new()
+	shot_lab_panel.name = "ShotLabPanel"
+	add_child(shot_lab_panel)
+	shot_lab_panel.setup(table.shot_lab_system)
+	if not shot_lab_panel.raw_events_requested.is_connected(open_shot_lab_raw_events):
+		shot_lab_panel.raw_events_requested.connect(open_shot_lab_raw_events)
+	shot_ledger_raw_events_panel = ShotLedgerRawEventsPanel.new()
+	shot_ledger_raw_events_panel.name = "ShotLedgerRawEventsPanel"
+	add_child(shot_ledger_raw_events_panel)
+	shot_ledger_raw_events_panel.setup(table.shot_ledger_system, table.shot_lab_system)
+
+
+func open_shot_lab_inspector() -> void:
+	_ensure_shot_lab_panels()
+	if shot_lab_panel != null:
+		shot_lab_panel.open_panel()
+
+
+func open_shot_lab_scoring_inspector() -> void:
+	_ensure_shot_lab_panels()
+	if shot_lab_panel != null:
+		shot_lab_panel.open_scoring_panel()
+
+
+func open_shot_lab_raw_events() -> void:
+	_ensure_shot_lab_panels()
+	if shot_ledger_raw_events_panel != null:
+		shot_ledger_raw_events_panel.open_panel()
+
+
+func close_shot_lab_inspectors() -> void:
+	if shot_lab_panel != null:
+		shot_lab_panel.close_panel()
+	if shot_ledger_raw_events_panel != null:
+		shot_ledger_raw_events_panel.close_panel()
+
+
+func _on_shot_lab_status_changed(message: String) -> void:
+	print(message)
+	debug_notification_requested.emit(message, "event")
+
+
 func _configure_resizable_debug_panels() -> void:
 	for panel_id in _get_positionable_panel_ids():
 		var panel: DebugPanel = _get_modular_debug_panel(panel_id) as DebugPanel
@@ -459,6 +508,11 @@ func _process(delta: float) -> void:
 
 
 func get_dev_option_state(option_id: String) -> Variant:
+	if table != null and table.shot_lab_system != null:
+		if option_id == "shot_lab.selected_preset":
+			return table.shot_lab_system.get_selected_preset_id()
+		if option_id.begins_with("shot_lab.option."):
+			return table.shot_lab_system.get_option(option_id.trim_prefix("shot_lab.option."))
 	if option_id == "panel.aim_compare_panels":
 		return _are_aim_compare_panels_visible()
 	if option_id.begins_with("panel."):
@@ -492,7 +546,22 @@ func get_dev_option_state(option_id: String) -> Variant:
 	return false
 
 
+func get_shot_lab_preset_choices() -> Array:
+	if table == null or table.shot_lab_system == null:
+		return []
+	return table.shot_lab_system.get_preset_choices()
+
+
 func set_dev_option_state(option_id: String, value: Variant) -> void:
+	if table != null and table.shot_lab_system != null:
+		if option_id == "shot_lab.selected_preset":
+			table.shot_lab_system.set_selected_preset_id(str(value))
+			dev_option_state_changed.emit(option_id, str(value))
+			return
+		if option_id.begins_with("shot_lab.option."):
+			table.shot_lab_system.set_option(option_id.trim_prefix("shot_lab.option."), bool(value))
+			dev_option_state_changed.emit(option_id, bool(value))
+			return
 	var enabled: bool = bool(value)
 	if option_id == "panel.aim_compare_panels":
 		set_aim_compare_panels_visible(enabled)
@@ -541,6 +610,36 @@ func trigger_dev_option_action(option_id: String) -> bool:
 			_copy_last_shot_ledger_json()
 		"shot_ledger.run_self_test":
 			_run_shot_ledger_self_test()
+		"shot_ledger.clear_diagnostics":
+			_clear_shot_ledger_diagnostics()
+		"shot_ledger.copy_lifecycle":
+			_copy_shot_ledger_lifecycle()
+		"shot_ledger.open_raw_events":
+			open_shot_lab_raw_events()
+		"shot_ledger.copy_raw_events":
+			_copy_all_shot_ledger_raw_events()
+		"shot_lab.open":
+			open_shot_lab_inspector()
+		"shot_lab.load":
+			table.shot_lab_system.load_selected_setup()
+		"shot_lab.fire":
+			table.shot_lab_system.fire_reference_shot()
+		"shot_lab.reset_setup":
+			table.shot_lab_system.reset_selected_setup()
+		"shot_lab.reset_last_shot":
+			table.shot_lab_system.reset_last_shot()
+		"shot_lab.rerun":
+			table.shot_lab_system.rerun_last_reference_shot()
+		"shot_lab.clear":
+			table.shot_lab_system.clear_shot_lab()
+		"shot_lab.copy_result":
+			table.shot_lab_system.copy_last_result()
+		"shot_lab.copy_arrangement":
+			table.shot_lab_system.copy_current_arrangement_as_preset()
+		"shot_lab.run_suite":
+			table.shot_lab_system.run_reference_suite()
+		"shot_lab.cancel_suite":
+			table.shot_lab_system.cancel_reference_suite("dev_options")
 		_:
 			_report_debug_action_error("Dev Options action callback missing: %s" % option_id)
 			return false
@@ -550,6 +649,10 @@ func trigger_dev_option_action(option_id: String) -> bool:
 func hide_all_debug_panels() -> void:
 	for panel_id in _get_positionable_panel_ids():
 		set_modular_debug_panel_visible(panel_id, false)
+	if shot_lab_panel != null:
+		shot_lab_panel.close_panel()
+	if shot_ledger_raw_events_panel != null:
+		shot_ledger_raw_events_panel.close_panel()
 	_set_quick_toggle(physics_debug_check_box, false, "overlay.physics_debug")
 	_set_quick_toggle(performance_overlay_check_box, false, "overlay.performance")
 	if debug_menu_panel.visible:
@@ -1206,6 +1309,32 @@ func _copy_last_shot_ledger_json() -> void:
 	print("Shot Ledger JSON copied to clipboard.")
 
 
+func _clear_shot_ledger_diagnostics() -> void:
+	if table == null or table.shot_ledger_system == null:
+		_report_debug_action_error("Shot Ledger diagnostics unavailable.")
+		return
+	table.shot_ledger_system.clear_diagnostic_counters()
+	debug_notification_requested.emit("Shot Ledger diagnostic counters cleared.", "event")
+	if shot_ledger_panel != null and shot_ledger_panel.visible:
+		_refresh_modular_debug_panel(PANEL_SHOT_LEDGER, {})
+
+
+func _copy_shot_ledger_lifecycle() -> void:
+	if table == null or table.shot_ledger_system == null:
+		_report_debug_action_error("Shot Ledger lifecycle diagnostics unavailable.")
+		return
+	DisplayServer.clipboard_set(table.shot_ledger_system.get_lifecycle_diagnostics_summary())
+	debug_notification_requested.emit("Shot Ledger lifecycle diagnostics copied.", "event")
+
+
+func _copy_all_shot_ledger_raw_events() -> void:
+	if table == null or table.shot_ledger_system == null:
+		_report_debug_action_error("Shot Ledger raw events unavailable.")
+		return
+	DisplayServer.clipboard_set(table.shot_ledger_system.get_last_raw_events_json())
+	debug_notification_requested.emit("Last Shot raw events copied.", "event")
+
+
 func _run_shot_ledger_self_test() -> void:
 	if table == null:
 		_report_debug_action_error("Shot Ledger Self-Test: table unavailable.")
@@ -1261,8 +1390,9 @@ func _make_shot_ledger_panel_text() -> String:
 	lines.append("SHOT")
 	if active:
 		var active_shot: Dictionary = _debug_dictionary(snapshot, "active_shot")
-		lines.append("#%d  %s / %s  ACTIVE" % [
+		lines.append("Shot %d / Attempt %d  %s / %s  ACTIVE" % [
 			int(active_shot.get("shot_id", -1)),
+			int(active_shot.get("attempt_id", -1)),
 			str(active_shot.get("source", "")),
 			str(active_shot.get("mode_id", "")),
 		])
@@ -1272,6 +1402,7 @@ func _make_shot_ledger_panel_text() -> String:
 		])
 	else:
 		lines.append("No active authoritative shot.")
+	_append_shot_ledger_lifecycle_lines(lines, snapshot)
 
 	var ledger: Dictionary = _debug_dictionary(snapshot, "last_completed")
 	if ledger.is_empty():
@@ -1289,8 +1420,9 @@ func _make_shot_ledger_panel_text() -> String:
 	var diagnostics: Dictionary = _debug_dictionary(ledger, "diagnostics")
 	lines.append("")
 	lines.append("LAST COMPLETED")
-	lines.append("#%d  %s / %s  %.3f sec" % [
+	lines.append("Shot %d / Attempt %d  %s / %s  %.3f sec" % [
 		int(ledger.get("shot_id", -1)),
+		int(ledger.get("attempt_id", -1)),
 		str(ledger.get("source", "")),
 		str(ledger.get("mode_id", "")),
 		float(ledger.get("duration_sec", 0.0)),
@@ -1390,16 +1522,52 @@ func _make_shot_ledger_panel_text() -> String:
 		int(diagnostics.get("suppressed_duplicate_pocket_attempts", 0)),
 		int(diagnostics.get("suppressed_travel_teleports", 0)),
 	])
-	lines.append("Lifecycle misuse: %d  |  Canceled shots: %d" % [
-		int(snapshot.get("lifecycle_misuse_count", 0)),
-		int(snapshot.get("total_canceled_shots", 0)),
-	])
 	_append_shot_ledger_self_test_lines(
 		lines,
 		_debug_dictionary(snapshot, "last_self_test_result"),
 		int(snapshot.get("self_test_case_count", 0))
 	)
 	return "\n".join(lines)
+
+
+func _append_shot_ledger_lifecycle_lines(lines: PackedStringArray, snapshot: Dictionary) -> void:
+	var active_shot: Dictionary = _debug_dictionary(snapshot, "active_shot")
+	var identity: Dictionary = _debug_dictionary(snapshot, "ball_identity")
+	lines.append("")
+	lines.append("LIFECYCLE")
+	lines.append("Active: %s | Shot: %d | Attempt: %d" % [
+		"yes" if bool(snapshot.get("active", false)) else "no",
+		int(active_shot.get("shot_id", -1)),
+		int(active_shot.get("attempt_id", -1)),
+	])
+	lines.append("Completed: %d | Canceled: %d | Misuse: %d" % [
+		int(snapshot.get("total_completed_shots", 0)),
+		int(snapshot.get("total_canceled_shots", 0)),
+		int(snapshot.get("lifecycle_misuse_count", 0)),
+	])
+	lines.append("Invalid: %d | Duplicate pockets: %d | Travel teleports: %d" % [
+		int(snapshot.get("global_invalid_event_count", 0)),
+		int(snapshot.get("global_duplicate_pocket_count", 0)),
+		int(snapshot.get("global_travel_teleport_count", 0)),
+	])
+	lines.append("Ball IDs next/fallback/duplicate/restored: %d / %d / %d / %d" % [
+		int(identity.get("next_run_ball_id", 1)),
+		int(identity.get("missing_id_fallback_count", 0)),
+		int(identity.get("duplicate_id_count", 0)),
+		int(identity.get("restored_id_count", 0)),
+	])
+	var reasons: Dictionary = _debug_dictionary(snapshot, "lifecycle_misuse_by_reason")
+	lines.append("Misuse reasons: %s" % (str(reasons) if not reasons.is_empty() else "none"))
+	var last_misuse: Dictionary = _debug_dictionary(snapshot, "last_lifecycle_misuse")
+	if not last_misuse.is_empty():
+		lines.append("Last: %s @ %s usec (shot %d / attempt %d / mode %s / %s)" % [
+			str(last_misuse.get("reason", "unknown")),
+			str(last_misuse.get("engine_timestamp_usec", 0)),
+			int(last_misuse.get("shot_id", -1)),
+			int(last_misuse.get("attempt_id", -1)),
+			str(last_misuse.get("mode_id", "unknown")),
+			str(last_misuse.get("context_label", "")),
+		])
 
 
 func _append_shot_ledger_self_test_lines(
@@ -1424,6 +1592,7 @@ func _append_shot_ledger_self_test_lines(
 	lines.append("Last run: %s" % str(result.get("last_run_timestamp", "Unknown")))
 	lines.append("Status: %s" % str(result.get("status", "ERROR")))
 	lines.append("Total: %d  |  Passed: %d  |  Failed: %d" % [total_count, passed_count, failed_count])
+	lines.append("Duration: %.3f ms" % (float(result.get("duration_usec", 0)) / 1000.0))
 	var failures: Array = _debug_array(result, "failures")
 	if failures.is_empty():
 		lines.append("Failures: none")

@@ -47,6 +47,7 @@ signal debug_copy_aim_benchmark_report_requested
 signal debug_reset_table_button_toggled(enabled: bool)
 signal debug_reset_last_shot_button_toggled(enabled: bool)
 signal quartermaster_cancel_placement_requested
+signal shot_lab_session_requested(run_suite: bool)
 
 const PANEL_CORE_PERFORMANCE := "core_performance"
 const PANEL_AIM_PREVIEW := "aim_preview"
@@ -260,6 +261,8 @@ var end_run_button: Button
 var end_run_confirm_panel: PanelContainer
 var end_run_yes_button: Button
 var end_run_cancel_button: Button
+var shot_lab_entry_confirmation: ConfirmationDialog
+var pending_shot_lab_suite := false
 
 
 func _ready() -> void:
@@ -278,6 +281,7 @@ func _ready() -> void:
 	_ensure_options_controls()
 	_ensure_run_stats_controls()
 	_ensure_dev_options_controls()
+	_ensure_shot_lab_entry_confirmation()
 	_ensure_end_run_controls()
 	_ensure_event_test_controls()
 	_ensure_pocket_capture_testing_controls()
@@ -773,6 +777,38 @@ func _ensure_dev_options_controls() -> void:
 		add_child(dev_options_panel)
 		dev_options_panel.setup(resume_button, menu_panel, dev_option_registry)
 		dev_options_panel.back_requested.connect(_on_dev_options_back_pressed)
+
+
+func _ensure_shot_lab_entry_confirmation() -> void:
+	if shot_lab_entry_confirmation != null:
+		return
+	shot_lab_entry_confirmation = ConfirmationDialog.new()
+	shot_lab_entry_confirmation.name = "ShotLabEntryConfirmation"
+	shot_lab_entry_confirmation.title = "Enter Shot Lab"
+	shot_lab_entry_confirmation.dialog_text = "Entering Shot Lab will leave the current run."
+	shot_lab_entry_confirmation.process_mode = Node.PROCESS_MODE_ALWAYS
+	shot_lab_entry_confirmation.confirmed.connect(_on_shot_lab_entry_confirmed)
+	add_child(shot_lab_entry_confirmation)
+	shot_lab_entry_confirmation.get_ok_button().text = "Enter Shot Lab"
+	shot_lab_entry_confirmation.get_cancel_button().text = "Stay"
+
+
+func _request_shot_lab_entry(run_suite: bool) -> void:
+	pending_shot_lab_suite = run_suite
+	_ensure_shot_lab_entry_confirmation()
+	shot_lab_entry_confirmation.dialog_text = (
+		"Entering Shot Lab will leave the current run.\n\n"
+		+ ("The reference suite will begin after the laboratory loads." if run_suite else "The selected reference setup will be loaded automatically.")
+	)
+	shot_lab_entry_confirmation.popup_centered(Vector2i(520, 210))
+
+
+func _on_shot_lab_entry_confirmed() -> void:
+	var run_suite: bool = pending_shot_lab_suite
+	pending_shot_lab_suite = false
+	if dev_options_panel != null:
+		dev_options_panel.close_panel()
+	shot_lab_session_requested.emit(run_suite)
 
 
 func _ensure_end_run_controls() -> void:
@@ -1509,6 +1545,57 @@ func _register_external_dev_options() -> void:
 		"Runs pure synthetic semantic-analysis cases without spawning balls or changing gameplay.",
 		["direct pot", "bank", "combination", "re-contact", "causality"]
 	)
+	_register_overlay_action(
+		"shot_ledger.open_raw_events",
+		"Open Last Shot Raw Events",
+		shot_ledger_locations,
+		"Opens a filtered, copyable view of the frozen raw events from the last completed authoritative shot.",
+		["event list", "ball id", "event filter", "raw ledger"]
+	)
+	_register_overlay_action(
+		"shot_ledger.copy_raw_events",
+		"Copy All Raw Events",
+		shot_ledger_locations,
+		"Copies every frozen raw event from the last completed shot as readable JSON.",
+		["clipboard", "event export", "raw ledger"]
+	)
+	_register_overlay_action(
+		"shot_ledger.clear_diagnostics",
+		"Clear Shot Ledger Diagnostic Counters",
+		shot_ledger_locations,
+		"Clears lifecycle, invalid-event, duplicate-pocket, travel-teleport, and stable-ID diagnostic counters without changing gameplay or completed ledgers.",
+		["lifecycle reset", "clear counters", "ball identity"]
+	)
+	_register_overlay_action(
+		"shot_ledger.copy_lifecycle",
+		"Copy Lifecycle Diagnostics",
+		shot_ledger_locations,
+		"Copies the always-available Shot Ledger lifecycle and run-ball identity diagnostics.",
+		["misuse reasons", "canceled shots", "stable ids"]
+	)
+
+	var shot_lab_locations: Array = [
+		_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Shot Lab"),
+		_dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Shot Lab"),
+	]
+	dev_option_registry.register_option({
+		"id": "shot_lab.enter_session",
+		"label": "Enter Shot Lab",
+		"kind": "action",
+		"locations": shot_lab_locations,
+		"description": "Opens a dedicated, consequence-frozen laboratory session. Entering from an active game leaves the current run.",
+		"keywords": ["controlled setup", "laboratory", "leave run"],
+		"action": _request_shot_lab_entry.bind(false),
+	})
+	dev_option_registry.register_option({
+		"id": "shot_lab.enter_and_run_suite",
+		"label": "Run Reference Suite in Lab",
+		"kind": "action",
+		"locations": shot_lab_locations,
+		"description": "Enters the dedicated Shot Lab visibly and starts the authoritative reference suite there.",
+		"keywords": ["batch validation", "all presets", "laboratory"],
+		"action": _request_shot_lab_entry.bind(true),
+	})
 
 	_register_overlay_bool("overlay.performance", "Full Performance Overlay", [_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Testing"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Performance Panels")], "Shows the original full-screen performance text overlay. It is denser and more expensive to format than the focused modular panels.", "The full performance overlay is visible.", "The full performance overlay is hidden.", ["f3", "all performance", "legacy diagnostics"])
 	_register_overlay_bool("overlay.physics_debug", "Physics Debug", [_dev_location(DevOptionsPanel.TAB_AIM_PHYSICS, "Aim Testing"), _dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Performance Panels")], "Shows the legacy on-screen physics debug text for moving balls and collision state.", "Physics debug text is visible.", "Physics debug text is hidden.", ["ball velocity", "collision state", "legacy overlay"])
@@ -1872,6 +1959,11 @@ func _get_debug_overlay_option_value(option_id: String) -> Variant:
 func _set_debug_overlay_option_value(value: Variant, option_id: String) -> void:
 	if debug_overlay_bridge != null:
 		debug_overlay_bridge.set_dev_option_state(option_id, bool(value))
+
+
+func _set_debug_overlay_variant_option_value(value: Variant, option_id: String) -> void:
+	if debug_overlay_bridge != null:
+		debug_overlay_bridge.set_dev_option_state(option_id, value)
 
 
 func _trigger_debug_overlay_action(option_id: String) -> void:

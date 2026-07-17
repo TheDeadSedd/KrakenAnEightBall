@@ -273,11 +273,39 @@ Owns the value-only authoritative Shot Ledger lifecycle: start snapshots at the 
 
 Does not calculate score, classify rewards, mutate physics, inspect aim-preview simulations, or retain live Ball/Node references in completed snapshots. `Table.gd` forwards canonical accepted events and lifecycle boundaries only.
 
+Shot ledgers use stable run-local ball IDs supplied by `RunBallIdentitySystem.gd`, and distinguish rewindable timeline `shot_id` values from monotonic physical `attempt_id` values. Immutable context records the run generation, mode, Passage/request or roguelite round origin, and active Shot Lab preset. Session-wide lifecycle diagnostics and analyzer self-test results are debug evidence rather than rewindable gameplay state.
+
+### `scripts/RunBallIdentitySystem.gd`
+
+Owns authoritative run-local ball identity allocation: monotonic `run_ball_id` assignment, fresh-run generation IDs, exact rewind restoration, non-recycling allocator behavior, and missing/duplicate/restored ID diagnostics.
+
+Does not assign IDs to pocket-capture or other presentation proxies, use visual ball numbers as semantic identity, classify shot events, or change ball lifecycle/gameplay behavior.
+
 ### `scripts/ShotLedgerAnalyzer.gd`
 
 Owns pure semantic transformation of schema-versioned raw shot ledgers into conservative causal activation, pocket facts, shot facts, and structured tags. The same analyzer is intended for authoritative and future predicted ledgers.
 
 Contains no scene references or gameplay mutation. Ambiguous collision direction must remain explicit rather than receiving an invented causal parent.
+
+### `scripts/RogueliteScoreResolver.gd`
+
+Owns the pure, versioned Haul x Mult scoring transformation for The Long Sink. It accepts a frozen analyzed Shot Ledger plus an optional ordered value-only modifier context, validates semantic pocket facts, and returns a defensive value-only breakdown containing Haul contributions, additive Mult contributions, xMult steps, replayable resolution steps, warnings, diagnostics, and the final floored Shot Score.
+
+Base rules are +10 Haul per semantic scoring-object pocket, +1 Mult for every scoring object after the first, up to +3 Mult from each pocketed ball's post-activation/pre-pocket semantic rail count, and +1 Mult per combination pot. Scratch is retained as a non-scoring consequence. The resolver has no scene references, mutates no gameplay state, and is shared by authoritative and predicted Shot Lab ledgers.
+
+### `scripts/RogueliteScoringSystem.gd`
+
+Owns lifecycle integration for Haul x Mult shadow scoring: one resolution per applicable completed roguelite or Shot Lab ledger, duplicate suppression, current/last defensive result snapshots, diagnostics, predicted-ledger resolution access, Shot Lab-only test modifiers, session scoring self-tests, and rewind-safe observation restoration.
+
+The system does not award Doubloons, change current roguelite quota progress, alter round targets, or calculate score during physics. `authoritative_score_applied_to_round` remains false until a later explicit migration makes the new model authoritative.
+
+### `scripts/ShotLabSystem.gd` / `scripts/ShotLabPresetCatalog.gd` / `scripts/ShotLabHUD.gd` / `scripts/ShotLabPanel.gd`
+
+Own the debug-only controlled-shot workflow. The catalog holds declarative normalized arrangements, reference-shot inputs, and focused expected assertions. `ShotLabSystem.gd` validates/loads controlled ordinary balls, maps semantic roles to stable run-ball IDs, commits optional reference shots through `Table.gd`'s canonical authoritative shot path, compares frozen ledgers, runs/cancels the sequential reference suite, and exposes debug snapshots.
+
+Dedicated laboratory sessions use `mode_id = "shot_lab"`: they start from a fresh shared table scene without initializing Passage or roguelite run state, auto-load a controlled preset without auto-firing, and return directly to the Main Menu rather than restoring or saving an abandoned run. `ShotLabHUD.gd` owns the compact in-world banner, right-side operating dock, collapse state, PASS/FAIL summary, suite progress, inspector launch actions, and Exit Lab presentation. `ShotLabPanel.gd` is an optional expected/observed/result inspector; `ShotLedgerRawEventsPanel.gd` remains the filtered raw-event inspector. Neither opens automatically on laboratory entry.
+
+With consequence isolation enabled, `Table.gd` keeps real billiards physics, ledger collection, aim prediction, audio, and pocket-capture presentation active while gating run-facing economy, progression, penalties, shot counters, and transitions at the shot/pocket coordination boundary. Shot Lab does not implement physics, synthesize events, mutate ledgers to satisfy assertions, or own scoring semantics. Interactive drag-to-arrange authoring is not implemented; the debug arrangement exporter copies normalized preset text for later catalog authoring.
 
 ### `scripts/ScoreSystem.gd`
 
@@ -557,7 +585,7 @@ The feed is a readable history/log for scoring, penalties, anomalies, Pocket Str
 
 ### `scripts/Main.gd`
 
-Owns small app-shell behavior such as fullscreen toggling, top-level UI/system wiring, run completion/return-to-menu coordination, and distribution of current cue modifier snapshots to systems that consume generic modifier keys.
+Owns small app-shell behavior such as fullscreen toggling, top-level UI/system wiring, run completion/return-to-menu coordination, dedicated Shot Lab scene handoff/exit coordination, and distribution of current cue modifier snapshots to systems that consume generic modifier keys.
 
 Does not own table gameplay systems, scoring values, cue part definitions, Oath definitions, Passage values, or persistence schemas.
 
@@ -565,7 +593,7 @@ Does not own table gameplay systems, scoring values, cue part definitions, Oath 
 
 Owns title-screen presentation, main menu input, button wiring, and safe transition into the existing gameplay scene.
 
-Current main menu uses layered UI over authored art: `assets/ui/mainmenu_bg.png` for sky/moon/ocean/distant scenery, lightweight animated overlay passes, then `assets/ui/mainmenu_fg.png` for ship/tentacles/foreground waves, then fog and menu UI. Start Run loads `Main.tscn`, Options opens the shared first-pass Options menu with audio sliders, Cue Locker and Run History open focused progression/history panels, and Quit exits the game. The same Options menu is also reachable from the in-game pause menu.
+Current main menu uses layered UI over authored art: `assets/ui/mainmenu_bg.png` for sky/moon/ocean/distant scenery, lightweight animated overlay passes, then `assets/ui/mainmenu_fg.png` for ship/tentacles/foreground waves, then fog and menu UI. Start Run opens the Passage/The Long Sink mode selector, Options opens the shared first-pass Options menu with audio sliders, Cue Locker and Run History open focused progression/history panels, and Quit exits the game. Debug builds also expose a modest lower-right `SHOT LAB` entry that launches a fresh dedicated laboratory session rather than a commercial game mode. The same Options menu is also reachable from the in-game pause menu.
 
 The public itch build exists. The main menu includes a small bottom-left Credits block:
 
@@ -804,7 +832,8 @@ Shot events reward recovery, geometry, improvisation, chaos control, anomaly-ass
 - The title screen uses layered authored art: background image, animated overlay passes, foreground image, fog, then menu UI.
 - Star twinkles and ocean shimmer should render behind ship/tentacle foreground silhouettes; fog can remain above the foreground if it reads naturally.
 - Title-screen overlays must remain lightweight and presentation-only: draw code or simple UI nodes, no heavy shaders or particle systems unless explicitly requested.
-- Start Run should load the existing gameplay scene without turning `Main.gd` into a large app shell.
+- Start Run should open the mode selector, whose enabled modes load the shared gameplay scene without turning `Main.gd` into a large app shell.
+- Debug builds may expose the modest lower-right Shot Lab entry; it launches a fresh `shot_lab` session and must not masquerade as Passage or The Long Sink.
 - Options is a real reusable menu with Audio sliders and is reachable from main menu and pause.
 - Run History and Cue Locker are focused Main Menu panels with their own presenter scripts.
 - Menu polish should not touch gameplay, pause/debug architecture, scoring, Kraken Intervention, Quartermaster, Reserve, or anomalies.
@@ -976,3 +1005,18 @@ Cue ball and eight ball sinking no longer end the game as this loop comes online
 Lowest-risk future extractions are UI/presentation helpers or clearly bounded gameplay systems. Highest-risk extraction remains `BallPhysics`; leave it in `Table.gd` until there is a focused plan, a stable checkpoint, and a verification pass.
 
 When adding a feature, first ask: which existing system owns this? If no system owns it cleanly, create a small focused system instead of expanding `Table.gd`.
+
+## Godot Testing Authorization
+
+- Codex agents are authorized to launch Godot whenever needed for parser checks,
+  scene-load validation, headless tests, interactive testing, screenshots, or
+  gameplay verification.
+- Do not ask for conversational confirmation before launching Godot.
+- Prefer direct invocation of the configured Godot executable so the dedicated
+  Codex command rule applies.
+- Do not use broad PowerShell or cmd wrappers merely to launch Godot.
+- If the Codex platform itself requires an approval, request the narrowest
+  persistent rule for the Godot executable rather than a one-time broad shell
+  approval.
+- Close test instances when validation is complete unless continued interactive
+  testing requires them.
