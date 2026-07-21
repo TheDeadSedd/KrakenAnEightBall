@@ -53,6 +53,14 @@ const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const GAME_MODE_SCRIPT := preload("res://scripts/GameModeSystem.gd")
 const ROGUELITE_RUN_SCRIPT := preload("res://scripts/RogueliteRunSystem.gd")
 const ROGUELITE_REWARD_SCRIPT := preload("res://scripts/RogueliteRewardSystem.gd")
+const ROGUELITE_BUILD_SCRIPT := preload("res://scripts/RogueliteBuildSystem.gd")
+const ROGUELITE_BALANCE_TUNING_SCRIPT := preload("res://scripts/RogueliteBalanceTuning.gd")
+const ROGUELITE_BALANCE_TELEMETRY_SCRIPT := preload(
+	"res://scripts/RogueliteBalanceTelemetry.gd"
+)
+const ROGUELITE_LIVE_SCORING_SCRIPT := preload(
+	"res://scripts/RogueliteLiveScoringAnticipationSystem.gd"
+)
 const BALL_SWEEP_MATH := preload("res://scripts/BallSweepMath.gd")
 
 # Presentation layout. The underlying table dimensions stay the same; the whole play space is centered in a larger 1920x1080 canvas.
@@ -110,6 +118,12 @@ const MAX_DRAG_DISTANCE := 210.0
 const MIN_SHOT_DISTANCE := 12.0
 const SHOT_POWER := 9.4
 const CUE_MODIFIER_CUE_SHOT_POWER_MULTIPLIER_BONUS := "cue_shot_power_multiplier_bonus"
+const REFERENCE_PREDICTION_ORIGIN_TOLERANCE_PX := 0.01
+const REFERENCE_PREDICTION_VELOCITY_TOLERANCE := 0.01
+const REFERENCE_PREDICTION_DIRECTION_DOT_MIN := 0.999999
+const REFERENCE_PREDICTION_POWER_TOLERANCE := 0.000001
+const COMMITTED_PREDICTION_FORCE_AFTER_MS := 60.0
+const COMMITTED_PREDICTION_WAIT_LIMIT_MS := 100.0
 const HIDE_CURSOR_DURING_CUE_DRAG := true
 const CUE_AIM_DEADZONE_RADIUS := 20.0
 const EARLY_CUE_RECLAIM_DELAY := 0.35
@@ -144,7 +158,7 @@ const CUE_BALL_CANNON_WAKE_DEFAULT_RETENTION := 0.22
 @onready var shot_event_system: ShotEventSystem = $ShotEventSystem
 @onready var run_ball_identity_system: RunBallIdentitySystem = $RunBallIdentitySystem
 @onready var shot_ledger_system: ShotLedgerSystem = $ShotLedgerSystem
-@onready var roguelite_scoring_system: Node = $RogueliteScoringSystem
+@onready var roguelite_scoring_system: RogueliteScoringSystem = $RogueliteScoringSystem
 @onready var shot_lab_system: ShotLabSystem = $ShotLabSystem
 @onready var score_system: ScoreSystem = $ScoreSystem
 @onready var pocket_streak_system: PocketStreakSystem = $PocketStreakSystem
@@ -196,7 +210,21 @@ var drag_start_drag_vector := Vector2.ZERO
 var drag_aim_direction := Vector2.RIGHT
 var drag_mouse_position := Vector2.ZERO
 var is_dragging := false
+var queued_prediction_release: Dictionary = {}
+var queued_prediction_release_started_usec := 0
+var queued_prediction_force_attempted := false
+var queued_prediction_releases_total := 0
+var queued_prediction_accepted_after_wait_total := 0
+var queued_prediction_timeouts_total := 0
+var exact_prediction_ready_at_release_total := 0
+var immediate_only_prediction_commits_total := 0
+var stale_prediction_commits_total := 0
+var last_prediction_release_wait_ms := 0.0
+var last_prediction_release_status := "not_committed"
+var last_prediction_commit_status := "not_committed"
+var last_prediction_release_disable_reason := ""
 var gameplay_mouse_lock_active := false
+var presentation_input_locks: Dictionary = {}
 var cue_drag_restore_mouse_mode: Input.MouseMode = Input.MOUSE_MODE_VISIBLE
 var aim_preview_dirty := true
 var aim_prediction_state_revision := 0
@@ -266,6 +294,14 @@ var game_mode_id: String = GAME_MODE_SCRIPT.MODE_PASSAGE
 var shot_lab_session_config: Dictionary = {}
 var roguelite_run_system: RogueliteRunSystem
 var roguelite_reward_system: RogueliteRewardSystem
+var roguelite_build_system: RogueliteBuildSystem
+var roguelite_live_scoring_system: RogueliteLiveScoringAnticipationSystem
+var roguelite_balance_tuning
+var roguelite_balance_telemetry
+var active_roguelite_balance_tuning_snapshot: Dictionary = {}
+var pending_roguelite_balance_tuning_configuration: Dictionary = {}
+var roguelite_shot_resolution_deferred := false
+var roguelite_settled_scoreable_ball_count := -1
 #endregion
 
 
@@ -317,6 +353,8 @@ func _ready() -> void:
 	back_room_deal_system.setup(self)
 	sunken_spoils_system.setup(self)
 	run_stats_system.setup(self)
+	_setup_roguelite_balance_tuning_if_needed()
+	_setup_roguelite_build_if_needed()
 	_setup_roguelite_mode_if_needed()
 	_cache_table_geometry()
 	pocket_capture_presenter.setup(self)
@@ -325,6 +363,12 @@ func _ready() -> void:
 		cue_controller.clear_cue()
 		queue_redraw()
 		return
+	roguelite_live_scoring_system = (
+		ROGUELITE_LIVE_SCORING_SCRIPT.new() as RogueliteLiveScoringAnticipationSystem
+	)
+	roguelite_live_scoring_system.name = "RogueliteLiveScoringAnticipationSystem"
+	add_child(roguelite_live_scoring_system)
+	roguelite_live_scoring_system.setup(self)
 
 	var starting_balls = _spawn_initial_balls_for_mode()
 	cue_ball = starting_balls.cue_ball
@@ -352,6 +396,20 @@ func set_game_mode_id(mode_id: String) -> void:
 
 func set_shot_lab_session_config(configuration: Dictionary) -> void:
 	shot_lab_session_config = configuration.duplicate(true)
+
+
+func set_pending_roguelite_balance_tuning_configuration(configuration: Dictionary) -> void:
+	pending_roguelite_balance_tuning_configuration = configuration.duplicate(true)
+
+
+func get_roguelite_balance_tuning_configuration() -> Dictionary:
+	if roguelite_balance_tuning == null:
+		return pending_roguelite_balance_tuning_configuration.duplicate(true)
+	return roguelite_balance_tuning.get_configuration_snapshot()
+
+
+func get_active_roguelite_balance_tuning_snapshot() -> Dictionary:
+	return active_roguelite_balance_tuning_snapshot.duplicate(true)
 
 
 func get_game_mode_id() -> String:
@@ -392,6 +450,45 @@ func get_roguelite_reward_snapshot() -> Dictionary:
 	return roguelite_reward_system.get_reward_snapshot()
 
 
+func get_roguelite_build_snapshot() -> Dictionary:
+	if roguelite_build_system == null:
+		return {}
+	return roguelite_build_system.get_build_snapshot()
+
+
+func get_roguelite_balance_report_source() -> Dictionary:
+	if roguelite_balance_telemetry == null:
+		return ROGUELITE_BALANCE_TELEMETRY_SCRIPT.get_session_last_finalized_report_source_snapshot()
+	var current_snapshot: Dictionary = roguelite_balance_telemetry.get_current_run_snapshot()
+	if bool(current_snapshot.get("finalized", false)):
+		var finalized_snapshot: Dictionary = (
+			roguelite_balance_telemetry.get_last_finalized_report_source_snapshot()
+		)
+		if not finalized_snapshot.is_empty():
+			return finalized_snapshot
+	var current_shots: Array = current_snapshot.get("shots", [])
+	if (
+		bool(current_snapshot.get("active", false))
+		or not current_shots.is_empty()
+	):
+		return current_snapshot
+	return roguelite_balance_telemetry.get_last_finalized_report_source_snapshot()
+
+
+func get_roguelite_balance_telemetry_diagnostics() -> Dictionary:
+	if roguelite_balance_telemetry == null:
+		return {}
+	return roguelite_balance_telemetry.get_diagnostics_snapshot()
+
+
+func abandon_roguelite_balance_telemetry(reason: String) -> void:
+	if roguelite_balance_telemetry == null:
+		return
+	var snapshot: Dictionary = roguelite_balance_telemetry.get_current_run_snapshot()
+	if bool(snapshot.get("active", false)) and not bool(snapshot.get("finalized", false)):
+		roguelite_balance_telemetry.abandon_active_run(reason)
+
+
 func should_offer_roguelite_reward(round_snapshot: Dictionary) -> bool:
 	return (
 		is_roguelite_mode()
@@ -406,25 +503,106 @@ func generate_roguelite_reward_offers(round_snapshot: Dictionary) -> Dictionary:
 	if not should_offer_roguelite_reward(round_snapshot):
 		return {}
 	var round_number: int = maxi(int(round_snapshot.get("round_number", 0)), 0)
-	return roguelite_reward_system.generate_reward_offers(round_number)
+	var tray_before: Dictionary = get_roguelite_build_snapshot()
+	var reward_snapshot: Dictionary = roguelite_reward_system.generate_reward_offers(
+		round_number
+	)
+	if roguelite_balance_telemetry != null and not reward_snapshot.is_empty():
+		var eligible_pool_value: Variant = reward_snapshot.get("eligible_pool", [])
+		var eligible_pool: Array = (
+			(eligible_pool_value as Array).duplicate(true)
+			if eligible_pool_value is Array
+			else []
+		)
+		roguelite_balance_telemetry.record_offer_generated(
+			reward_snapshot,
+			eligible_pool,
+			tray_before,
+			{
+				"round_number": round_number,
+				"eligible_pool_complete": true,
+				"timestamp_unix": int(Time.get_unix_time_from_system()),
+			}
+		)
+	return reward_snapshot
 
 
-func choose_roguelite_reward(reward_id: String) -> bool:
+func choose_roguelite_reward(reward_id: String) -> Dictionary:
 	if not is_roguelite_mode() or roguelite_reward_system == null or roguelite_run_system == null:
-		return false
+		return {}
 
 	var result: Dictionary = roguelite_reward_system.choose_reward(reward_id)
 	if result.is_empty():
-		return false
+		return {}
+	if not bool(result.get("completed", false)):
+		return result.duplicate(true)
+	_apply_completed_roguelite_reward(result)
+	_record_roguelite_balance_reward_selected(result)
+	return result.duplicate(true)
+
+
+func confirm_roguelite_eight_ball_replacement(tray_slot_index: int) -> Dictionary:
+	if not is_roguelite_mode() or roguelite_reward_system == null:
+		return {}
+	var result: Dictionary = roguelite_reward_system.confirm_eight_ball_replacement(
+		tray_slot_index
+	)
+	if bool(result.get("completed", false)):
+		_apply_completed_roguelite_reward(result)
+		_record_roguelite_balance_reward_selected(result)
+	return result.duplicate(true)
+
+
+func cancel_roguelite_eight_ball_replacement() -> void:
+	if roguelite_reward_system != null:
+		roguelite_reward_system.cancel_eight_ball_replacement()
+
+
+func keep_current_roguelite_course() -> Dictionary:
+	if not is_roguelite_mode() or roguelite_reward_system == null:
+		return {}
+	var result: Dictionary = roguelite_reward_system.keep_current_course()
+	if (
+		roguelite_balance_telemetry != null
+		and bool(result.get("completed", false))
+		and bool(result.get("skipped", false))
+	):
+		roguelite_balance_telemetry.record_offer_skipped(
+			result,
+			get_roguelite_build_snapshot(),
+			{
+				"reason": "keep_current_course",
+				"timestamp_unix": int(Time.get_unix_time_from_system()),
+			}
+		)
+	return result.duplicate(true)
+
+
+func _record_roguelite_balance_reward_selected(result: Dictionary) -> void:
+	if roguelite_balance_telemetry == null:
+		return
+	roguelite_balance_telemetry.record_offer_selected(
+		result,
+		get_roguelite_build_snapshot(),
+		{
+			"reason": "selected",
+			"timestamp_unix": int(Time.get_unix_time_from_system()),
+		}
+	)
+
+
+func _apply_completed_roguelite_reward(result: Dictionary) -> void:
+	if roguelite_run_system == null:
+		return
 
 	var reward_snapshot_value: Variant = result.get("reward", {})
-	var effect_snapshot_value: Variant = result.get("effects", {})
-	var reward_snapshot: Dictionary = reward_snapshot_value as Dictionary
-	var effect_snapshot: Dictionary = effect_snapshot_value as Dictionary
-	roguelite_run_system.apply_reward_effect_snapshot(effect_snapshot)
+	var reward_snapshot: Dictionary = (
+		(reward_snapshot_value as Dictionary)
+		if reward_snapshot_value is Dictionary
+		else {}
+	)
 	var reward_name: String = str(reward_snapshot.get("display_name", "Course marked"))
 	status_text_changed.emit("Course marked: %s." % reward_name)
-	return true
 
 
 func _spawn_initial_balls_for_mode():
@@ -446,50 +624,343 @@ func _setup_roguelite_mode_if_needed() -> void:
 		return
 
 	roguelite_reward_system = ROGUELITE_REWARD_SCRIPT.new()
-	roguelite_reward_system.setup()
+	roguelite_reward_system.setup(run_ball_identity_system.get_run_generation())
+	roguelite_reward_system.set_build_system(roguelite_build_system)
+	roguelite_reward_system.set_balance_tuning_snapshot(
+		active_roguelite_balance_tuning_snapshot
+	)
 	roguelite_run_system = ROGUELITE_RUN_SCRIPT.new()
 	roguelite_run_system.set_reward_system(roguelite_reward_system)
-	if not score_system.doubloons_awarded.is_connected(_on_roguelite_doubloons_awarded):
-		score_system.doubloons_awarded.connect(_on_roguelite_doubloons_awarded)
+	roguelite_run_system.set_balance_tuning_snapshot(
+		active_roguelite_balance_tuning_snapshot
+	)
+	roguelite_run_system.set_doubloon_payout_applier(
+		Callable(score_system, "apply_roguelite_shot_payout")
+	)
+	roguelite_balance_telemetry = ROGUELITE_BALANCE_TELEMETRY_SCRIPT.new()
+	roguelite_balance_telemetry.begin_fresh_run(
+		run_ball_identity_system.get_run_generation(),
+		GAME_MODE_SCRIPT.MODE_ROGUELITE,
+		roguelite_run_system.get_snapshot(),
+		get_roguelite_build_snapshot(),
+		{
+			"balance_tuning": active_roguelite_balance_tuning_snapshot.duplicate(true),
+			"timestamp_unix": int(Time.get_unix_time_from_system()),
+		}
+	)
 	if not shot_finished.is_connected(_on_roguelite_shot_finished):
 		shot_finished.connect(_on_roguelite_shot_finished)
+	if not roguelite_run_system.round_started.is_connected(_on_roguelite_round_started):
+		roguelite_run_system.round_started.connect(_on_roguelite_round_started)
 	if not roguelite_run_system.round_won.is_connected(_on_roguelite_round_won):
 		roguelite_run_system.round_won.connect(_on_roguelite_round_won)
 	if not roguelite_run_system.run_failed.is_connected(_on_roguelite_run_failed):
 		roguelite_run_system.run_failed.connect(_on_roguelite_run_failed)
 	if not roguelite_run_system.run_completed.is_connected(_on_roguelite_run_completed):
 		roguelite_run_system.run_completed.connect(_on_roguelite_run_completed)
+	if (
+		roguelite_scoring_system != null
+		and not roguelite_scoring_system.authoritative_round_score_committed.is_connected(
+			_on_roguelite_authoritative_round_score_committed
+		)
+	):
+		roguelite_scoring_system.authoritative_round_score_committed.connect(
+			_on_roguelite_authoritative_round_score_committed
+		)
 
 	roguelite_run_system.start_run()
-
-
-func _on_roguelite_doubloons_awarded(amount: int, _total: int) -> void:
-	if roguelite_run_system == null:
-		return
-
-	var quota_progress: int = maxi(amount, 0)
-	if quota_progress <= 0:
-		return
-
-	if roguelite_reward_system != null:
-		var volley_result: Dictionary = roguelite_reward_system.consume_opening_volley_bonus(
-			int(roguelite_run_system.get_snapshot().get("round_number", 0)),
-			quota_progress
+	if roguelite_build_system != null:
+		roguelite_build_system.begin_round(
+			int(roguelite_run_system.get_snapshot().get("round_number", 1))
 		)
-		var volley_bonus: int = maxi(int(volley_result.get("amount", 0)), 0)
-		if volley_bonus > 0:
-			quota_progress += volley_bonus
-			status_text_changed.emit("%s: +%s quota." % [str(volley_result.get("label", "Reward")), volley_bonus])
 
-	roguelite_run_system.add_round_score(quota_progress)
+
+func _on_roguelite_round_started(snapshot: Dictionary) -> void:
+	if roguelite_balance_telemetry == null:
+		return
+	roguelite_balance_telemetry.record_round_started(
+		snapshot,
+		get_roguelite_build_snapshot(),
+		int(snapshot.get("object_ball_count", 0)),
+		{"timestamp_unix": int(Time.get_unix_time_from_system())}
+	)
+
+
+func _setup_roguelite_build_if_needed() -> void:
+	if not (is_roguelite_mode() or is_shot_lab_mode()):
+		return
+	roguelite_build_system = ROGUELITE_BUILD_SCRIPT.new() as RogueliteBuildSystem
+	roguelite_build_system.setup(
+		is_shot_lab_mode(),
+		run_ball_identity_system.get_run_generation()
+	)
+	roguelite_build_system.set_balance_tuning_snapshot(
+		active_roguelite_balance_tuning_snapshot
+	)
+	if roguelite_scoring_system != null:
+		roguelite_scoring_system.set_build_system(roguelite_build_system)
+		roguelite_scoring_system.set_shot_lab_balance_telemetry_enabled(bool(
+			active_roguelite_balance_tuning_snapshot.get(
+				"shot_lab_telemetry_enabled",
+				false
+			)
+		))
+
+
+func _setup_roguelite_balance_tuning_if_needed() -> void:
+	if not (is_roguelite_mode() or is_shot_lab_mode()):
+		return
+	roguelite_balance_tuning = ROGUELITE_BALANCE_TUNING_SCRIPT.new()
+	if not pending_roguelite_balance_tuning_configuration.is_empty():
+		roguelite_balance_tuning.apply_configuration_snapshot(
+			pending_roguelite_balance_tuning_configuration
+		)
+	active_roguelite_balance_tuning_snapshot = (
+		roguelite_balance_tuning.make_active_run_snapshot()
+	)
+	pending_roguelite_balance_tuning_configuration.clear()
 
 
 func _on_roguelite_shot_finished(_count: int) -> void:
 	if roguelite_run_system == null:
 		return
+	if (
+		roguelite_scoring_system != null
+		and roguelite_scoring_system.has_pending_authoritative_round_score()
+	):
+		roguelite_shot_resolution_deferred = true
+		# The score presenter acquires its table-level lock synchronously from the
+		# completed-ledger signal. If no presenter accepted the result, commit now
+		# so a disabled/debug presentation cannot stall the run lifecycle.
+		if not is_presentation_input_locked():
+			roguelite_scoring_system.commit_pending_authoritative_round_score()
+		return
 
-	roguelite_run_system.consume_shot()
+	# A disabled scorer or an invalid-but-safe ledger still resolves the physical
+	# attempt exactly once. It contributes zero score but cannot skip Hull, shots,
+	# or terminal evaluation.
+	var completed_ledger: Dictionary = shot_ledger_system.get_last_completed_ledger()
+	var fallback_result: Dictionary = completed_ledger.duplicate(true)
+	fallback_result["shot_score"] = 0
+	var transaction: Dictionary = commit_roguelite_completed_shot(
+		fallback_result,
+		completed_ledger
+	)
+	var already_resolved: bool = (
+		bool(transaction.get("duplicate", false))
+		and str(transaction.get("rejection_reason", "")) == "transaction_already_resolved"
+	)
+	if bool(transaction.get("accepted", false)):
+		_attach_roguelite_transaction_to_fallback_result(
+			fallback_result,
+			transaction
+		)
+		_record_roguelite_balance_authoritative_shot(
+			fallback_result,
+			completed_ledger
+		)
+	if bool(transaction.get("accepted", false)) or already_resolved:
+		_complete_roguelite_shot_resolution()
+
+
+func _on_roguelite_authoritative_round_score_committed(score_result: Dictionary) -> void:
+	if bool(score_result.get("shot_transaction_accepted", false)):
+		_record_roguelite_balance_authoritative_shot(score_result)
+	if not roguelite_shot_resolution_deferred:
+		return
+	roguelite_shot_resolution_deferred = false
+	if not bool(score_result.get("shot_transaction_accepted", false)):
+		push_error("Long Sink shot score committed without an accepted shot transaction.")
+		return
+	_complete_roguelite_shot_resolution()
+
+
+func _record_roguelite_balance_authoritative_shot(
+	score_result: Dictionary,
+	completed_ledger_override: Dictionary = {}
+) -> void:
+	if roguelite_balance_telemetry == null or roguelite_scoring_system == null:
+		return
+	var completed_ledger: Dictionary = completed_ledger_override.duplicate(true)
+	if completed_ledger.is_empty():
+		completed_ledger = roguelite_scoring_system.get_source_ledger_for_result(
+			score_result
+		)
+	if completed_ledger.is_empty():
+		push_warning("Long Sink balance telemetry skipped a committed shot without its ledger.")
+		return
+
+	var run_after: Dictionary = roguelite_run_system.get_snapshot()
+	var run_before: Dictionary = _make_roguelite_balance_run_before_snapshot(
+		score_result,
+		run_after
+	)
+	var payload: Dictionary = roguelite_scoring_system.get_balance_telemetry_payload(
+		score_result,
+		completed_ledger
+	)
+	var base_result_value: Variant = payload.get("base_score_result", {})
+	var base_result: Dictionary = (
+		(base_result_value as Dictionary).duplicate(true)
+		if base_result_value is Dictionary
+		else {}
+	)
+	var counterfactual_value: Variant = payload.get(
+		"item_counterfactual_results",
+		{}
+	)
+	var counterfactuals: Dictionary = (
+		(counterfactual_value as Dictionary).duplicate(true)
+		if counterfactual_value is Dictionary
+		else {}
+	)
+	var context_value: Variant = payload.get("context", {})
+	var context: Dictionary = (
+		(context_value as Dictionary).duplicate(true)
+		if context_value is Dictionary
+		else {}
+	)
+	if roguelite_live_scoring_system != null:
+		context["global_excitement"] = (
+			roguelite_live_scoring_system.get_replay_excitement()
+		)
+	context["timestamp_unix"] = int(Time.get_unix_time_from_system())
+
+	var record_result: Dictionary = roguelite_balance_telemetry.record_authoritative_shot(
+		completed_ledger,
+		score_result,
+		base_result,
+		run_before,
+		run_after,
+		get_roguelite_build_snapshot(),
+		counterfactuals,
+		context
+	)
+	if not bool(record_result.get("accepted", false)):
+		if not bool(record_result.get("duplicate", false)):
+			push_warning("Long Sink balance telemetry rejected a committed shot: %s" % str(
+				record_result.get("reason", "unknown")
+			))
+		return
+	_finalize_roguelite_balance_after_shot(score_result, run_after)
+
+
+func _make_roguelite_balance_run_before_snapshot(
+	score_result: Dictionary,
+	run_after: Dictionary
+) -> Dictionary:
+	var run_before: Dictionary = run_after.duplicate(true)
+	run_before["shots_left"] = int(score_result.get(
+		"shots_before",
+		run_after.get("shots_left", 0)
+	))
+	run_before["hull"] = int(score_result.get(
+		"hull_before",
+		run_after.get("hull", 0)
+	))
+	run_before["round_score"] = int(score_result.get(
+		"round_score_before",
+		run_after.get("round_score", 0)
+	))
+	run_before["round_active"] = true
+	run_before["round_won"] = false
+	run_before["run_failed"] = false
+	run_before["run_completed"] = false
+	run_before["failure_reason"] = ""
+	return run_before
+
+
+func _attach_roguelite_transaction_to_fallback_result(
+	result: Dictionary,
+	transaction: Dictionary
+) -> void:
+	result["final_haul"] = 0
+	result["final_mult"] = 1.0
+	result["authoritative_score_applied_to_round"] = true
+	result["shot_transaction_accepted"] = true
+	result["shot_transaction_outcome"] = str(transaction.get("outcome", ""))
+	result["shot_transaction_failure_reason"] = str(transaction.get(
+		"failure_reason",
+		""
+	))
+	result["round_score_before"] = int(transaction.get("score_before", 0))
+	result["round_score_after"] = int(transaction.get("score_after", 0))
+	result["round_quota"] = int(transaction.get("round_quota", 0))
+	result["shots_before"] = int(transaction.get("shots_before", 0))
+	result["shots_after"] = int(transaction.get("shots_after", 0))
+	result["hull_before"] = int(transaction.get("hull_before", 0))
+	result["hull_after"] = int(transaction.get("hull_after", 0))
+	result["doubloon_payout"] = {}
+	result["shot_transaction"] = transaction.duplicate(true)
+
+
+func _finalize_roguelite_balance_after_shot(
+	score_result: Dictionary,
+	run_snapshot: Dictionary
+) -> void:
+	if roguelite_balance_telemetry == null:
+		return
+	var outcome: String = str(score_result.get("shot_transaction_outcome", ""))
+	var failure_reason: String = str(run_snapshot.get("failure_reason", ""))
+	var build_snapshot: Dictionary = get_roguelite_build_snapshot()
+	var context: Dictionary = {
+		"timestamp_unix": int(Time.get_unix_time_from_system()),
+	}
+	if bool(run_snapshot.get("run_failed", false)):
+		roguelite_balance_telemetry.record_round_finalized(
+			run_snapshot,
+			build_snapshot,
+			outcome,
+			failure_reason,
+			context
+		)
+		roguelite_balance_telemetry.finalize_run(
+			run_snapshot,
+			build_snapshot,
+			outcome,
+			failure_reason,
+			context
+		)
+	elif bool(run_snapshot.get("round_won", false)):
+		roguelite_balance_telemetry.record_round_finalized(
+			run_snapshot,
+			build_snapshot,
+			outcome,
+			"",
+			context
+		)
+
+
+func _complete_roguelite_shot_resolution() -> void:
+	if roguelite_run_system == null:
+		return
 	_resolve_roguelite_round_after_motion()
+	roguelite_settled_scoreable_ball_count = -1
+
+
+func commit_roguelite_completed_shot(
+	score_result: Dictionary,
+	ledger: Dictionary = {}
+) -> Dictionary:
+	if not is_roguelite_mode() or roguelite_run_system == null:
+		return {}
+	var transaction_source: Dictionary = ledger if not ledger.is_empty() else score_result
+	var transaction_key: String = _make_roguelite_shot_transaction_key(transaction_source)
+	var scoreable_ball_count: int = roguelite_settled_scoreable_ball_count
+	if scoreable_ball_count < 0:
+		scoreable_ball_count = _get_roguelite_scoreable_ball_count()
+	var payout_value: Variant = score_result.get("doubloon_payout", {})
+	var doubloon_payout: Dictionary = (
+		(payout_value as Dictionary).duplicate(true)
+		if payout_value is Dictionary
+		else {}
+	)
+	return roguelite_run_system.resolve_completed_shot(
+		maxi(int(score_result.get("shot_score", 0)), 0),
+		scoreable_ball_count,
+		transaction_key,
+		doubloon_payout
+	)
 
 
 func _on_roguelite_round_won(_snapshot: Dictionary) -> void:
@@ -500,7 +971,15 @@ func _on_roguelite_run_failed(_snapshot: Dictionary) -> void:
 	status_text_changed.emit("Run Failed")
 
 
-func _on_roguelite_run_completed(_snapshot: Dictionary) -> void:
+func _on_roguelite_run_completed(snapshot: Dictionary) -> void:
+	if roguelite_balance_telemetry != null:
+		roguelite_balance_telemetry.finalize_run(
+			snapshot,
+			get_roguelite_build_snapshot(),
+			"run_completed",
+			"",
+			{"timestamp_unix": int(Time.get_unix_time_from_system())}
+		)
 	status_text_changed.emit("Run Complete")
 
 
@@ -512,13 +991,6 @@ func _resolve_roguelite_round_after_motion() -> void:
 	if bool(snapshot.get("run_failed", false)):
 		_finish_roguelite_run_failed(snapshot)
 		return
-
-	var scoreable_ball_count: int = _get_roguelite_scoreable_ball_count()
-	if scoreable_ball_count <= 0:
-		snapshot = roguelite_run_system.fail_empty_table_if_needed(scoreable_ball_count)
-		if bool(snapshot.get("run_failed", false)):
-			_finish_roguelite_run_failed(snapshot)
-			return
 
 	if not bool(snapshot.get("round_won", false)):
 		return
@@ -539,6 +1011,10 @@ func continue_roguelite_round() -> bool:
 		return false
 	if not roguelite_run_system.advance_to_next_round():
 		return false
+	if roguelite_build_system != null:
+		roguelite_build_system.begin_round(
+			int(roguelite_run_system.get_snapshot().get("round_number", 1))
+		)
 
 	_reset_roguelite_table_for_current_round()
 	return true
@@ -546,6 +1022,7 @@ func continue_roguelite_round() -> bool:
 
 func _enter_roguelite_round_hold() -> void:
 	game_over = true
+	_discard_queued_prediction_release()
 	_end_cue_drag()
 	cue_controller.stop_recoil()
 	_clear_aim_preview_now()
@@ -554,6 +1031,7 @@ func _enter_roguelite_round_hold() -> void:
 
 func _finish_roguelite_run_failed(_snapshot: Dictionary) -> void:
 	game_over = true
+	_discard_queued_prediction_release()
 	_end_cue_drag()
 	cue_controller.stop_recoil()
 	_clear_aim_preview_now()
@@ -569,6 +1047,22 @@ func _get_roguelite_scoreable_ball_count() -> int:
 			continue
 		scoreable_count += 1
 	return scoreable_count
+
+
+func _make_roguelite_shot_transaction_key(source: Dictionary) -> String:
+	var shot_id: int = int(source.get("shot_id", -1))
+	var attempt_id: int = int(source.get("attempt_id", -1))
+	if shot_id < 0 or attempt_id < 0:
+		return "fallback|%s|%d" % [
+			str(run_ball_identity_system.get_run_generation()),
+			shots_taken_count,
+		]
+	return "%s|%s|%d|%d" % [
+		str(source.get("run_generation", "")),
+		str(source.get("mode_id", "")),
+		shot_id,
+		attempt_id,
+	]
 
 
 func has_roguelite_scoreable_balls_remaining() -> bool:
@@ -590,9 +1084,14 @@ func _is_roguelite_scoreable_ball(ball: Ball) -> bool:
 
 
 func _reset_roguelite_table_for_current_round() -> void:
+	_discard_queued_prediction_release()
 	shot_rewind_system.invalidate_checkpoint("Reset unavailable: the table changed rounds.")
 	shot_ledger_system.cancel_active_shot("roguelite_round_transition")
 	roguelite_scoring_system.handle_round_transition()
+	roguelite_shot_resolution_deferred = false
+	roguelite_settled_scoreable_ball_count = -1
+	if roguelite_live_scoring_system != null:
+		roguelite_live_scoring_system.cancel_current_shot("roguelite_round_transition")
 	aim_preview.clear_for_authoritative_table_reset("roguelite_round_transition")
 	pocket_capture_presenter.clear_collections("roguelite_round_transition")
 	game_over = false
@@ -646,6 +1145,7 @@ func _clear_roguelite_table_balls() -> void:
 
 
 func _exit_tree() -> void:
+	_discard_queued_prediction_release()
 	if gameplay_mouse_lock_active and HIDE_CURSOR_DURING_CUE_DRAG:
 		Input.mouse_mode = cue_drag_restore_mouse_mode
 
@@ -827,6 +1327,7 @@ func _physics_process(delta: float) -> void:
 	_reset_performance_frame_stats()
 	wayfinder_system.update_redirect_cooldowns(delta)
 	aim_preview.update_debug(delta, is_dragging, aim_preview_dirty)
+	_process_queued_prediction_release()
 
 	_begin_cue_reclaim_motion_snapshot()
 	var step_delta: float = delta / float(PHYSICS_SUBSTEPS)
@@ -879,7 +1380,7 @@ func _physics_process(delta: float) -> void:
 	var can_run_anchor_warning_timer: bool = can_use_cue and not shot_active
 	anchor_ball_system.update_curse_warning_timers(delta, can_run_anchor_warning_timer)
 	_update_cue_controller(can_use_cue, delta)
-	if is_dragging:
+	if is_dragging and queued_prediction_release.is_empty():
 		_mark_aim_preview_dirty()
 	_flush_aim_preview_refresh()
 
@@ -893,6 +1394,8 @@ func _unhandled_input(event: InputEvent) -> void:
 	if game_over or not is_instance_valid(cue_ball):
 		return
 	if ball_placement_system.is_placement_active():
+		return
+	if not queued_prediction_release.is_empty():
 		return
 
 	if _try_debug_spawn_ball(event):
@@ -1816,11 +2319,19 @@ func _resolve_rail_collisions() -> void:
 			shot_ledger_system.record_suppressed_rail_clamps(clamp_count)
 		for hit_event in hit_events:
 			if shot_active:
+				var rail_surface_contact: Vector2 = (
+					hit_event.position - hit_event.normal * ball.radius
+				)
 				shot_ledger_system.record_rail_contact({
 					"ball_id": get_run_ball_id(ball),
 					"rail_id": str(hit_event.boundary_id),
 					"rail_kind": str(hit_event.boundary_kind),
-					"contact_point": hit_event.position - hit_event.normal * ball.radius,
+					# Keep both physical representations explicit. Matching uses centers;
+					# table-local presentation uses the surface contact point.
+					"ball_center_at_contact": hit_event.position,
+					"surface_contact_point": rail_surface_contact,
+					"ball_radius": ball.radius,
+					"contact_point": rail_surface_contact,
 					"contact_normal": hit_event.normal,
 					"pre_velocity": hit_event.incoming_velocity,
 					"post_velocity": hit_event.outgoing_velocity,
@@ -2033,7 +2544,29 @@ func is_gameplay_mouse_locked() -> bool:
 
 
 func should_suppress_hover_ui() -> bool:
-	return is_gameplay_mouse_locked()
+	return is_gameplay_mouse_locked() or is_presentation_input_locked()
+
+
+func set_presentation_input_locked(lock_id: String, locked: bool) -> void:
+	var normalized_id: String = lock_id.strip_edges()
+	if normalized_id.is_empty():
+		return
+	var was_suppressed: bool = should_suppress_hover_ui()
+	if locked:
+		presentation_input_locks[normalized_id] = true
+	else:
+		presentation_input_locks.erase(normalized_id)
+	if locked and is_dragging:
+		_end_cue_drag()
+		_clear_aim_preview_now()
+		return
+	var is_suppressed: bool = should_suppress_hover_ui()
+	if was_suppressed != is_suppressed:
+		gameplay_mouse_lock_changed.emit(is_suppressed)
+
+
+func is_presentation_input_locked() -> bool:
+	return not presentation_input_locks.is_empty()
 
 
 func get_cue_start_selection_snapshot() -> Dictionary:
@@ -2145,7 +2678,7 @@ func _try_start_drag(mouse_position: Vector2) -> void:
 
 
 func _release_shot(_mouse_position: Vector2) -> void:
-	if not is_dragging:
+	if not is_dragging or not queued_prediction_release.is_empty():
 		return
 
 	if not _can_release_current_shot():
@@ -2159,14 +2692,51 @@ func _release_shot(_mouse_position: Vector2) -> void:
 	var drag_vector: Vector2 = _get_drag_vector(release_position)
 	var release_pullback: float = cue_controller.get_pullback_for_drag_vector(drag_vector, MAX_DRAG_DISTANCE)
 	var release_direction: Vector2 = drag_vector.normalized()
-	_end_cue_drag()
 	if drag_vector.length() < MIN_SHOT_DISTANCE:
+		_end_cue_drag()
 		cue_controller.stop_recoil()
 		_clear_aim_preview_now()
 		queue_redraw()
 		return
 
 	var release_rotation: float = release_direction.angle() if release_direction != Vector2.ZERO else cue_controller.get_rotation_angle()
+	if _should_queue_release_for_exact_prediction():
+		# Mouse motion may have updated the frozen drag after the last physics tick.
+		# Refresh once so the staged request exactly matches the released shot.
+		_flush_aim_preview_refresh()
+		var effective_shot_power: float = get_effective_shot_power()
+		var launch_velocity: Vector2 = drag_vector * effective_shot_power
+		var exact_prediction: Dictionary = _get_exact_commit_prediction_bundle(
+			cue_ball.global_position,
+			launch_velocity
+		)
+		if bool(exact_prediction.get("accepted", false)):
+			exact_prediction_ready_at_release_total += 1
+			last_prediction_release_wait_ms = 0.0
+			last_prediction_release_status = "exact_ready_at_release"
+			last_prediction_release_disable_reason = ""
+			_end_cue_drag()
+			_commit_authoritative_shot(
+				drag_vector,
+				release_pullback,
+				release_rotation,
+				release_position,
+				"player_release",
+				effective_shot_power,
+				exact_prediction
+			)
+			return
+		_queue_prediction_release(
+			drag_vector,
+			release_pullback,
+			release_rotation,
+			release_position,
+			effective_shot_power,
+			launch_velocity
+		)
+		return
+
+	_end_cue_drag()
 	_commit_authoritative_shot(
 		drag_vector,
 		release_pullback,
@@ -2176,9 +2746,139 @@ func _release_shot(_mouse_position: Vector2) -> void:
 	)
 
 
-func commit_debug_reference_shot(direction: Vector2, power_normalized: float) -> bool:
+func _should_queue_release_for_exact_prediction() -> bool:
+	return is_roguelite_mode() or is_shot_lab_mode()
+
+
+func _queue_prediction_release(
+	drag_vector: Vector2,
+	release_pullback: float,
+	release_rotation: float,
+	release_position: Vector2,
+	effective_shot_power: float,
+	launch_velocity: Vector2
+) -> void:
+	queued_prediction_release = {
+		"drag_vector": drag_vector,
+		"release_pullback": release_pullback,
+		"release_rotation": release_rotation,
+		"release_position": release_position,
+		"shot_power": effective_shot_power,
+		"cue_origin": cue_ball.global_position,
+		"launch_velocity": launch_velocity,
+	}
+	queued_prediction_release_started_usec = Time.get_ticks_usec()
+	queued_prediction_force_attempted = false
+	queued_prediction_releases_total += 1
+	last_prediction_release_status = "queued_for_exact_prediction"
+	last_prediction_release_disable_reason = ""
+	status_text_changed.emit("CHARTING...")
+
+
+func _process_queued_prediction_release() -> void:
+	if queued_prediction_release.is_empty():
+		return
+	if game_over or not is_instance_valid(cue_ball):
+		_cancel_queued_prediction_release("cue_unavailable")
+		return
+	var elapsed_ms: float = float(
+		maxi(Time.get_ticks_usec() - queued_prediction_release_started_usec, 0)
+	) / 1000.0
+	var cue_origin: Vector2 = queued_prediction_release.get("cue_origin", Vector2.ZERO)
+	var launch_velocity: Vector2 = queued_prediction_release.get(
+		"launch_velocity",
+		Vector2.ZERO
+	)
+	var exact_prediction: Dictionary = _get_exact_commit_prediction_bundle(
+		cue_origin,
+		launch_velocity
+	)
+	if not bool(exact_prediction.get("accepted", false)) and (
+		not queued_prediction_force_attempted
+		and elapsed_ms >= COMMITTED_PREDICTION_FORCE_AFTER_MS
+	):
+		queued_prediction_force_attempted = true
+		exact_prediction = _force_exact_commit_prediction(cue_origin, launch_velocity)
+	if bool(exact_prediction.get("accepted", false)):
+		exact_prediction["status"] = "settled_cloned_after_wait"
+		queued_prediction_accepted_after_wait_total += 1
+		last_prediction_release_wait_ms = elapsed_ms
+		last_prediction_release_status = "accepted_after_wait"
+		last_prediction_release_disable_reason = ""
+		_commit_queued_prediction_release(exact_prediction)
+		return
+	if elapsed_ms < COMMITTED_PREDICTION_WAIT_LIMIT_MS:
+		return
+	queued_prediction_timeouts_total += 1
+	last_prediction_release_wait_ms = elapsed_ms
+	last_prediction_release_status = "timed_out"
+	last_prediction_release_disable_reason = str(exact_prediction.get(
+		"status",
+		"exact_prediction_timeout"
+	))
+	_commit_queued_prediction_release({})
+
+
+func _commit_queued_prediction_release(prediction_override: Dictionary) -> void:
+	var release: Dictionary = queued_prediction_release.duplicate(true)
+	queued_prediction_release.clear()
+	queued_prediction_release_started_usec = 0
+	queued_prediction_force_attempted = false
+	_end_cue_drag()
+	_commit_authoritative_shot(
+		release.get("drag_vector", Vector2.ZERO),
+		float(release.get("release_pullback", 0.0)),
+		float(release.get("release_rotation", 0.0)),
+		release.get("release_position", Vector2.ZERO),
+		"player_release",
+		float(release.get("shot_power", -1.0)),
+		prediction_override
+	)
+
+
+func _cancel_queued_prediction_release(reason: String) -> void:
+	_discard_queued_prediction_release()
+	last_prediction_release_status = "canceled"
+	last_prediction_release_disable_reason = reason
+	_end_cue_drag()
+	cue_controller.stop_recoil()
+	_clear_aim_preview_now()
+	queue_redraw()
+
+
+func _discard_queued_prediction_release() -> void:
+	queued_prediction_release.clear()
+	queued_prediction_release_started_usec = 0
+	queued_prediction_force_attempted = false
+
+
+func _get_exact_commit_prediction_bundle(
+	origin: Vector2,
+	launch_velocity: Vector2
+) -> Dictionary:
+	return aim_preview.get_exact_commit_prediction_bundle(origin, launch_velocity)
+
+
+func _force_exact_commit_prediction(
+	origin: Vector2,
+	launch_velocity: Vector2
+) -> Dictionary:
+	return aim_preview.force_exact_commit_prediction(origin, launch_velocity)
+
+
+func commit_debug_reference_shot(
+	direction: Vector2,
+	power_normalized: float,
+	committed_prediction_override: Dictionary
+) -> bool:
 	var active_cue: Ball = _get_authoritative_cue_ball()
-	if active_cue == null or game_over or shot_active or not _all_balls_stopped():
+	if (
+		active_cue == null
+		or game_over
+		or shot_active
+		or is_presentation_input_locked()
+		or not _all_balls_stopped()
+	):
 		return false
 	var normalized_direction: Vector2 = direction.normalized()
 	var profile: Dictionary = get_shot_lab_reference_power_profile(power_normalized)
@@ -2186,6 +2886,18 @@ func commit_debug_reference_shot(direction: Vector2, power_normalized: float) ->
 	if normalized_direction == Vector2.ZERO or drag_magnitude < MIN_SHOT_DISTANCE:
 		return false
 	var drag_vector: Vector2 = normalized_direction * drag_magnitude
+	var baseline_shot_power: float = float(profile.get("baseline_shot_power", SHOT_POWER))
+	var launch_velocity: Vector2 = drag_vector * baseline_shot_power
+	var prediction_blocker: String = _get_committed_prediction_override_blocker(
+		committed_prediction_override,
+		active_cue.global_position,
+		launch_velocity,
+		normalized_direction,
+		power_normalized
+	)
+	if not prediction_blocker.is_empty():
+		push_warning("Shot Lab reference commit rejected: %s" % prediction_blocker)
+		return false
 	var pullback: float = cue_controller.get_pullback_for_drag_vector(drag_vector, MAX_DRAG_DISTANCE)
 	return _commit_authoritative_shot(
 		drag_vector,
@@ -2193,7 +2905,8 @@ func commit_debug_reference_shot(direction: Vector2, power_normalized: float) ->
 		normalized_direction.angle(),
 		active_cue.global_position - drag_vector,
 		"shot_lab_reference",
-		float(profile.get("baseline_shot_power", SHOT_POWER))
+		baseline_shot_power,
+		committed_prediction_override
 	)
 
 
@@ -2203,7 +2916,8 @@ func _commit_authoritative_shot(
 	release_rotation: float,
 	release_position: Vector2,
 	commit_source: String,
-	shot_power_override: float = -1.0
+	shot_power_override: float = -1.0,
+	committed_prediction_override: Dictionary = {}
 ) -> bool:
 	if not is_instance_valid(cue_ball) or drag_vector.length() < MIN_SHOT_DISTANCE:
 		return false
@@ -2215,19 +2929,140 @@ func _commit_authoritative_shot(
 		else get_effective_shot_power()
 	)
 	var release_direction: Vector2 = drag_vector.normalized()
+	var committed_prediction: Dictionary = {}
 	if release_direction != Vector2.ZERO:
-		aim_preview.start_path_comparison(cue_ball.global_position, drag_vector * effective_shot_power)
+		aim_preview.start_path_comparison(
+			cue_ball.global_position,
+			drag_vector * effective_shot_power,
+			committed_prediction_override
+		)
+		committed_prediction = aim_preview.get_last_committed_scoring_prediction()
+	_record_committed_prediction_status(committed_prediction)
 	cue_ball.velocity = drag_vector * effective_shot_power
 	aim_preview.report_debug_actual_launch(cue_ball.global_position, cue_ball.velocity)
 	cue_controller.begin_recoil(cue_ball.global_position, release_rotation, release_pullback)
 	_print_shot_power_debug(drag_vector, release_position)
-	_start_shot_tracking()
+	_start_shot_tracking(committed_prediction)
 	status_text_changed.emit("Shot taken. Wait for the balls to settle before shooting again.")
 	_clear_aim_preview_now()
 	queue_redraw()
 	if commit_source.is_empty():
 		push_warning("Authoritative shot committed without a source label.")
 	return true
+
+
+func _record_committed_prediction_status(committed_prediction: Dictionary) -> void:
+	last_prediction_commit_status = str(committed_prediction.get(
+		"status",
+		"immediate_only_at_commit"
+	))
+	match last_prediction_commit_status:
+		"immediate_only_at_commit":
+			immediate_only_prediction_commits_total += 1
+		"stale_prediction_at_commit":
+			stale_prediction_commits_total += 1
+
+
+func get_prediction_release_snapshot() -> Dictionary:
+	var active_wait_ms: float = 0.0
+	if not queued_prediction_release.is_empty():
+		active_wait_ms = float(maxi(
+			Time.get_ticks_usec() - queued_prediction_release_started_usec,
+			0
+		)) / 1000.0
+	var live_snapshot: Dictionary = (
+		roguelite_live_scoring_system.get_state_snapshot()
+		if roguelite_live_scoring_system != null
+		else {}
+	)
+	return {
+		"release_queued_for_prediction": not queued_prediction_release.is_empty(),
+		"current_queue_duration_ms": active_wait_ms,
+		"last_queue_duration_ms": last_prediction_release_wait_ms,
+		"force_after_ms": COMMITTED_PREDICTION_FORCE_AFTER_MS,
+		"wait_limit_ms": COMMITTED_PREDICTION_WAIT_LIMIT_MS,
+		"force_attempted": queued_prediction_force_attempted,
+		"exact_prediction_ready_at_release": (
+			last_prediction_release_status == "exact_ready_at_release"
+		),
+		"accepted_after_wait": last_prediction_release_status == "accepted_after_wait",
+		"timed_out": last_prediction_release_status == "timed_out",
+		"exact_clone_accepted": last_prediction_commit_status in [
+			"settled_cloned_at_commit",
+			"settled_cloned_after_wait",
+			"shot_lab_reference_preflight_at_commit",
+		],
+		"last_release_status": last_prediction_release_status,
+		"last_commit_status": last_prediction_commit_status,
+		"last_plan_disable_reason": str(live_snapshot.get(
+			"last_disable_reason",
+			last_prediction_release_disable_reason
+		)),
+		"queued_releases_total": queued_prediction_releases_total,
+		"exact_ready_at_release_total": exact_prediction_ready_at_release_total,
+		"accepted_after_wait_total": queued_prediction_accepted_after_wait_total,
+		"timeout_count": queued_prediction_timeouts_total,
+		"immediate_only_committed_count": immediate_only_prediction_commits_total,
+		"stale_committed_count": stale_prediction_commits_total,
+		"live_anticipation_plan_available": bool(live_snapshot.get("active", false)),
+		"live_anticipation_prediction_accepted": bool(live_snapshot.get(
+			"prediction_accepted_at_commit",
+			false
+		)),
+		"live_anticipation_prediction_result_mode": str(live_snapshot.get(
+			"prediction_result_mode",
+			"unknown"
+		)),
+		"live_anticipation_rail_semantic_evidence_status": str(live_snapshot.get(
+			"rail_semantic_evidence_status",
+			"NOT_APPLICABLE"
+		)),
+		"live_anticipation_rail_semantic_evidence_missing_fields": live_snapshot.get(
+			"rail_semantic_evidence_missing_fields",
+			[]
+		),
+	}
+
+
+func _get_committed_prediction_override_blocker(
+	prediction_bundle: Dictionary,
+	commit_origin: Vector2,
+	commit_velocity: Vector2,
+	commit_direction: Vector2,
+	power_normalized: float
+) -> String:
+	if prediction_bundle.is_empty() or not bool(prediction_bundle.get("accepted", false)):
+		return "the validated cloned prediction bundle is missing"
+	var request_value: Variant = prediction_bundle.get("request_snapshot", {})
+	var result_value: Variant = prediction_bundle.get("prediction_result", {})
+	if not request_value is Dictionary or not result_value is Dictionary:
+		return "the prediction bundle is malformed"
+	var request_snapshot: Dictionary = request_value
+	var prediction_result: Dictionary = result_value
+	if not bool(prediction_result.get("valid", false)):
+		return "the cloned prediction result is invalid"
+	if str(request_snapshot.get("source", "")) != "shot_lab_reference_preflight":
+		return "the prediction bundle is not a Shot Lab reference preflight"
+	var origin_value: Variant = request_snapshot.get("cue_origin", null)
+	var velocity_value: Variant = request_snapshot.get("launch_velocity", null)
+	var direction_value: Variant = request_snapshot.get("world_direction", null)
+	if not origin_value is Vector2 or not velocity_value is Vector2 or not direction_value is Vector2:
+		return "the preflight launch snapshot is incomplete"
+	if (origin_value as Vector2).distance_to(commit_origin) > REFERENCE_PREDICTION_ORIGIN_TOLERANCE_PX:
+		return "the cue origin changed after preflight"
+	if (velocity_value as Vector2).distance_to(commit_velocity) > REFERENCE_PREDICTION_VELOCITY_TOLERANCE:
+		return "the launch velocity changed after preflight"
+	var preflight_direction: Vector2 = (direction_value as Vector2).normalized()
+	if preflight_direction == Vector2.ZERO or preflight_direction.dot(commit_direction) < REFERENCE_PREDICTION_DIRECTION_DOT_MIN:
+		return "the launch direction changed after preflight"
+	if absf(float(request_snapshot.get("power_normalized", -1.0)) - power_normalized) > REFERENCE_PREDICTION_POWER_TOLERANCE:
+		return "the normalized power changed after preflight"
+	var current_revision: int = get_aim_prediction_state_revision()
+	if int(request_snapshot.get("table_prediction_revision", -1)) != current_revision:
+		return "the table prediction revision changed after preflight"
+	if int(prediction_result.get("table_revision", -1)) != current_revision:
+		return "the cloned result belongs to a stale table revision"
+	return ""
 
 
 func _get_drag_vector(mouse_position: Vector2) -> Vector2:
@@ -2396,7 +3231,7 @@ func _set_gameplay_mouse_lock(locked: bool) -> void:
 	else:
 		if HIDE_CURSOR_DURING_CUE_DRAG:
 			Input.mouse_mode = cue_drag_restore_mouse_mode
-	gameplay_mouse_lock_changed.emit(gameplay_mouse_lock_active)
+	gameplay_mouse_lock_changed.emit(should_suppress_hover_ui())
 
 
 func _mark_aim_preview_dirty() -> void:
@@ -2561,11 +3396,17 @@ func _handle_pocketed_ball(ball: Ball) -> void:
 	ball.sink()
 	ball.queue_free()
 	var shot_sink_recorded: bool = _note_object_ball_pocketed(ball, score_context)
-	var score_snapshot: Dictionary = _get_object_ball_score_snapshot(ball, score_context, shot_sink_recorded)
-	var scored_amount: int = score_system.score_sunk_ball_snapshot(score_snapshot, score_context)
-	if scored_amount > 0:
-		wayfinder_system.note_wayfinder_current_sink_scored(ball)
-	_apply_roguelite_sink_reward_quota_bonus(score_snapshot, scored_amount)
+	var scored_amount: int = 0
+	if is_passage_mode():
+		var score_snapshot: Dictionary = _get_object_ball_score_snapshot(
+			ball,
+			score_context,
+			shot_sink_recorded
+		)
+		scored_amount = score_system.score_sunk_ball_snapshot(score_snapshot, score_context)
+	# Clear any one-shot Wayfinder Current scoring snapshot independently of the
+	# active mode's currency policy.
+	wayfinder_system.note_wayfinder_current_sink_scored(ball)
 	treasure_ball_system.handle_treasure_claimed(ball, score_context)
 	var pocket_streak_result: Dictionary = {}
 	if shot_sink_recorded:
@@ -2582,29 +3423,6 @@ func _handle_shot_lab_cue_ball_pocketed(ball: Ball) -> void:
 	_clear_authoritative_cue_reference("Shot Lab cue scratch")
 	ball.queue_free()
 	status_text_changed.emit("Shot Lab scratch recorded; cue will restore after evaluation.")
-
-
-func _apply_roguelite_sink_reward_quota_bonus(score_snapshot: Dictionary, scored_amount: int) -> void:
-	if not is_roguelite_mode() or roguelite_reward_system == null or roguelite_run_system == null:
-		return
-
-	var bonus_result: Dictionary = roguelite_reward_system.get_sink_quota_bonus(score_snapshot, scored_amount)
-	var bonus_amount: int = maxi(int(bonus_result.get("amount", 0)), 0)
-	if bonus_amount <= 0:
-		return
-
-	roguelite_run_system.add_round_score(bonus_amount)
-	var labels_value: Variant = bonus_result.get("labels", [])
-	var labels: Array = []
-	if labels_value is Array:
-		labels = labels_value
-	var label_text: String = "Reward"
-	if not labels.is_empty():
-		var label_parts: PackedStringArray = PackedStringArray()
-		for label_value in labels:
-			label_parts.append(str(label_value))
-		label_text = " / ".join(label_parts)
-	status_text_changed.emit("%s: +%s quota." % [label_text, bonus_amount])
 
 
 func _handle_special_ball_pocketed(ball: Ball, reset_origin: Vector2, ball_label: String) -> void:
@@ -2630,16 +3448,21 @@ func _handle_special_ball_pocketed(ball: Ball, reset_origin: Vector2, ball_label
 
 
 func _handle_roguelite_cue_ball_pocketed(ball: Ball) -> void:
-	var hull: int = 0
-	var run_failed: bool = false
+	var message: String = "Cue ball recovered."
 	if roguelite_run_system != null:
-		var hull_snapshot: Dictionary = roguelite_run_system.damage_hull(1)
-		hull = maxi(int(hull_snapshot.get("hull", 0)), 0)
-		run_failed = bool(hull_snapshot.get("run_failed", false))
-
-	var message: String = "Cue ball recovered. Hull: %s" % hull
-	if run_failed:
-		message = "Hull breached. Run Failed."
+		var active_ledger: Dictionary = shot_ledger_system.get_active_shot_snapshot()
+		var transaction_key: String = _make_roguelite_shot_transaction_key(active_ledger)
+		var queue_result: Dictionary = roguelite_run_system.queue_shot_hull_damage(
+			1,
+			transaction_key
+		)
+		if bool(queue_result.get("accepted", false)):
+			message = "Cue ball recovered. Hull damage awaits settlement."
+		else:
+			push_warning(
+				"Long Sink scratch Hull damage was not queued: %s"
+				% str(queue_result.get("rejection_reason", "unknown"))
+			)
 	_reset_ball(ball, spawn_system.get_cue_start(), message)
 
 
@@ -2745,10 +3568,17 @@ func _note_actual_cue_pocketed(ball: Ball) -> void:
 	aim_preview.note_actual_cue_pocketed(ball)
 
 
-func _start_shot_tracking() -> void:
+func _start_shot_tracking(committed_prediction: Dictionary = {}) -> void:
 	_deactivate_initial_cue_start_selection()
 	shot_active = true
+	if is_roguelite_mode():
+		roguelite_settled_scoreable_ball_count = -1
 	shot_ledger_system.begin_shot(_make_shot_ledger_start_context())
+	if roguelite_live_scoring_system != null:
+		roguelite_live_scoring_system.prepare_committed_shot(
+			committed_prediction,
+			_make_prediction_source_to_run_id_map()
+		)
 	if shot_lab_system != null and shot_lab_system.is_active():
 		shot_lab_system.notify_authoritative_shot_started()
 	_reset_cue_toi_for_committed_shot()
@@ -2793,6 +3623,7 @@ func _make_shot_ledger_start_context() -> Dictionary:
 			"anomaly_type": _get_shot_ledger_anomaly_type(ball),
 			"counts_as_object_ball": ball.ball_type == Ball.BallType.OBJECT,
 			"radius": ball.radius,
+			"display_color": ball.get_aim_preview_display_color(),
 			"start_position": ball.global_position,
 			"start_velocity": ball.velocity,
 		}
@@ -2818,6 +3649,16 @@ func _make_shot_ledger_start_context() -> Dictionary:
 		"ball_id_strategy": "run_local_monotonic",
 		"starting_balls": starting_balls,
 	}
+
+
+func _make_prediction_source_to_run_id_map() -> Dictionary:
+	var source_to_run_id: Dictionary = {}
+	for child in balls.get_children():
+		var ball: Ball = child as Ball
+		if ball == null or not is_instance_valid(ball) or ball.is_queued_for_deletion():
+			continue
+		source_to_run_id[str(ball.get_instance_id())] = get_run_ball_id(ball)
+	return source_to_run_id
 
 
 func _make_shot_ledger_final_state() -> Dictionary:
@@ -3079,11 +3920,11 @@ func _handle_pocket_streak_result(pocket_streak_result: Dictionary) -> void:
 		return
 
 	var multiplier: int = int(pocket_streak_result.get("multiplier", 0))
-	var awarded: int = score_system.award_pocket_streak(multiplier, pocket_streak_result)
-	if awarded <= 0:
-		return
-
-	pocket_streak_system.note_bonus_awarded(pocket_streak_result, awarded)
+	if is_passage_mode():
+		var awarded: int = score_system.award_pocket_streak(multiplier, pocket_streak_result)
+		if awarded <= 0:
+			return
+		pocket_streak_system.note_bonus_awarded(pocket_streak_result, awarded)
 	var pocket_position: Vector2 = Vector2.ZERO
 	var pocket_position_value: Variant = pocket_streak_result.get("pocket_position", Vector2.ZERO)
 	if pocket_position_value is Vector2:
@@ -3097,6 +3938,8 @@ func _try_finish_shot() -> void:
 	if not shot_active or not _all_balls_stopped():
 		return
 
+	if is_roguelite_mode():
+		roguelite_settled_scoreable_ball_count = _get_roguelite_scoreable_ball_count()
 	var should_advance_anchor_chains: bool = not cue_control_reclaimed
 	shot_active = false
 	cue_toi_first_contact_pending = false
@@ -3127,10 +3970,13 @@ func is_shot_lab_consequence_freeze_active() -> bool:
 
 
 func prepare_for_shot_lab_setup(reason: String) -> void:
+	_discard_queued_prediction_release()
 	if shot_active and not is_shot_lab_consequence_freeze_active():
 		table_event_system.finish_shot()
 	shot_ledger_system.cancel_active_shot(reason)
 	roguelite_scoring_system.clear_transient_state(reason)
+	if roguelite_live_scoring_system != null:
+		roguelite_live_scoring_system.cancel_current_shot(reason)
 	shot_active = false
 	shot_lab_reference_commit_active = false
 	cue_toi_first_contact_pending = false
@@ -3283,12 +4129,18 @@ func get_shot_rewind_state() -> Dictionary:
 		"shot_bank_bonus_awarded": shot_bank_bonus_awarded,
 		"shot_bank_eligible_ball_ids": shot_bank_eligible_ball_ids.duplicate(true),
 		"cue_toi_first_contact_pending": cue_toi_first_contact_pending,
+		"roguelite_settled_scoreable_ball_count": roguelite_settled_scoreable_ball_count,
 	}
 
 
 func prepare_for_shot_rewind() -> void:
+	_discard_queued_prediction_release()
 	game_over = false
 	shot_ledger_system.cancel_active_shot("shot_rewind")
+	roguelite_shot_resolution_deferred = false
+	roguelite_settled_scoreable_ball_count = -1
+	if roguelite_live_scoring_system != null:
+		roguelite_live_scoring_system.cancel_current_shot("shot_rewind")
 	shot_active = false
 	cue_toi_first_contact_pending = false
 	_reset_cue_toi_shot_counters()
@@ -3349,6 +4201,7 @@ func restore_shot_rewind_balls(ball_states_value: Variant) -> void:
 func restore_shot_rewind_state(state: Dictionary) -> void:
 	game_over = bool(state.get("game_over", false))
 	shot_active = false
+	roguelite_shot_resolution_deferred = false
 	shot_lab_reference_commit_active = false
 	cue_toi_first_contact_pending = bool(state.get("cue_toi_first_contact_pending", false))
 	_reset_cue_toi_shot_counters()
@@ -3365,6 +4218,9 @@ func restore_shot_rewind_state(state: Dictionary) -> void:
 	shot_multi_pocket_bonus_awarded = bool(state.get("shot_multi_pocket_bonus_awarded", false))
 	shot_bank_bonus_awarded = bool(state.get("shot_bank_bonus_awarded", false))
 	shot_bank_eligible_ball_ids = state.get("shot_bank_eligible_ball_ids", {}).duplicate(true)
+	roguelite_settled_scoreable_ball_count = int(
+		state.get("roguelite_settled_scoreable_ball_count", -1)
+	)
 	shot_elapsed_time = 0.0
 	cue_control_reclaimed = false
 	cue_reclaim_eligible = false
@@ -4066,6 +4922,7 @@ func _get_aim_performance_snapshot(aim_snapshot: Dictionary) -> Dictionary:
 		"aim_cloned_profiler": aim_snapshot.get("cloned_profiler", {}),
 		"aim_staged_prediction": aim_snapshot.get("staged_prediction", {}),
 		"aim_player_parity": aim_snapshot.get("player_aim_parity", {}),
+		"aim_release_prediction": get_prediction_release_snapshot(),
 		"debug_aim_mode": get_debug_aim_mode_snapshot(),
 		"cue_toi_correction_enabled": cue_first_contact_toi_enabled,
 		"cue_toi_first_contact_active": _should_run_cue_first_contact_toi(),
@@ -4524,6 +5381,8 @@ func _evaluate_cue_reclaim_eligibility() -> Dictionary:
 func _get_cue_control_base_blocker() -> String:
 	if game_over:
 		return "Game over"
+	if is_presentation_input_locked():
+		return "Shot resolution presentation"
 	if table_event_system != null and table_event_system.is_event_menu_open():
 		return "Table Event menu open"
 	if ball_placement_system.is_placement_active():
@@ -4620,6 +5479,7 @@ func _reset_ball(ball: Ball, origin: Vector2, message: String) -> void:
 
 func _finish_game(message: String) -> void:
 	game_over = true
+	_discard_queued_prediction_release()
 	cue_toi_first_contact_pending = false
 	_reset_cue_toi_substep_context()
 	_end_cue_drag()

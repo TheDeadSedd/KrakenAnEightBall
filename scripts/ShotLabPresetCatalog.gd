@@ -56,6 +56,20 @@ static func get_presets() -> Array[Dictionary]:
 			{"exact": {"object_ball_pocket_count": 1}, "role_facts": {"target": {"bank_count": 2}}, "tag_counts": {"double_bank": 1}}
 		),
 		_preset(
+			"triple_bank", "Triple Bank",
+			"Target follows right-bottom-left cushions into the top-middle pocket.",
+			[
+				_ball("cue", "cue", Vector2(0.176000, 0.308000)),
+				_ball("target", "object", Vector2(0.330000, 0.420000), 15),
+			],
+			_role_reference("target", 0.98, _preflight("target", ["target"], false, PREFLIGHT_BLOCK)),
+			{
+				"exact": {"object_ball_pocket_count": 1},
+				"role_facts": {"target": {"bank_count": 3}},
+				"tag_counts": {"triple_bank_plus": 1},
+			}
+		),
+		_preset(
 			"kick", "Kick",
 			"Cue reaches a cushion before its first object-ball contact.",
 			[
@@ -101,6 +115,48 @@ static func get_presets() -> Array[Dictionary]:
 			],
 			_role_reference("first_target", 0.88, _preflight("first_target", ["first_target", "second_target"], false, PREFLIGHT_BLOCK, false, true)),
 			{"exact": {"object_ball_pocket_count": 2}, "tag_counts": {"multi_pot": 1, "same_pocket_streak": 0}, "maximum": {"largest_same_pocket_count": 1}}
+		),
+		_preset(
+			"two_direct_pots", "Two Direct Pots",
+			"A split contact sends two cue-struck targets into separate top pockets.",
+			[
+				_ball("cue", "cue", Vector2(0.271, 0.850)),
+				_ball("first_target", "object", Vector2(0.250, 0.500), 18),
+				_ball("second_target", "object", Vector2(0.392, 0.245), 19),
+			],
+			_role_offset_reference(
+				"first_target",
+				Vector2(19.8, 19.8),
+				0.85,
+				_preflight(
+					"first_target",
+					["first_target", "second_target"],
+					false,
+					PREFLIGHT_BLOCK,
+					false,
+					true
+				)
+			),
+			{
+				"exact": {"object_ball_pocket_count": 2},
+				"role_facts": {
+					"first_target": {
+						"causal_depth": 1,
+						"bank_count": 0,
+						"is_direct_pot": true,
+					},
+					"second_target": {
+						"causal_depth": 1,
+						"bank_count": 0,
+						"is_direct_pot": true,
+					},
+				},
+				"tag_counts": {
+					"direct_pot": 2,
+					"multi_pot": 1,
+					"same_pocket_streak": 0,
+				},
+			}
 		),
 		_preset(
 			"same_pocket_x2", "Same-Pocket X2",
@@ -212,6 +268,10 @@ static func _score_expectations_by_preset() -> Dictionary:
 			"base_object_ball_value": 1,
 			"base_bank_rail": 1,
 		}),
+		"triple_bank": _score_expectation(10, 4.0, 40, {
+			"base_object_ball_value": 1,
+			"base_bank_rail": 1,
+		}),
 		"kick": _score_expectation(0, 1.0, 0, {"base_object_ball_value": 0}),
 		"combination": _score_expectation(10, 2.0, 20, {
 			"base_object_ball_value": 1,
@@ -227,6 +287,10 @@ static func _score_expectations_by_preset() -> Dictionary:
 			"base_additional_ball": 1,
 			"base_bank_rail": 1,
 			"base_combination": 1,
+		}),
+		"two_direct_pots": _score_expectation(20, 2.0, 40, {
+			"base_object_ball_value": 2,
+			"base_additional_ball": 1,
 		}),
 		"same_pocket_x2": _score_expectation(20, 3.0, 60, {
 			"base_object_ball_value": 2,

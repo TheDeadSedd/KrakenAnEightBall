@@ -10,6 +10,7 @@ class_name RogueliteRoundPanel
 signal continue_requested
 signal restart_requested
 signal abandon_requested
+signal balance_report_requested
 
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 
@@ -25,6 +26,7 @@ var panel_margin: MarginContainer
 var title_label: Label
 var body_label: Label
 var continue_button: Button
+var balance_report_button: Button
 var abandon_button: Button
 var primary_action: String = "continue"
 var current_panel_size: Vector2 = ROUND_PANEL_SIZE
@@ -54,6 +56,8 @@ func open_round_cleared(snapshot: Dictionary) -> void:
 	continue_button.text = "Continue"
 	continue_button.visible = true
 	continue_button.disabled = false
+	balance_report_button.visible = false
+	balance_report_button.disabled = true
 	abandon_button.text = "Abandon Run"
 	visible = true
 	_center_panel()
@@ -68,6 +72,8 @@ func open_run_completed(snapshot: Dictionary) -> void:
 	body_label.text = _make_completed_summary_text(snapshot)
 	continue_button.visible = false
 	continue_button.disabled = true
+	balance_report_button.visible = true
+	balance_report_button.disabled = false
 	abandon_button.text = "Return to Main Menu"
 	visible = true
 	_center_panel()
@@ -83,6 +89,8 @@ func open_run_failed(snapshot: Dictionary = {}) -> void:
 	continue_button.text = "Restart"
 	continue_button.visible = true
 	continue_button.disabled = false
+	balance_report_button.visible = true
+	balance_report_button.disabled = false
 	abandon_button.text = "Main Menu"
 	visible = true
 	_center_panel()
@@ -146,6 +154,12 @@ func _build_panel() -> void:
 	continue_button = _make_button("Continue")
 	continue_button.pressed.connect(_on_continue_pressed)
 	stack.add_child(continue_button)
+
+	balance_report_button = _make_button("VIEW BALANCE REPORT")
+	balance_report_button.visible = false
+	balance_report_button.disabled = true
+	balance_report_button.pressed.connect(_on_balance_report_pressed)
+	stack.add_child(balance_report_button)
 
 	abandon_button = _make_button("Abandon Run")
 	abandon_button.pressed.connect(_on_abandon_pressed)
@@ -345,3 +359,7 @@ func _on_continue_pressed() -> void:
 
 func _on_abandon_pressed() -> void:
 	abandon_requested.emit()
+
+
+func _on_balance_report_pressed() -> void:
+	balance_report_requested.emit()

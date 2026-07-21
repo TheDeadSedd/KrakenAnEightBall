@@ -287,23 +287,89 @@ Owns pure semantic transformation of schema-versioned raw shot ledgers into cons
 
 Contains no scene references or gameplay mutation. Ambiguous collision direction must remain explicit rather than receiving an invented causal parent.
 
+### `scripts/RogueliteEightBallCatalog.gd` / `scripts/RogueliteScoringTriggerEvaluator.gd`
+
+Own the pure, data-driven Eight Ball definitions and semantic build-trigger extraction. The catalog is the single source for the 22 item IDs, names, Bank/Combination/Direct Pot/Multi-Pot/Same-Pocket trigger families, add-Haul/add-Mult/xMult values, Legendary retrigger metadata, rarity, weights, and tooltip text. The evaluator converts analyzed predicted or authoritative Shot Ledgers into ordered value-only Single/Double/Triple Bank milestone, Combination, Direct Pot, one-per-shot Multi-Pot, and one-per-qualifying-pocket Same-Pocket occurrences using stable scoring-ball IDs and exact semantic event indices.
+
+These scripts have no scene references and never create or identify physical table balls. Bank milestones remain cumulative: Double Bank also emits Single Bank, while Triple Bank emits all three initial Bank milestones once. Direct Pot may overlap Multi-Pot and Same-Pocket, but never Bank or Combination.
+
+### `scripts/RogueliteBuildSystem.gd` / `scripts/RogueliteRewardSystem.gd`
+
+Own The Long Sink's run-local five-slot nonphysical Eight Ball build and Mark Your Course economy. `RogueliteBuildSystem.gd` owns acquisition order, duplicate rejection, fixed-slot replacement, round persistence, fresh-run clearing, isolated Shot Lab loadouts, trigger-to-modifier context construction, bounded nonrecursive family retriggers, replacement warnings for unsupported retrigger keystones, activation diagnostics, and predicted/authoritative parity observations. `RogueliteRewardSystem.gd` owns deterministic weighted three-offer generation, owned/contextual exclusion, family diversity, at-most-one-Legendary enforcement, full-tray replacement staging, and Keep Current Course. Mark Your Course offers Eight Balls only; obsolete utility-reward fields in older debug snapshots are ignored.
+
+Neither system mutates billiards physics, creates authoritative balls, changes base Haul x Mult rules, or applies Passage scoring. Build modifiers enter scoring only through `RogueliteScoringSystem.gd`'s generic resolver context.
+
+### `scripts/RogueliteBalanceTuning.gd`
+
+Owns debug-only, session-local staging for Long Sink balance experiments: offer-family multipliers, the round-quota multiplier, selected Eight Ball value/weight overrides, and the opt-in Shot Lab telemetry flag. A fresh run freezes one immutable active snapshot; edits made afterward are staged for the next fresh debug run and never persist into player settings or alter the authored catalog.
+
+### `scripts/RogueliteBalanceTelemetry.gd` / `scripts/RogueliteBalanceAnalyzer.gd`
+
+Own run-level Long Sink balance evidence and interpretation. `RogueliteBalanceTelemetry.gd` records bounded value-only snapshots for committed authoritative shots, rounds, trigger families, Mark Your Course offers/selections/replacements/skips, tray transitions, counterfactual item results, outcomes, Dead Reckoning retrigger support, and rewind-discarded attempts. It has no per-frame work, retains no live Nodes, resets on a fresh run, and finalizes one session-accessible report source on completion or failure.
+
+`RogueliteBalanceAnalyzer.gd` is a pure aggregator over that snapshot. It owns per-shot/round/run metrics, deterministic leave-one-item-out attribution, interaction surplus, trigger and offer diagnostics, build identity, balance-watch flags, and copy-ready report data. It never queries scenes, mutates gameplay, or changes balance values.
+
+### `scripts/RogueliteBalanceReportPanel.gd`
+
+Owns presentation of compact and Advanced Long Sink Balance Reports, sortable Eight Ball contribution rows, and explicit clipboard actions for the summary, JSON, item table, and round table. It contains no telemetry collection, balance calculations, persistence, or gameplay mutation, and does not format report content while hidden.
+
+### `scripts/RogueliteBuildTrayHUD.gd` / `scripts/RogueliteRewardPanel.gd`
+
+Own presentation for the persistent five-slot Eight Ball tray, family and Legendary labels, tooltips, exact resolver-step activation/retrigger pulses, Mark Your Course item cards, contextual replacement warnings, and full-tray Cast One Overboard selection. The tray is read-only and cue-drag-safe; the reward panel emits player intent while build/reward systems validate every acquisition, replacement, and skip.
+
 ### `scripts/RogueliteScoreResolver.gd`
 
 Owns the pure, versioned Haul x Mult scoring transformation for The Long Sink. It accepts a frozen analyzed Shot Ledger plus an optional ordered value-only modifier context, validates semantic pocket facts, and returns a defensive value-only breakdown containing Haul contributions, additive Mult contributions, xMult steps, replayable resolution steps, warnings, diagnostics, and the final floored Shot Score.
 
 Base rules are +10 Haul per semantic scoring-object pocket, +1 Mult for every scoring object after the first, up to +3 Mult from each pocketed ball's post-activation/pre-pocket semantic rail count, and +1 Mult per combination pot. Scratch is retained as a non-scoring consequence. The resolver has no scene references, mutates no gameplay state, and is shared by authoritative and predicted Shot Lab ledgers.
 
+### `scripts/RogueliteRunSystem.gd`
+
+Owns The Long Sink's round target, round score, shots, Hull, terminal state, and atomic completed-shot settlement. Cue scratches queue shot-local Hull damage; `resolve_completed_shot()` then applies the immutable Haul x Mult score, queued Hull damage, exactly one shot consumption, empty-table state, and one prioritized outcome in a single state transaction. Outcome priority is Hull failure, quota clear, shots failure, empty-table failure, then continuation.
+
+Stable ledger attempt keys suppress duplicate settlement, and queued consequences plus transaction diagnostics are rewind-safe. Ordinary Long Sink play must not assemble the same outcome through separate score, Hull, shot, or empty-table calls. ScoreSystem Doubloon awards never enter this transaction.
+
 ### `scripts/RogueliteScoringSystem.gd`
 
-Owns lifecycle integration for Haul x Mult shadow scoring: one resolution per applicable completed roguelite or Shot Lab ledger, duplicate suppression, current/last defensive result snapshots, diagnostics, predicted-ledger resolution access, Shot Lab-only test modifiers, session scoring self-tests, and rewind-safe observation restoration.
+Owns lifecycle integration for Haul x Mult scoring: one resolution per applicable completed roguelite or Shot Lab ledger, bounded duplicate suppression, current/last defensive result and frozen-source-ledger snapshots, diagnostics, predicted-ledger resolution access, Shot Lab-only test modifiers, session scoring self-tests, and rewind-safe observation restoration.
 
-The system does not award Doubloons, change current roguelite quota progress, alter round targets, or calculate score during physics. `authoritative_score_applied_to_round` remains false until a later explicit migration makes the new model authoritative.
+Haul x Mult is the sole authoritative round-progress source in The Long Sink. The system applies each completed roguelite Shot Score exactly once through `RogueliteRunSystem.gd`. Doubloons remain ScoreSystem-owned currency and never become Long Sink quota progress. The scoring system does not award Doubloons, alter round targets, or calculate score during physics. Shot Lab resolutions remain observational and never change a run quota.
+
+### `scripts/RogueliteScorePresentationMapper.gd`
+
+Owns the pure value-only mapping from immutable resolution steps plus their matching frozen Shot Ledger to presentation anchors. Pocket contributions map to frozen pocket geometry, bank contributions map to qualifying semantic rail-contact events, combinations map to their causal activation contact, scratches map to the cue pocket, and modifier-only steps map to the persistent equation HUD.
+
+Does not query live Ball nodes, recalculate score, mutate scenes, or invent physical source locations. Missing or invalid geometry produces an explicit warned fallback and diagnostics.
+
+### `scripts/RogueliteScoringNarrativeBuilder.gd`
+
+Owns the pure value-only transformation from an analyzed predicted or authoritative Shot Ledger plus its immutable score result into deterministic per-ball scoring narratives. It keeps scoring balls in pocket order, preserves each ball's chronological physical facts, safely partitions grouped capped rail contributions only when exact semantic rail indices exist, keeps modifier/xMult events in canonical order, precomputes every displayed before/after value, and validates the final presentation state against the immutable result.
+
+Does not reference live Nodes, detect collisions, calculate new score, mutate a run, query `Table.gd`, or infer scoring facts from screen position. Failed validation requires the tally presenter to retain the canonical `resolution_steps` sequence.
+
+### `scripts/RogueliteLiveScoringAnticipationSystem.gd` / `scripts/RoguelitePredictedLedgerAdapter.gd` / `scripts/RogueliteScoringCueConductor.gd`
+
+Own the Long Sink and Shot Lab live scoring-anticipation bridge. The adapter converts only the exact accepted cloned prediction frozen at shot commitment into a value-only predicted ledger. The anticipation system builds scoring-ball lanes, matches later accepted authoritative semantic ledger events by stable IDs and event identity, emits nonnumeric table-local cues at actual event positions, and silences only a diverged lane. The conductor owns bounded sampled-audio pools, independent logical ball lanes, simultaneous-request arbitration, and bounded shot-wide Global Excitement.
+
+These scripts never make prediction authoritative, rerun cloned simulation for presentation, calculate or apply score, announce unmatched events, generate realtime waveforms, or retain gameplay Nodes in frozen plans. Unsupported, capped, stale, or missing prediction disables live anticipation for that shot while leaving authoritative replay intact.
+
+### `scripts/RogueliteWorldScorePresenter.gd` / `scripts/RogueliteWorldScoreCallout.gd` / `scripts/RogueliteLiveScoringCallout.gd` / `scripts/RogueliteScoringGhostBall.gd` / `scripts/RogueliteScoringGhostTrail.gd` / `scripts/RogueliteProgressHUD.gd`
+
+Own table-local Haul x Mult presentation and the persistent Long Sink/Shot Lab score HUD. The presenter maps once per completed result, displays live nonnumeric milestone words, replays validated authoritative ball narratives with bounded ghost echoes and frozen-position trails, bounds active callouts, updates supplied equation values, animates authoritative round-bar observations, exposes anchor diagnostics, and coordinates the optional debug final result. Callouts, ghosts, and trails are draw/tween-only. The progress HUD owns upper-center round/quota and equation display, neutral shot-in-motion state, zero-score feedback, and the single viewport dismissal layer used only when the optional final card is enabled.
+
+These scripts never calculate score, apply quota, inspect raw save data, retain live gameplay nodes in mapped results, or change physics/input semantics beyond the presenter's keyed table-level presentation lock.
+
+### `scripts/RogueliteScoreTallyPresenter.gd` / `scripts/RogueliteScoreTallyHUD.gd`
+
+Own the presentation-only replay timeline and sampled tally audio for completed Haul x Mult score results. The presenter prefers a validated per-ball narrative presentation sequence, falls back to immutable canonical `resolution_steps` on any validation failure, coordinates the world presenter, controls accelerating pacing/fast-forward/replay/audio, requests the pending authoritative round-score commit exactly once just before round-bar fill, holds one keyed cue-input presentation lock, emits lifecycle snapshots, and releases queued Long Sink result panels only through `Main.gd` coordination. The old large receipt-style HUD and final card are lazy, off by default in ordinary play, and retained for detailed replay/inspection alongside pause-safe diagnostics.
+
+Neither script detects billiards events, recalculates Haul/Mult/Score, emits score-resolution signals, applies quota progress, changes Hull, or mutates a stored result. Automatic playback is limited to roguelite and Shot Lab results; Passage remains outside this presentation path. Shot Lab suites consume results instantly so validation throughput is unaffected.
 
 ### `scripts/ShotLabSystem.gd` / `scripts/ShotLabPresetCatalog.gd` / `scripts/ShotLabHUD.gd` / `scripts/ShotLabPanel.gd`
 
 Own the debug-only controlled-shot workflow. The catalog holds declarative normalized arrangements, reference-shot inputs, and focused expected assertions. `ShotLabSystem.gd` validates/loads controlled ordinary balls, maps semantic roles to stable run-ball IDs, commits optional reference shots through `Table.gd`'s canonical authoritative shot path, compares frozen ledgers, runs/cancels the sequential reference suite, and exposes debug snapshots.
 
-Dedicated laboratory sessions use `mode_id = "shot_lab"`: they start from a fresh shared table scene without initializing Passage or roguelite run state, auto-load a controlled preset without auto-firing, and return directly to the Main Menu rather than restoring or saving an abandoned run. `ShotLabHUD.gd` owns the compact in-world banner, right-side operating dock, collapse state, PASS/FAIL summary, suite progress, inspector launch actions, and Exit Lab presentation. `ShotLabPanel.gd` is an optional expected/observed/result inspector; `ShotLedgerRawEventsPanel.gd` remains the filtered raw-event inspector. Neither opens automatically on laboratory entry.
+Dedicated laboratory sessions use `mode_id = "shot_lab"`: they start from a fresh shared table scene without initializing Passage or roguelite run state, auto-load a controlled preset without auto-firing, and return directly to the Main Menu rather than restoring or saving an abandoned run. `ShotLabHUD.gd` owns the compact in-world banner, right-side operating dock, collapse state, PASS/FAIL summary, suite progress, tally replay/instant controls, inspector launch actions, and Exit Lab presentation. `ShotLabPanel.gd` is an optional expected/observed/result inspector and highlights the current retained tally step when its scoring tab is open; `ShotLedgerRawEventsPanel.gd` remains the filtered raw-event inspector. Neither opens automatically on laboratory entry.
 
 With consequence isolation enabled, `Table.gd` keeps real billiards physics, ledger collection, aim prediction, audio, and pocket-capture presentation active while gating run-facing economy, progression, penalties, shot counters, and transitions at the shot/pocket coordination boundary. Shot Lab does not implement physics, synthesize events, mutate ledgers to satisfy assertions, or own scoring semantics. Interactive drag-to-arrange authoring is not implemented; the debug arrangement exporter copies normalized preset text for later catalog authoring.
 

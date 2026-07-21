@@ -53,6 +53,7 @@ const PROFILE_EVENT_PACKAGING := "event_result_packaging"
 const PROFILE_TOTAL_SIMULATION := "total_simulation"
 
 const RESULT_MODE_PLAYER_MINIMAL := "player_minimal"
+const RESULT_MODE_PLAYER_SCORING := "player_scoring"
 const RESULT_MODE_PLAYER_EXTENDED := "player_extended"
 const RESULT_MODE_FULL_DEBUG := "full_debug"
 const RESULT_MODE_CHOICES: Array[Dictionary] = [
@@ -60,6 +61,11 @@ const RESULT_MODE_CHOICES: Array[Dictionary] = [
 		"label": "Player Minimal",
 		"value": RESULT_MODE_PLAYER_MINIMAL,
 		"description": "Retains exact player-facing paths and compact event identity while omitting diagnostic evidence.",
+	},
+	{
+		"label": "Player Scoring",
+		"value": RESULT_MODE_PLAYER_SCORING,
+		"description": "Retains compact player paths plus the semantic contact evidence needed by live scoring anticipation.",
 	},
 	{
 		"label": "Player Extended",
@@ -276,7 +282,7 @@ static func _get_configuration_help() -> Dictionary:
 		},
 		"result_detail_mode": {
 			"description": "Controls retained prediction evidence and presentation data without changing deterministic collision math.",
-			"keywords": ["player minimal", "player extended", "full debug", "result evidence"],
+			"keywords": ["player minimal", "player scoring", "player extended", "full debug", "result evidence"],
 		},
 		"max_simulated_seconds": {
 			"description": "Limits how far into the future the cloned aim predictor may simulate.",
@@ -475,7 +481,7 @@ static func normalize_configuration(configuration: Dictionary, default_substeps:
 
 static func _apply_result_mode_constraints(configuration: Dictionary) -> void:
 	var result_mode: String = str(configuration.get("result_detail_mode", RESULT_MODE_FULL_DEBUG))
-	if result_mode == RESULT_MODE_PLAYER_MINIMAL:
+	if result_mode in [RESULT_MODE_PLAYER_MINIMAL, RESULT_MODE_PLAYER_SCORING]:
 		configuration["draw_ghost_balls"] = false
 		configuration["draw_event_numbers"] = false
 		configuration["draw_ball_labels"] = false
@@ -652,9 +658,13 @@ static func get_player_long_sight_configuration(chain_depth: int, default_subste
 	return get_player_aim_configuration(chain_depth, default_substeps)
 
 
-static func get_player_aim_configuration(chain_depth: int, default_substeps: int = 4) -> Dictionary:
+static func get_player_aim_configuration(
+	chain_depth: int,
+	default_substeps: int = 4,
+	result_mode: String = RESULT_MODE_PLAYER_MINIMAL
+) -> Dictionary:
 	var configuration: Dictionary = get_default_configuration(default_substeps)
-	configuration["result_detail_mode"] = RESULT_MODE_PLAYER_MINIMAL
+	configuration["result_detail_mode"] = result_mode
 	configuration["max_simulated_seconds"] = 8.0
 	configuration["max_physics_frames"] = 480
 	if chain_depth <= 0:
@@ -1955,6 +1965,10 @@ func _resolve_rails() -> void:
 				_result["boundary_temporary_objects_created"] = int(
 					_result.get("boundary_temporary_objects_created", 0)
 				) + 1
+			var rail_ball_center: Vector2 = state.rail_position
+			var rail_surface_contact: Vector2 = (
+				rail_ball_center - state.rail_normal * ball.radius
+			)
 			var event_index: int = _append_event({
 				"event_type": EVENT_RAIL_CONTACT,
 				"source_ball_id": ball.source_id,
@@ -1967,6 +1981,9 @@ func _resolve_rails() -> void:
 				"causal_root_ball_id": ball.causal_root_ball_id,
 				"source_center": ball.position,
 				"target_center": state.rail_position,
+				"ball_center_at_contact": rail_ball_center,
+				"surface_contact_point": rail_surface_contact,
+				"ball_radius": ball.radius,
 				"contact_point": state.rail_position,
 				"collision_normal": state.rail_normal,
 				"incoming_source_velocity": incoming_velocity,
@@ -2170,6 +2187,9 @@ func _compact_event_for_result(event: Dictionary) -> Dictionary:
 		"generation_depth",
 		"causal_root_ball_id",
 		"contact_point",
+		"ball_center_at_contact",
+		"surface_contact_point",
+		"ball_radius",
 		"source_radius",
 		"target_radius",
 		"source_center",
@@ -2180,6 +2200,17 @@ func _compact_event_for_result(event: Dictionary) -> Dictionary:
 		"unsupported_reason",
 	]
 	_copy_event_fields(event, compact, minimal_fields)
+	if result_mode in [RESULT_MODE_PLAYER_SCORING, RESULT_MODE_PLAYER_EXTENDED]:
+		var scoring_fields: Array[String] = [
+			"source_parent_contact_event",
+			"collision_normal",
+			"incoming_source_velocity",
+			"incoming_target_velocity",
+			"impact_speed",
+			"resolution_source",
+			"rail_name",
+		]
+		_copy_event_fields(event, compact, scoring_fields)
 	if result_mode == RESULT_MODE_PLAYER_EXTENDED:
 		var extended_fields: Array[String] = [
 			"source_ball_label",
@@ -2188,16 +2219,9 @@ func _compact_event_for_result(event: Dictionary) -> Dictionary:
 			"target_radius",
 			"source_center",
 			"target_center",
-			"source_parent_contact_event",
-			"collision_normal",
-			"incoming_source_velocity",
-			"incoming_target_velocity",
 			"outgoing_source_velocity",
 			"outgoing_target_velocity",
 			"effective_collision_radius",
-			"impact_speed",
-			"resolution_source",
-			"rail_name",
 		]
 		_copy_event_fields(event, compact, extended_fields)
 	return compact
@@ -2732,7 +2756,7 @@ func _make_ball_result(ball: PredictionBall) -> Dictionary:
 		"parent_source_ball_id": ball.parent_source_ball_id,
 	}
 	var result_mode: String = _get_result_detail_mode()
-	if result_mode != RESULT_MODE_PLAYER_MINIMAL:
+	if result_mode in [RESULT_MODE_PLAYER_EXTENDED, RESULT_MODE_FULL_DEBUG]:
 		result["source_ball_label"] = ball.label
 		result["anomaly_kind"] = ball.anomaly_kind
 		result["starting_position"] = ball.starting_position
@@ -2746,6 +2770,8 @@ func _estimate_result_memory_bytes(trace_points: int, event_count: int, ball_cou
 	var event_bytes: int = 360
 	if _get_result_detail_mode() == RESULT_MODE_PLAYER_MINIMAL:
 		event_bytes = 112
+	elif _get_result_detail_mode() == RESULT_MODE_PLAYER_SCORING:
+		event_bytes = 176
 	elif _get_result_detail_mode() == RESULT_MODE_PLAYER_EXTENDED:
 		event_bytes = 224
 	return trace_points * 16 + event_count * event_bytes + ball_count * 192

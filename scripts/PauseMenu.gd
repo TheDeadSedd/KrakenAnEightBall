@@ -46,6 +46,8 @@ signal debug_stop_aim_benchmark_requested
 signal debug_copy_aim_benchmark_report_requested
 signal debug_reset_table_button_toggled(enabled: bool)
 signal debug_reset_last_shot_button_toggled(enabled: bool)
+signal debug_balance_report_requested
+signal debug_balance_analyzer_self_test_requested
 signal quartermaster_cancel_placement_requested
 signal shot_lab_session_requested(run_suite: bool)
 
@@ -165,6 +167,7 @@ const DEBUG_CONTRABAND_SELECTOR_ITEMS := [
 const OPTIONS_MENU_SCRIPT := preload("res://scripts/OptionsMenu.gd")
 const AIM_TRAJECTORY_PREDICTOR_SCRIPT := preload("res://scripts/AimTrajectoryPredictor.gd")
 const AIM_STAGING_CONFIGURATION_SCRIPT := preload("res://scripts/AimStagingConfiguration.gd")
+const EIGHT_BALL_CATALOG_SCRIPT := preload("res://scripts/RogueliteEightBallCatalog.gd")
 const DEV_OPTION_REGISTRY_SCRIPT := preload("res://scripts/DevOptionRegistry.gd")
 const DEV_OPTIONS_PANEL_SCRIPT := preload("res://scripts/DevOptionsPanel.gd")
 const CONFIRM_PANEL_SIZE := Vector2(430.0, 220.0)
@@ -253,8 +256,12 @@ var dev_options_panel: DevOptionsPanel
 var dev_option_registry: DevOptionRegistry
 var debug_overlay_bridge: DebugOverlay
 var ball_audio_system_bridge: BallAudioSystem
+var score_tally_presenter_bridge: RogueliteScoreTallyPresenter
+var roguelite_balance_tuning_bridge
 var _external_dev_options_registered := false
 var _ball_audio_dev_options_registered := false
+var _score_tally_dev_options_registered := false
+var _balance_dev_options_registered := false
 var options_button: Button
 var options_panel: OptionsMenu
 var end_run_button: Button
@@ -484,6 +491,50 @@ func configure_dev_options_ball_audio(system: BallAudioSystem) -> void:
 		dev_option_registry.refresh_all()
 
 
+func configure_dev_options_score_tally(presenter: RogueliteScoreTallyPresenter) -> void:
+	if (
+		score_tally_presenter_bridge != null
+		and score_tally_presenter_bridge.state_changed.is_connected(_on_score_tally_dev_state_changed)
+	):
+		score_tally_presenter_bridge.state_changed.disconnect(_on_score_tally_dev_state_changed)
+	score_tally_presenter_bridge = presenter
+	if score_tally_presenter_bridge == null:
+		return
+	if not score_tally_presenter_bridge.state_changed.is_connected(_on_score_tally_dev_state_changed):
+		score_tally_presenter_bridge.state_changed.connect(_on_score_tally_dev_state_changed)
+	_register_score_tally_dev_options()
+	if dev_options_panel != null:
+		dev_options_panel.rebuild_options()
+	if dev_option_registry != null:
+		dev_option_registry.refresh_all()
+
+
+func configure_dev_options_roguelite_balance(tuning) -> void:
+	if (
+		roguelite_balance_tuning_bridge != null
+		and roguelite_balance_tuning_bridge.changed.is_connected(
+			_on_roguelite_balance_tuning_changed
+		)
+	):
+		roguelite_balance_tuning_bridge.changed.disconnect(
+			_on_roguelite_balance_tuning_changed
+		)
+	roguelite_balance_tuning_bridge = tuning
+	if roguelite_balance_tuning_bridge == null:
+		return
+	if not roguelite_balance_tuning_bridge.changed.is_connected(
+		_on_roguelite_balance_tuning_changed
+	):
+		roguelite_balance_tuning_bridge.changed.connect(
+			_on_roguelite_balance_tuning_changed
+		)
+	_register_balance_dev_options()
+	if dev_options_panel != null:
+		dev_options_panel.rebuild_options()
+	if dev_option_registry != null:
+		dev_option_registry.refresh_all()
+
+
 func set_debug_panel_states(panel_states: Dictionary) -> void:
 	core_performance_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_CORE_PERFORMANCE, false)))
 	aim_preview_check_box.set_pressed_no_signal(bool(panel_states.get(PANEL_AIM_PREVIEW, false)))
@@ -524,6 +575,16 @@ func get_debug_session_snapshot() -> Dictionary:
 		"aim_benchmark_label": aim_benchmark_label,
 		"force_back_room": force_back_room_available_check_box.button_pressed,
 		"selected_oath_id": _get_selected_debug_oath_id(),
+		"score_tally_configuration": (
+			score_tally_presenter_bridge.get_configuration_snapshot()
+			if score_tally_presenter_bridge != null
+			else {}
+		),
+		"roguelite_balance_tuning_configuration": (
+			roguelite_balance_tuning_bridge.get_configuration_snapshot()
+			if roguelite_balance_tuning_bridge != null
+			else {}
+		),
 		"dev_options_ui": dev_options_panel.get_session_snapshot() if dev_options_panel != null else {},
 	}
 
@@ -553,6 +614,17 @@ func apply_debug_session_snapshot(snapshot: Dictionary) -> void:
 	aim_benchmark_label = str(snapshot.get("aim_benchmark_label", ""))
 	_set_debug_option(force_back_room_available_check_box, bool(snapshot.get("force_back_room", false)), debug_back_room_force_available_toggled)
 	_select_debug_oath_id(str(snapshot.get("selected_oath_id", OathSystem.OATH_OF_URGENCY)))
+	var score_tally_value: Variant = snapshot.get("score_tally_configuration", {})
+	if score_tally_presenter_bridge != null and score_tally_value is Dictionary:
+		score_tally_presenter_bridge.apply_configuration_snapshot(score_tally_value as Dictionary)
+	var balance_tuning_value: Variant = snapshot.get(
+		"roguelite_balance_tuning_configuration",
+		{}
+	)
+	if roguelite_balance_tuning_bridge != null and balance_tuning_value is Dictionary:
+		roguelite_balance_tuning_bridge.apply_configuration_snapshot(
+			balance_tuning_value as Dictionary
+		)
 	var dev_options_ui_value: Variant = snapshot.get("dev_options_ui", {})
 	if dev_options_panel != null and dev_options_ui_value is Dictionary:
 		dev_options_panel.apply_session_snapshot(dev_options_ui_value as Dictionary)
@@ -1574,6 +1646,18 @@ func _register_external_dev_options() -> void:
 		["misuse reasons", "canceled shots", "stable ids"]
 	)
 
+	var roguelite_build_locations: Array = [
+		_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "The Long Sink Build"),
+		_dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Scoring Tests"),
+	]
+	_register_overlay_action(
+		"roguelite.run_build_self_test",
+		"Run Eight Ball Build Self-Test",
+		roguelite_build_locations,
+		"Runs the pure catalog, trigger, tray, ordering, arithmetic, and parity regression suite without changing the active table.",
+		["engine build", "cumulative banks", "reward tray", "score parity"]
+	)
+
 	var shot_lab_locations: Array = [
 		_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Shot Lab"),
 		_dev_location(DevOptionsPanel.TAB_PANELS_DIAGNOSTICS, "Shot Lab"),
@@ -1844,6 +1928,820 @@ func _register_ball_audio_dev_options() -> void:
 		ball_audio_system_bridge.regenerate_procedural_bank,
 		["rebuild sounds", "cached wav"]
 	)
+
+
+func _register_score_tally_dev_options() -> void:
+	if (
+		_score_tally_dev_options_registered
+		or dev_option_registry == null
+		or score_tally_presenter_bridge == null
+	):
+		return
+	_score_tally_dev_options_registered = true
+	var locations: Array = [
+		_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Long Sink Score Presentation")
+	]
+	_register_score_tally_bool(
+		"score_tally.shot_lab_apply_test_doubloon_payout",
+		"Apply Test Doubloon Payout",
+		"Lets manual Shot Lab shots apply their Base-Haul-derived test payout to the real wallet. Automated suites always force this off.",
+		score_tally_presenter_bridge.is_shot_lab_apply_test_doubloon_payout_enabled,
+		_set_shot_lab_apply_test_doubloon_payout,
+		"Manual Shot Lab settlements apply their expected payout once.",
+		"Shot Lab displays expected Doubloons without changing the wallet.",
+		"Shot Lab"
+	)
+	_register_score_tally_bool(
+		"score_tally.live_anticipation", "Live Scoring Anticipation",
+		"Freezes only an exact accepted committed prediction and matches later semantic ledger events without exposing score values during motion.",
+		score_tally_presenter_bridge.is_live_scoring_anticipation_enabled,
+		_set_live_scoring_anticipation,
+		"Predicted scoring lanes may announce matched authoritative milestones.",
+		"Shots still receive the authoritative post-settlement replay.",
+		"Long Sink Live Scoring"
+	)
+	_register_score_tally_bool(
+		"score_tally.live_words", "Live Scoring Words",
+		"Shows table-local, nonnumeric milestone words only after matching authoritative semantic events.",
+		score_tally_presenter_bridge.is_live_scoring_words_enabled,
+		_set_live_scoring_words,
+		"Matched milestones create transparent table-local words.",
+		"Live anticipation remains silent visually.",
+		"Long Sink Live Scoring"
+	)
+	_register_score_tally_bool(
+		"score_tally.live_audio", "Live Scoring Audio",
+		"Uses the bounded sampled scoring-cue conductor for matched live milestones and replay accents.",
+		score_tally_presenter_bridge.is_live_scoring_audio_enabled,
+		_set_live_scoring_audio,
+		"Scoring cues use bounded shared voice pools.",
+		"Live semantic cues are muted; tally count audio is separate.",
+		"Long Sink Live Scoring"
+	)
+	_register_score_tally_bool(
+		"score_tally.global_excitement", "Global Excitement",
+		"Lets matched milestones add a bounded shot-wide offset while preserving each ball lane's local tier progression.",
+		score_tally_presenter_bridge.is_global_excitement_enabled,
+		_set_global_excitement,
+		"Later scoring cues gain restrained pitch, body, and glow.",
+		"Each lane keeps only its local milestone profile.",
+		"Long Sink Live Scoring"
+	)
+	dev_option_registry.register_option({
+		"id": "score_tally.global_excitement_strength",
+		"label": "Global Excitement Strength",
+		"kind": "number",
+		"locations": [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Long Sink Live Scoring")],
+		"description": "Scales the conductor's bounded shot-wide excitement offsets without changing event matching or scoring.",
+		"minimum": 0.0,
+		"maximum": 2.0,
+		"step": 0.1,
+		"default": 1.0,
+		"suffix": "x",
+		"low_effect": "Little or no shot-wide lift.",
+		"high_effect": "Stronger bounded lift; lane-local tiers remain independent.",
+		"getter": score_tally_presenter_bridge.get_global_excitement_strength,
+		"setter": _set_global_excitement_strength,
+	})
+	_register_score_tally_bool(
+		"score_tally.ghost_replay", "Ghost-Ball Replay",
+		"Shows bounded presentation-only echoes at frozen authoritative event positions after settlement.",
+		score_tally_presenter_bridge.is_ghost_ball_replay_enabled,
+		_set_ghost_ball_replay,
+		"Authoritative ball stories leave short-lived ghost echoes.",
+		"The equation and callouts replay without ghost balls.",
+		"Long Sink Live Scoring"
+	)
+	_register_score_tally_bool(
+		"score_tally.ghost_trails", "Ghost Trails",
+		"Connects sequential frozen event positions within one scoring-ball story using bounded draw-only trails.",
+		score_tally_presenter_bridge.is_ghost_trails_enabled,
+		_set_ghost_trails,
+		"Each scoring ball's replay echoes are connected.",
+		"Ghost echoes remain unconnected.",
+		"Long Sink Live Scoring"
+	)
+	_register_score_tally_bool(
+		"score_tally.ball_subtotals", "Per-Ball Subtotals",
+		"Shows a brief nonmodal subtotal near the final echo after each scoring-ball narrative.",
+		score_tally_presenter_bridge.is_per_ball_subtotals_enabled,
+		_set_per_ball_subtotals,
+		"Each completed ball story receives a compact subtotal.",
+		"Only event contributions and the persistent equation are shown.",
+		"Long Sink Live Scoring"
+	)
+	_register_score_tally_bool(
+		"score_tally.show_predicted_narratives", "Show Predicted Narratives",
+		"Exposes the frozen predicted narrative in scoring diagnostics; it never becomes authoritative score truth.",
+		score_tally_presenter_bridge.is_show_predicted_narratives_enabled,
+		_set_show_predicted_narratives,
+		"Predicted narrative diagnostics are marked for inspection.",
+		"Predicted narrative details stay compact.",
+		"Long Sink Live Scoring"
+	)
+	_register_score_tally_bool(
+		"score_tally.show_event_matching", "Show Event Matching",
+		"Exposes matched, unmatched, unexpected, and diverged lane evidence in scoring diagnostics.",
+		score_tally_presenter_bridge.is_show_event_matching_enabled,
+		_set_show_event_matching,
+		"Live matching evidence is marked for inspection.",
+		"Only aggregate lifecycle diagnostics remain.",
+		"Long Sink Live Scoring"
+	)
+	_register_direct_action_option(
+		"score_tally.replay_ball_narrative",
+		"Replay Last Ball Narrative",
+		[_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Long Sink Live Scoring")],
+		"Replays the retained validated per-ball presentation without physics, scoring, or quota application.",
+		_replay_last_ball_narrative,
+		["ghost replay", "authoritative narrative", "ball story"]
+	)
+	_register_direct_action_option(
+		"score_tally.conductor_diagnostics",
+		"Open Scoring Conductor Diagnostics",
+		[_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Long Sink Live Scoring")],
+		"Opens the existing score inspector with lane, excitement, voice, coalescing, divergence, and narrative validation evidence.",
+		_open_score_tally_diagnostics,
+		["audio lanes", "global excitement", "cue coalescing"]
+	)
+	_register_score_tally_bool(
+		"score_tally.world_callouts", "World Score Callouts",
+		"Shows each immutable score source near its frozen pocket, rail, or causal contact anchor.",
+		score_tally_presenter_bridge.is_world_score_callouts_enabled,
+		_set_world_score_callouts,
+		"Table-local score sources are visible.", "Only the persistent equation updates."
+	)
+	_register_score_tally_bool(
+		"score_tally.persistent_equation", "Persistent Equation",
+		"Shows the evolving Haul x Mult equation throughout Long Sink and Shot Lab play.",
+		score_tally_presenter_bridge.is_persistent_equation_enabled,
+		_set_persistent_equation,
+		"The compact current/last-shot equation is visible.", "The equation line is hidden."
+	)
+	_register_score_tally_bool(
+		"score_tally.persistent_round_bar", "Persistent Round Bar",
+		"Shows authoritative Long Sink round progress and overflow without changing the quota curve.",
+		score_tally_presenter_bridge.is_persistent_round_bar_enabled,
+		_set_persistent_round_bar,
+		"Round progress is visible and animates after resolution.", "The round bar is hidden."
+	)
+	_register_score_tally_bool(
+		"score_tally.local_source_flashes", "Local Source Flashes",
+		"Adds restrained pocket, rail, and contact glows behind table-local score callouts.",
+		score_tally_presenter_bridge.is_local_source_flashes_enabled,
+		_set_local_source_flashes,
+		"Localized presentation flashes are enabled.", "Callout text remains without source flashes."
+	)
+	_register_score_tally_bool(
+		"score_tally.detailed_modal_auto_open", "Detailed Modal Auto-Open",
+		"Debug-only: restores the old large receipt-style tally during automatic playback.",
+		score_tally_presenter_bridge.is_detailed_modal_auto_open_enabled,
+		_set_detailed_modal_auto_open,
+		"The detailed tally opens automatically.", "Normal play uses world callouts and the persistent HUD."
+	)
+	_register_score_tally_bool(
+		"score_tally.final_requires_dismissal", "Automatic Final Card",
+		"Debug-only: restores the blocking final result card after the authoritative replay. Normal play leaves this off.",
+		score_tally_presenter_bridge.is_final_result_dismissal_required,
+		_set_final_result_requires_dismissal,
+		"A nonzero final card waits for dismissal.", "The persistent HUD lands the score and returns automatically.",
+		"Long Sink Live Scoring"
+	)
+	_register_score_tally_bool(
+		"score_tally.zero_quick_feedback", "Zero-Score Quick Feedback",
+		"Uses a concise NO HAUL indicator and sampled descending two-note sting instead of a full tally.",
+		score_tally_presenter_bridge.is_zero_score_quick_feedback_enabled,
+		_set_zero_score_quick_feedback,
+		"Zero results return automatically after brief feedback.", "Zero results use the ordinary detailed sequence."
+	)
+	_register_score_tally_bool(
+		"score_tally.auto_dismiss_final", "Auto-Dismiss Final Result - debug",
+		"Debug/automation escape hatch that skips the nonzero final-card wait.",
+		score_tally_presenter_bridge.is_auto_dismiss_final_result_enabled,
+		_set_auto_dismiss_final_result,
+		"Final results release automatically.", "Manual Long Sink results use the authored dismissal rule."
+	)
+	_register_score_tally_bool(
+		"score_tally.show_presentation_anchors", "Show Presentation Anchors",
+		"Draws score-step indices, event IDs, true anchors, clamped anchors, reasons, and fallback warnings.",
+		score_tally_presenter_bridge.is_show_presentation_anchors_enabled,
+		_set_show_presentation_anchors,
+		"Value-only presentation mapping anchors are visible.", "Anchor diagnostics are hidden."
+	)
+	dev_option_registry.register_option({
+		"id": "score_tally.enabled",
+		"label": "Enabled",
+		"kind": "bool",
+		"locations": locations,
+		"description": "Plays the immutable Haul x Mult resolution after Long Sink and Shot Lab shots. Passage is never shown automatically.",
+		"on_effect": "Completed score results play through the tally presenter.",
+		"off_effect": "Results remain available for diagnostics, but automatic playback is skipped.",
+		"keywords": ["shot score", "haul", "mult", "presentation"],
+		"getter": score_tally_presenter_bridge.is_enabled,
+		"setter": _set_score_tally_enabled,
+	})
+	dev_option_registry.register_option({
+		"id": "score_tally.playback_speed",
+		"label": "Playback Speed",
+		"kind": "number",
+		"locations": locations,
+		"description": "Scales authored tally timing without changing the stored resolution or final score.",
+		"minimum": 0.25,
+		"maximum": 3.0,
+		"step": 0.125,
+		"default": 0.375,
+		"suffix": "x",
+		"low_effect": "Very deliberate presentation; the authored default is 0.375x.",
+		"high_effect": "Faster presentation; every stored step is still consumed.",
+		"getter": score_tally_presenter_bridge.get_playback_speed,
+		"setter": _set_score_tally_playback_speed,
+	})
+	dev_option_registry.register_option({
+		"id": "score_tally.instant",
+		"label": "Instant Tally",
+		"kind": "bool",
+		"locations": locations,
+		"description": "Consumes every stored visual step immediately and lands on the exact supplied final values.",
+		"on_effect": "Tallies complete immediately; automated suites always use this behavior.",
+		"off_effect": "Tallies use authored pacing and player fast-forward.",
+		"getter": score_tally_presenter_bridge.is_instant_tally_enabled,
+		"setter": _set_score_tally_instant,
+	})
+	dev_option_registry.register_option({
+		"id": "score_tally.show_history",
+		"label": "Show Resolution History",
+		"kind": "bool",
+		"locations": locations,
+		"description": "Shows a bounded recent-trigger strip beneath the current resolution step.",
+		"on_effect": "Up to four recent trigger summaries remain visible.",
+		"off_effect": "Only the current trigger is shown.",
+		"getter": score_tally_presenter_bridge.is_resolution_history_enabled,
+		"setter": _set_score_tally_history,
+	})
+	dev_option_registry.register_option({
+		"id": "score_tally.audio",
+		"label": "Play Tally Audio",
+		"kind": "bool",
+		"locations": locations,
+		"description": "Uses a bounded six-voice main tick pool, four filtered bass voices, and restrained xMult, consequence, and final accents.",
+		"on_effect": "Numeric ticks use isolated tally buses under SFX; the established accent path stays separate.",
+		"off_effect": "Tally presentation is silent.",
+		"getter": score_tally_presenter_bridge.is_tally_audio_enabled,
+		"setter": _set_score_tally_audio,
+	})
+	dev_option_registry.register_option({
+		"id": "score_tally.tick_volume_db",
+		"label": "Tally Tick Volume",
+		"kind": "number",
+		"locations": locations,
+		"description": "Sets only the repeated sampled tally ticks. Source-opening ticks remain slightly clearer, while the final landing keeps its separate stronger accent.",
+		"minimum": -36.0,
+		"maximum": -14.0,
+		"step": 0.5,
+		"default": -22.0,
+		"unit": "dB",
+		"low_effect": "Quieter rising count ticks.",
+		"high_effect": "More prominent count ticks, still protected by the dedicated tally limiter.",
+		"getter": score_tally_presenter_bridge.get_tally_tick_volume_db,
+		"setter": _set_score_tally_tick_volume_db,
+	})
+	dev_option_registry.register_option({
+		"id": "score_tally.tick_bass",
+		"label": "Tally Tick Bass",
+		"kind": "bool",
+		"locations": locations,
+		"description": "Adds a bounded parallel low-pitched copy of the existing sampled tick. It supplies brief physical body without changing the collision sound asset or gameplay audio.",
+		"on_effect": "First, selected middle, and landing ticks receive filtered low body.",
+		"off_effect": "Only the main rising tick pool plays.",
+		"getter": score_tally_presenter_bridge.is_tally_tick_bass_enabled,
+		"setter": _set_score_tally_tick_bass_enabled,
+	})
+	dev_option_registry.register_option({
+		"id": "score_tally.tick_bass_level_db",
+		"label": "Tally Tick Bass Level",
+		"kind": "number",
+		"locations": locations,
+		"description": "Controls the filtered parallel bass layer only. Its four-voice pool skips nonessential overlaps when full to prevent low-frequency buildup.",
+		"minimum": -36.0,
+		"maximum": -18.0,
+		"step": 0.5,
+		"default": -25.0,
+		"unit": "dB",
+		"low_effect": "Subtle physical support beneath the main tick.",
+		"high_effect": "More audible body; bus compression and limiting remain active.",
+		"getter": score_tally_presenter_bridge.get_tally_tick_bass_volume_db,
+		"setter": _set_score_tally_tick_bass_volume_db,
+	})
+	dev_option_registry.register_option({
+		"id": "score_tally.tick_reverb",
+		"label": "Tally Tick Reverb",
+		"kind": "bool",
+		"locations": locations,
+		"description": "Enables the intentionally short tally-only room halo. The bass layer remains on its separate mostly dry filtered bus so rapid counts stay clear.",
+		"on_effect": "Main tally ticks receive a brief damped room tail.",
+		"off_effect": "Main tally ticks remain dry.",
+		"getter": score_tally_presenter_bridge.is_tally_tick_reverb_enabled,
+		"setter": _set_score_tally_tick_reverb_enabled,
+	})
+	dev_option_registry.register_option({
+		"id": "score_tally.tick_reverb_amount",
+		"label": "Tally Tick Reverb Amount",
+		"kind": "number",
+		"locations": locations,
+		"description": "Adjusts only the wet amount of the short damped tally room. Low values preserve pitch articulation between scoring sources.",
+		"minimum": 0.0,
+		"maximum": 0.25,
+		"step": 0.01,
+		"default": 0.11,
+		"low_effect": "Nearly dry sampled ticks.",
+		"high_effect": "A more audible room halo without changing tally timing.",
+		"getter": score_tally_presenter_bridge.get_tally_tick_reverb_wet,
+		"setter": _set_score_tally_tick_reverb_wet,
+	})
+	_register_direct_action_option(
+		"score_tally.reset_audio_tuning",
+		"Reset Tally Audio Tuning",
+		locations,
+		"Restores authored tick volume, filtered bass layer, and short reverb without changing tally speed, visuals, history, or Instant Tally.",
+		_reset_score_tally_audio_tuning,
+		["tally sound defaults", "bass tick", "short reverb"]
+	)
+	_register_direct_action_option(
+		"score_tally.replay_world",
+		"Replay Last World Tally",
+		locations,
+		"Replays retained table-local callouts and the persistent equation without physics, score signals, assertions, or quota application.",
+		_replay_last_world_score_tally,
+		["world callouts", "presentation replay", "last result"]
+	)
+	_register_direct_action_option(
+		"score_tally.replay",
+		"Replay Detailed Tally",
+		locations,
+		"Replays the retained score result as presentation only. Physics, scoring signals, assertions, and quota progress are not rerun.",
+		_replay_last_score_tally,
+		["presentation replay", "last result"]
+	)
+	_register_direct_action_option(
+		"score_tally.diagnostics",
+		"Open Score Inspector",
+		locations,
+		"Opens the pause-safe tally state, step, lock, lifecycle-counter, and queued-follow-up readout.",
+		_open_score_tally_diagnostics,
+		["tally state", "presentation lock", "current step"]
+	)
+	_register_direct_action_option(
+		"score_tally.reset",
+		"Reset Tally Settings",
+		locations,
+		"Restores authored world presentation, dismissal, zero feedback, tally pacing, history, and audio defaults.",
+		_reset_score_tally_settings,
+		["tally defaults", "reset presentation speed"]
+	)
+
+
+func _register_balance_dev_options() -> void:
+	if (
+		_balance_dev_options_registered
+		or dev_option_registry == null
+		or roguelite_balance_tuning_bridge == null
+	):
+		return
+	_balance_dev_options_registered = true
+	var locations: Array = [
+		_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, "Long Sink Balance")
+	]
+	var family_definitions: Array[Dictionary] = [
+		{"id": "single_bank", "label": "Single Bank Offer Multiplier"},
+		{"id": "double_bank", "label": "Double Bank Offer Multiplier"},
+		{"id": "triple_bank", "label": "Triple Bank Offer Multiplier"},
+		{"id": "combination", "label": "Combination Offer Multiplier"},
+		{"id": "direct_pot", "label": "Direct Pot Offer Multiplier"},
+		{"id": "multi_pot", "label": "Multi-Pot Offer Multiplier"},
+		{"id": "same_pocket", "label": "Same-Pocket Offer Multiplier"},
+	]
+	for family in family_definitions:
+		var family_id: String = str(family.get("id", ""))
+		dev_option_registry.register_option({
+			"id": "balance.offer_family.%s" % family_id,
+			"label": str(family.get("label", family_id)),
+			"kind": "number",
+			"locations": locations,
+			"description": "Stages a debug-only family multiplier after authored rarity/item weights. It applies only when a fresh run starts.",
+			"minimum": 0.0,
+			"maximum": 5.0,
+			"step": 0.1,
+			"default": 1.0,
+			"unit": "x",
+			"low_effect": "This family appears less often in the next fresh debug run.",
+			"high_effect": "This family appears more often in the next fresh debug run.",
+			"getter": _get_balance_family_multiplier.bind(family_id),
+			"setter": _set_balance_family_multiplier.bind(family_id),
+		})
+	dev_option_registry.register_option({
+		"id": "balance.quota_multiplier",
+		"label": "Round Quota Multiplier",
+		"kind": "number",
+		"locations": locations,
+		"description": "Stages a debug-only multiplier over the authored round targets for the next fresh run. The production curve remains unchanged.",
+		"minimum": 0.25,
+		"maximum": 5.0,
+		"step": 0.05,
+		"default": 1.0,
+		"unit": "x",
+		"getter": roguelite_balance_tuning_bridge.get_quota_multiplier,
+		"setter": roguelite_balance_tuning_bridge.set_quota_multiplier,
+	})
+	var item_choices: Array[Dictionary] = []
+	for definition in EIGHT_BALL_CATALOG_SCRIPT.get_all_definitions():
+		item_choices.append({
+			"label": str(definition.get("display_name", definition.get("eight_ball_item_id", "Item"))),
+			"value": str(definition.get("eight_ball_item_id", "")),
+			"description": "%s / %s / authored value %s / weight %s" % [
+				str(definition.get("family_id", "")),
+				str(definition.get("modifier_phase", "")),
+				definition.get("value", 0),
+				definition.get("offer_weight", 0),
+			],
+		})
+	dev_option_registry.register_option({
+		"id": "balance.selected_item",
+		"label": "Eight Ball Inspector",
+		"kind": "select",
+		"locations": locations,
+		"description": "Chooses which Eight Ball receives the temporary next-run value and offer-weight overrides below.",
+		"choices": item_choices,
+		"getter": roguelite_balance_tuning_bridge.get_selected_item_id,
+		"setter": roguelite_balance_tuning_bridge.set_selected_item_id,
+	})
+	_register_balance_item_number(
+		"balance.item.add_haul", "Selected +Haul Value", 0.0, 200.0, 1.0, 10.0,
+		EIGHT_BALL_CATALOG_SCRIPT.PHASE_ADD_HAUL,
+		roguelite_balance_tuning_bridge.get_selected_add_haul_value,
+		roguelite_balance_tuning_bridge.set_selected_add_haul_value,
+		locations
+	)
+	_register_balance_item_number(
+		"balance.item.add_mult", "Selected +Mult Value", 0.0, 20.0, 0.25, 1.0,
+		EIGHT_BALL_CATALOG_SCRIPT.PHASE_ADD_MULT,
+		roguelite_balance_tuning_bridge.get_selected_add_mult_value,
+		roguelite_balance_tuning_bridge.set_selected_add_mult_value,
+		locations
+	)
+	_register_balance_item_number(
+		"balance.item.xmult", "Selected xMult Factor", 0.0, 5.0, 0.05, 1.25,
+		EIGHT_BALL_CATALOG_SCRIPT.PHASE_XMULT,
+		roguelite_balance_tuning_bridge.get_selected_xmult_factor,
+		roguelite_balance_tuning_bridge.set_selected_xmult_factor,
+		locations
+	)
+	dev_option_registry.register_option({
+		"id": "balance.item.offer_weight",
+		"label": "Selected Item Offer Weight",
+		"kind": "number",
+		"locations": locations,
+		"description": "Stages a temporary authored-item weight override before the family multiplier for the next fresh debug run.",
+		"minimum": 0.0,
+		"maximum": 500.0,
+		"step": 1.0,
+		"default": 100.0,
+		"getter": roguelite_balance_tuning_bridge.get_selected_offer_weight,
+		"setter": roguelite_balance_tuning_bridge.set_selected_offer_weight,
+	})
+	dev_option_registry.register_option({
+		"id": "balance.shot_lab_telemetry",
+		"label": "Shot Lab Balance Telemetry",
+		"kind": "bool",
+		"locations": locations,
+		"description": "Stages opt-in balance analysis for future fresh Shot Lab sessions. Shot Lab remains isolated by default.",
+		"on_effect": "Fresh Shot Lab sessions may attach observational balance records.",
+		"off_effect": "Shot Lab is excluded from Long Sink balance telemetry.",
+		"getter": roguelite_balance_tuning_bridge.is_shot_lab_telemetry_enabled,
+		"setter": roguelite_balance_tuning_bridge.set_shot_lab_telemetry_enabled,
+	})
+	_register_direct_action_option(
+		"balance.view_report", "View Balance Report", locations,
+		"Opens the current or most recently finalized value-only Long Sink Balance Report.",
+		_request_balance_report,
+		["telemetry", "round report", "item contribution"]
+	)
+	_register_direct_action_option(
+		"balance.reset_overrides", "Reset Balance Overrides", locations,
+		"Restores catalog values, item weights, family multipliers, quota multiplier, and Shot Lab telemetry staging defaults.",
+		roguelite_balance_tuning_bridge.reset_overrides,
+		["production defaults", "clear tuning"]
+	)
+	_register_direct_action_option(
+		"balance.run_analyzer_tests", "Run Balance Analyzer Self-Test", locations,
+		"Runs the pure synthetic Balance Analyzer regression suite and reports actual failures without changing the run.",
+		_request_balance_analyzer_self_test,
+		["balance tests", "aggregation tests"]
+	)
+
+
+func _register_balance_item_number(
+	option_id: String,
+	label: String,
+	minimum: float,
+	maximum: float,
+	step: float,
+	default_value: float,
+	required_phase: String,
+	getter: Callable,
+	setter: Callable,
+	locations: Array
+) -> void:
+	dev_option_registry.register_option({
+		"id": option_id,
+		"label": label,
+		"kind": "number",
+		"locations": locations,
+		"description": "Stages a debug-only value override for the selected item when its modifier phase matches. It applies only to a fresh run.",
+		"minimum": minimum,
+		"maximum": maximum,
+		"step": step,
+		"default": default_value,
+		"getter": getter,
+		"setter": setter,
+		"disabled_getter": _is_balance_item_phase_disabled.bind(required_phase),
+	})
+
+
+func _get_balance_family_multiplier(family_id: String) -> float:
+	return (
+		roguelite_balance_tuning_bridge.get_family_offer_multiplier(family_id)
+		if roguelite_balance_tuning_bridge != null
+		else 1.0
+	)
+
+
+func _set_balance_family_multiplier(value: Variant, family_id: String) -> void:
+	if roguelite_balance_tuning_bridge != null:
+		roguelite_balance_tuning_bridge.set_family_offer_multiplier(family_id, float(value))
+
+
+func _is_balance_item_phase_disabled(required_phase: String) -> bool:
+	return (
+		roguelite_balance_tuning_bridge == null
+		or not roguelite_balance_tuning_bridge.is_selected_item_phase(required_phase)
+	)
+
+
+func _request_balance_report() -> void:
+	debug_balance_report_requested.emit()
+
+
+func _request_balance_analyzer_self_test() -> void:
+	debug_balance_analyzer_self_test_requested.emit()
+
+
+func _on_roguelite_balance_tuning_changed(_snapshot: Dictionary) -> void:
+	if dev_option_registry != null:
+		dev_option_registry.refresh_all()
+
+
+func _register_score_tally_bool(
+	option_id: String,
+	label: String,
+	description: String,
+	getter: Callable,
+	setter: Callable,
+	on_effect: String,
+	off_effect: String,
+	section: String = "Long Sink Score Presentation"
+) -> void:
+	if dev_option_registry.has_option(option_id):
+		return
+	dev_option_registry.register_option({
+		"id": option_id,
+		"label": label,
+		"kind": "bool",
+		"locations": [_dev_location(DevOptionsPanel.TAB_RUN_SYSTEMS, section)],
+		"description": description,
+		"on_effect": on_effect,
+		"off_effect": off_effect,
+		"keywords": ["long sink", "haul", "mult", "score presentation"],
+		"getter": getter,
+		"setter": setter,
+	})
+
+
+func _set_score_tally_enabled(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_enabled(bool(value))
+
+
+func _set_shot_lab_apply_test_doubloon_payout(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_shot_lab_apply_test_doubloon_payout(bool(value))
+
+
+func _set_live_scoring_anticipation(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_live_scoring_anticipation_enabled(bool(value))
+
+
+func _set_live_scoring_words(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_live_scoring_words_enabled(bool(value))
+
+
+func _set_live_scoring_audio(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_live_scoring_audio_enabled(bool(value))
+
+
+func _set_global_excitement(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_global_excitement_enabled(bool(value))
+
+
+func _set_global_excitement_strength(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_global_excitement_strength(float(value))
+
+
+func _set_ghost_ball_replay(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_ghost_ball_replay_enabled(bool(value))
+
+
+func _set_ghost_trails(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_ghost_trails_enabled(bool(value))
+
+
+func _set_per_ball_subtotals(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_per_ball_subtotals_enabled(bool(value))
+
+
+func _set_show_predicted_narratives(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_show_predicted_narratives(bool(value))
+
+
+func _set_show_event_matching(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_show_event_matching(bool(value))
+
+
+func _set_world_score_callouts(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_world_score_callouts_enabled(bool(value))
+
+
+func _set_persistent_equation(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_persistent_equation_enabled(bool(value))
+
+
+func _set_persistent_round_bar(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_persistent_round_bar_enabled(bool(value))
+
+
+func _set_local_source_flashes(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_local_source_flashes_enabled(bool(value))
+
+
+func _set_detailed_modal_auto_open(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_detailed_modal_auto_open(bool(value))
+
+
+func _set_final_result_requires_dismissal(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_final_result_requires_dismissal(bool(value))
+
+
+func _set_zero_score_quick_feedback(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_zero_score_quick_feedback_enabled(bool(value))
+
+
+func _set_auto_dismiss_final_result(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_auto_dismiss_final_result(bool(value))
+
+
+func _set_show_presentation_anchors(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_show_presentation_anchors(bool(value))
+
+
+func _set_score_tally_playback_speed(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_playback_speed(float(value))
+
+
+func _set_score_tally_instant(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_instant_tally(bool(value))
+
+
+func _set_score_tally_history(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_show_resolution_history(bool(value))
+
+
+func _set_score_tally_audio(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_play_tally_audio(bool(value))
+
+
+func _set_score_tally_tick_volume_db(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_tally_tick_volume_db(float(value))
+
+
+func _set_score_tally_tick_bass_enabled(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_tally_tick_bass_enabled(bool(value))
+
+
+func _set_score_tally_tick_bass_volume_db(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_tally_tick_bass_volume_db(float(value))
+
+
+func _set_score_tally_tick_reverb_enabled(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_tally_tick_reverb_enabled(bool(value))
+
+
+func _set_score_tally_tick_reverb_wet(value: Variant) -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.set_tally_tick_reverb_wet(float(value))
+
+
+func _reset_score_tally_audio_tuning() -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.reset_tally_audio_tuning()
+
+
+func _replay_last_score_tally() -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.replay_last_tally(false)
+
+
+func _replay_last_world_score_tally() -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.replay_last_world_tally(false)
+
+
+func _replay_last_ball_narrative() -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.replay_last_ball_narrative(false)
+
+
+func _open_score_tally_diagnostics() -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.request_open_diagnostics()
+
+
+func _reset_score_tally_settings() -> void:
+	if score_tally_presenter_bridge != null:
+		score_tally_presenter_bridge.reset_tally_settings()
+
+
+func _on_score_tally_dev_state_changed(_snapshot: Dictionary) -> void:
+	if dev_option_registry == null or not is_dev_options_open():
+		return
+	for option_id in [
+		"score_tally.shot_lab_apply_test_doubloon_payout",
+		"score_tally.live_anticipation",
+		"score_tally.live_words",
+		"score_tally.live_audio",
+		"score_tally.global_excitement",
+		"score_tally.global_excitement_strength",
+		"score_tally.ghost_replay",
+		"score_tally.ghost_trails",
+		"score_tally.ball_subtotals",
+		"score_tally.show_predicted_narratives",
+		"score_tally.show_event_matching",
+		"score_tally.world_callouts",
+		"score_tally.persistent_equation",
+		"score_tally.persistent_round_bar",
+		"score_tally.local_source_flashes",
+		"score_tally.detailed_modal_auto_open",
+		"score_tally.final_requires_dismissal",
+		"score_tally.zero_quick_feedback",
+		"score_tally.auto_dismiss_final",
+		"score_tally.show_presentation_anchors",
+		"score_tally.enabled",
+		"score_tally.playback_speed",
+		"score_tally.instant",
+		"score_tally.show_history",
+		"score_tally.audio",
+		"score_tally.tick_volume_db",
+		"score_tally.tick_bass",
+		"score_tally.tick_bass_level_db",
+		"score_tally.tick_reverb",
+		"score_tally.tick_reverb_amount",
+	]:
+		dev_option_registry.refresh_option(option_id)
 
 
 func _register_ball_audio_number(
@@ -2229,6 +3127,7 @@ func _get_cloned_aim_section(key: String) -> String:
 		"progressive_deep_aim_reveal",
 		"deep_aim_reveal_duration_ms",
 		"keep_stale_deep_aim_faintly_visible",
+		"long_sink_full_prediction_paths",
 		"show_staging_status",
 	]:
 		return "Staged Deep Prediction"

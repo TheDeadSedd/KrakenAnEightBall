@@ -15,6 +15,7 @@ var observed_label: Label
 var scoring_label: Label
 var raw_events_label: Label
 var tab_container: TabContainer
+var tally_snapshot: Dictionary = {}
 
 
 func setup(system_ref: ShotLabSystem) -> void:
@@ -54,6 +55,12 @@ func close_panel() -> void:
 	visible = false
 	if shot_lab_system != null:
 		shot_lab_system.set_panel_open(false)
+
+
+func set_tally_snapshot(snapshot: Dictionary) -> void:
+	tally_snapshot = snapshot.duplicate(true)
+	if visible and shot_lab_system != null:
+		_refresh(shot_lab_system.get_snapshot())
 
 
 func _notification(what: int) -> void:
@@ -323,6 +330,9 @@ func _refresh(snapshot: Dictionary) -> void:
 	scoring_lines.append("")
 	scoring_lines.append("SELF-TEST")
 	scoring_lines.append(_format_dictionary(self_test) if not self_test.is_empty() else "NOT RUN")
+	scoring_lines.append("")
+	scoring_lines.append("TALLY PLAYBACK")
+	scoring_lines.append_array(_make_tally_playback_lines(tally_snapshot))
 	scoring_label.text = "\n".join(scoring_lines)
 
 	var ledger: Dictionary = _dictionary_value(result, "ledger")
@@ -332,6 +342,304 @@ func _refresh(snapshot: Dictionary) -> void:
 		if raw_events.is_empty()
 		else "RAW EVENTS (%d)\n\n%s" % [raw_events.size(), JSON.stringify(_to_json_safe(raw_events), "  ")]
 	)
+
+
+func _make_tally_playback_lines(snapshot: Dictionary) -> Array[String]:
+	if snapshot.is_empty():
+		return ["No tally result observed."]
+	var lines: Array[String] = [
+		"State: %s | Active: %s | Replay: %s" % [
+			str(snapshot.get("current_state", "idle")),
+			bool(snapshot.get("presenter_active", false)),
+			bool(snapshot.get("replay_mode_active", false)),
+		],
+	]
+	var live_scoring: Dictionary = _dictionary_value(snapshot, "live_scoring")
+	var prediction_release: Dictionary = _dictionary_value(snapshot, "prediction_release")
+	var conductor: Dictionary = _dictionary_value(snapshot, "scoring_conductor")
+	var narrative_validation: Dictionary = _dictionary_value(snapshot, "narrative_validation")
+	lines.append("Narrative: %s | Fallbacks: %d" % [
+		str(narrative_validation.get("status", "NOT RUN")),
+		int(snapshot.get("narrative_fallback_count", 0)),
+	])
+	var narrative_input: Dictionary = _dictionary_value(snapshot, "narrative_input")
+	lines.append("Input: identity %s | derived %s | events %d | balls %d" % [
+		bool(narrative_input.get("identity_present", false)),
+		bool(narrative_input.get("derived_present", false)),
+		int(narrative_input.get("raw_event_count", 0)),
+		int(narrative_input.get("starting_ball_count", 0)),
+	])
+	var fallback_reason: String = str(snapshot.get("last_narrative_warning", ""))
+	if fallback_reason.is_empty():
+		fallback_reason = str(snapshot.get("narrative_fallback_reason", ""))
+	if not fallback_reason.is_empty():
+		lines.append("Fallback reason: %s" % fallback_reason)
+	lines.append("")
+	lines.append_array(_make_live_anticipation_lines(live_scoring, prediction_release))
+	lines.append("Matching: %d live events | Diverged: %d" % [
+		int(live_scoring.get("matched_live_events", 0)),
+		int(live_scoring.get("diverged_lanes", 0)),
+	])
+	lines.append("Structural: %d/%d | Silent: %d | Presented: %d/%d | Direct: %d" % [
+		int(live_scoring.get("structural_events_matched", 0)),
+		int(live_scoring.get("structural_events_expected", 0)),
+		int(live_scoring.get("silent_structural_events_matched", 0)),
+		int(live_scoring.get("presentation_milestones_matched", 0)),
+		int(live_scoring.get("presentation_milestones_expected", 0)),
+		int(live_scoring.get("direct_activations_matched", 0)),
+	])
+	lines.append("Normalized events: %d -> %d | Overlaps suppressed: %d" % [
+		int(live_scoring.get("predicted_events_before_normalization", 0)),
+		int(live_scoring.get("predicted_events_after_normalization", 0)),
+		int(live_scoring.get("suppressed_predicted_overlap_contacts", 0)),
+	])
+	lines.append("Lookahead skips: %d | Rails exact/tolerant/failed: %d/%d/%d" % [
+		int(live_scoring.get("silent_lookahead_skips", 0)),
+		int(live_scoring.get("exact_rail_matches", 0)),
+		int(live_scoring.get("tolerant_rail_matches", 0)),
+		int(live_scoring.get("rail_match_failures", 0)),
+	])
+	var divergence_reason: String = str(live_scoring.get("lane_divergence_reason", ""))
+	if not divergence_reason.is_empty():
+		lines.append("Lane divergence: %s" % divergence_reason)
+	lines.append("Commit: %s | Wait %.1f ms | Timeouts %d | Available %s" % [
+		str(prediction_release.get("last_commit_status", "not_committed")),
+		float(prediction_release.get("last_queue_duration_ms", 0.0)),
+		int(prediction_release.get("timeout_count", 0)),
+		bool(prediction_release.get("live_anticipation_plan_available", false)),
+	])
+	lines.append("Excitement peak: %.2f | Cues coalesced/dropped: %d/%d" % [
+		float(live_scoring.get("global_excitement_peak", snapshot.get("inherited_live_excitement", 0.0))),
+		int(conductor.get("cues_coalesced_total", 0)),
+		int(conductor.get("cues_dropped_total", 0)),
+	])
+	if bool(snapshot.get("show_predicted_narratives", false)):
+		lines.append("")
+		lines.append("PREDICTED NARRATIVE")
+		lines.append(_format_dictionary(_dictionary_value(snapshot, "predicted_narrative")))
+		lines.append("")
+		lines.append("AUTHORITATIVE NARRATIVE")
+		lines.append(_format_dictionary(_dictionary_value(snapshot, "authoritative_narrative")))
+	if bool(snapshot.get("show_event_matching", false)):
+		lines.append("")
+		lines.append("EVENT MATCHING")
+		lines.append(_format_dictionary(_dictionary_value(snapshot, "event_matching")))
+	var score_result: Dictionary = _dictionary_value(snapshot, "score_result")
+	if score_result.is_empty():
+		lines.append("No completed score result retained.")
+		return lines
+	var steps: Array = _array_value(score_result, "resolution_steps")
+	var current_index: int = int(snapshot.get("current_step_index", -1))
+	lines.append("Steps: %d | Final: %d Haul x %s Mult = %d" % [
+		steps.size(),
+		int(score_result.get("final_haul", 0)),
+		_format_tally_number(float(score_result.get("final_mult", 1.0))),
+		int(score_result.get("shot_score", 0)),
+	])
+	if steps.is_empty():
+		lines.append("No resolution mutations (zero-score result).")
+		return lines
+	lines.append("")
+	for step_value in steps:
+		if not step_value is Dictionary:
+			continue
+		var step: Dictionary = step_value
+		var step_index: int = int(step.get("step_index", 0))
+		var marker: String = ">" if bool(snapshot.get("presenter_active", false)) and step_index == current_index else " "
+		lines.append("%s [%02d] %s | %s | %s" % [
+			marker,
+			step_index + 1,
+			str(step.get("phase", "")),
+			str(step.get("source_id", "")),
+			str(step.get("display_name", "")),
+		])
+		lines.append("    Haul %d %+d -> %d | Mult %s %s x%s -> %s | Preview %d" % [
+			int(step.get("haul_before", 0)),
+			int(step.get("haul_delta", 0)),
+			int(step.get("haul_after", 0)),
+			_format_tally_number(float(step.get("mult_before", 1.0))),
+			_format_tally_signed_number(float(step.get("mult_delta", 0.0))),
+			_format_tally_number(float(step.get("xmult_factor", 1.0))),
+			_format_tally_number(float(step.get("mult_after", 1.0))),
+			int(step.get("score_preview_after", 0)),
+		])
+	return lines
+
+
+func _make_live_anticipation_lines(
+	live_scoring: Dictionary,
+	prediction_release: Dictionary
+) -> Array[String]:
+	var lines: Array[String] = ["LIVE ANTICIPATION"]
+	lines.append("Plan: %s" % str(live_scoring.get("plan_status", "DISABLED")))
+	lines.append("Prediction result mode: %s" % str(live_scoring.get(
+		"prediction_result_mode",
+		"unknown"
+	)))
+	lines.append("Prediction: release %s | wait %s | timeout %s | capped %s | unsupported %s" % [
+		bool(prediction_release.get("exact_prediction_ready_at_release", false)),
+		bool(prediction_release.get("accepted_after_wait", false)),
+		bool(prediction_release.get("timed_out", false)),
+		bool(live_scoring.get("prediction_capped", false)),
+		bool(live_scoring.get("prediction_unsupported", false)),
+	])
+	lines.append("Lanes: total %d | complete %d | incomplete %d | active %d | diverged %d" % [
+		int(live_scoring.get("total_predicted_scoring_lanes", 0)),
+		int(live_scoring.get("complete_lanes", 0)),
+		int(live_scoring.get("incomplete_lanes", 0)),
+		int(live_scoring.get("active_lanes", 0)),
+		int(live_scoring.get("diverged_lanes", 0)),
+	])
+	lines.append("Rail semantic evidence: %s | exact %d | geometric %d | received %d" % [
+		str(live_scoring.get("rail_semantic_evidence_status", "NOT_APPLICABLE")),
+		int(live_scoring.get("rail_events_eligible_for_exact_matching", 0)),
+		int(live_scoring.get("rail_events_eligible_for_geometric_matching", 0)),
+		int(live_scoring.get("predicted_rail_events_received", 0)),
+	])
+	lines.append("Rail missing name/normal/center/surface/radius: %d/%d/%d/%d/%d" % [
+		int(live_scoring.get("rail_events_missing_name", 0)),
+		int(live_scoring.get("rail_events_missing_normal", 0)),
+		int(live_scoring.get("rail_events_missing_center", 0)),
+		int(live_scoring.get("rail_events_missing_surface", 0)),
+		int(live_scoring.get("rail_events_missing_radius", 0)),
+	])
+	var globally_missing_rail_fields: Array = _array_value(
+		live_scoring,
+		"rail_semantic_evidence_missing_fields"
+	)
+	if not globally_missing_rail_fields.is_empty():
+		lines.append("Predicted rail semantic evidence incomplete: %s" % (
+			_join_string_values(globally_missing_rail_fields)
+		))
+	var lane_lookup: Dictionary = _dictionary_value(live_scoring, "lanes")
+	var lane_ids: Array[int] = []
+	for lane_key in lane_lookup.keys():
+		var lane_id: int = int(lane_key)
+		if lane_id > 0:
+			lane_ids.append(lane_id)
+	lane_ids.sort()
+	for lane_id in lane_ids:
+		var lane: Dictionary = _dictionary_value(lane_lookup, str(lane_id))
+		var ball_number: int = int(lane.get("ball_number", -1))
+		var label: String = "Ball %d" % lane_id
+		if ball_number >= 0:
+			label = "Ball #%d" % ball_number
+		lines.append("%s: %s | cap %s | unsupported %s" % [
+			label,
+			str(lane.get("lane_plan_status", "incomplete")).to_upper(),
+			bool(lane.get("affected_by_prediction_cap", false)),
+			bool(lane.get("affected_by_unsupported_event", false)),
+		])
+		var milestone_parts: Array[String] = [
+			"activation %s" % _yes_no(bool(lane.get("activation_matched", false))),
+		]
+		for milestone_value in _array_value(lane, "bank_milestones"):
+			if not milestone_value is Dictionary:
+				continue
+			var milestone: Dictionary = milestone_value
+			milestone_parts.append("bank %d %s" % [
+				int(milestone.get("tier", milestone_parts.size())),
+				_yes_no(bool(milestone.get("matched", false))),
+			])
+		milestone_parts.append("pocket %s" % _yes_no(bool(lane.get("pocket_matched", false))))
+		lines.append("  " + " | ".join(milestone_parts))
+		var disable_reason: String = str(lane.get("lane_disable_reason", ""))
+		var divergence_reason: String = str(lane.get("divergence_reason", ""))
+		if not disable_reason.is_empty():
+			lines.append("  Disabled: %s" % disable_reason)
+		if not divergence_reason.is_empty():
+			lines.append("  Diverged: %s" % divergence_reason)
+		var missing_rail_fields: Array = _array_value(
+			lane,
+			"missing_predicted_rail_semantic_evidence"
+		)
+		if not missing_rail_fields.is_empty():
+			lines.append("  Predicted rail semantic evidence incomplete: %s" % (
+				_join_string_values(missing_rail_fields)
+			))
+		if bool(lane.get("has_next_expected_rail", false)):
+			var next_rail_name: String = str(lane.get("next_expected_rail_name", ""))
+			if next_rail_name.is_empty():
+				next_rail_name = "<missing>"
+			lines.append("  Next rail: %s | index %d | side %s | normal %s" % [
+				next_rail_name,
+				int(lane.get("next_expected_rail_index", -1)),
+				str(lane.get("next_expected_rail_side", "unknown")),
+				_format_vector2_diagnostic(lane.get(
+					"next_expected_rail_normal",
+					Vector2.ZERO
+				)),
+			])
+			lines.append("  Next center/surface: %s / %s | evidence %s" % [
+				_format_vector2_diagnostic(lane.get(
+					"next_expected_rail_center",
+					Vector2.INF
+				)),
+				_format_vector2_diagnostic(lane.get(
+					"next_expected_rail_surface",
+					Vector2.INF
+				)),
+				(
+					"COMPLETE"
+					if bool(lane.get(
+						"next_expected_rail_semantic_evidence_complete",
+						false
+					))
+					else "INCOMPLETE"
+				),
+			])
+		var rail_match: Dictionary = _dictionary_value(lane, "last_rail_match")
+		if not rail_match.is_empty():
+			lines.append("  Rail %s/%s/%s -> %s/%s/%s" % [
+				str(rail_match.get("expected_rail_id", "?")),
+				str(rail_match.get("expected_rail_kind", "?")),
+				str(rail_match.get("expected_rail_side", "?")),
+				str(rail_match.get("actual_rail_id", "?")),
+				str(rail_match.get("actual_rail_kind", "?")),
+				str(rail_match.get("actual_rail_side", "?")),
+			])
+			lines.append("  Delta center/surface/normal: %s / %s px / %s deg | %s | %s" % [
+				_format_diagnostic_delta(float(rail_match.get("center_delta_px", INF))),
+				_format_diagnostic_delta(float(rail_match.get("surface_delta_px", INF))),
+				_format_diagnostic_delta(float(rail_match.get("normal_angle_delta_degrees", INF))),
+				str(rail_match.get("quality", "failed")),
+				str(rail_match.get("decision", "diverge")),
+			])
+	return lines
+
+
+func _yes_no(value: bool) -> String:
+	return "YES" if value else "no"
+
+
+func _format_diagnostic_delta(value: float) -> String:
+	return "-" if not is_finite(value) else "%.1f" % value
+
+
+func _format_vector2_diagnostic(value: Variant) -> String:
+	if not value is Vector2:
+		return "-"
+	var vector: Vector2 = value
+	if not is_finite(vector.x) or not is_finite(vector.y):
+		return "-"
+	return "(%.1f, %.1f)" % [vector.x, vector.y]
+
+
+func _join_string_values(values: Array) -> String:
+	var text_values: Array[String] = []
+	for value in values:
+		text_values.append(str(value))
+	return ", ".join(text_values)
+
+
+func _format_tally_number(value: float) -> String:
+	if is_equal_approx(value, roundf(value)):
+		return str(int(roundf(value)))
+	return "%.2f" % value
+
+
+func _format_tally_signed_number(value: float) -> String:
+	return ("+" if value >= 0.0 else "") + _format_tally_number(value)
 
 
 func _center_in_viewport() -> void:

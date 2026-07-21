@@ -1,6 +1,8 @@
 extends Control
 class_name DebugOverlay
 
+const ROGUELITE_BUILD_TEST_SCRIPT_PATH := "res://scripts/RogueliteEightBallBuildTests.gd"
+
 signal reset_table_requested
 signal reset_last_shot_requested
 signal dev_option_state_changed(option_id: String, value: Variant)
@@ -146,6 +148,7 @@ var shot_ledger_panel: DebugPanel
 var shot_ledger_label: Label
 var shot_lab_panel: ShotLabPanel
 var shot_ledger_raw_events_panel: ShotLedgerRawEventsPanel
+var latest_shot_lab_tally_snapshot: Dictionary = {}
 var verbose_aim_candidates := false
 var developer_preferences: DeveloperPreferences
 var fps_label: Label
@@ -339,12 +342,19 @@ func _ensure_shot_lab_panels() -> void:
 	shot_lab_panel.name = "ShotLabPanel"
 	add_child(shot_lab_panel)
 	shot_lab_panel.setup(table.shot_lab_system)
+	shot_lab_panel.set_tally_snapshot(latest_shot_lab_tally_snapshot)
 	if not shot_lab_panel.raw_events_requested.is_connected(open_shot_lab_raw_events):
 		shot_lab_panel.raw_events_requested.connect(open_shot_lab_raw_events)
 	shot_ledger_raw_events_panel = ShotLedgerRawEventsPanel.new()
 	shot_ledger_raw_events_panel.name = "ShotLedgerRawEventsPanel"
 	add_child(shot_ledger_raw_events_panel)
 	shot_ledger_raw_events_panel.setup(table.shot_ledger_system, table.shot_lab_system)
+
+
+func set_shot_lab_tally_snapshot(snapshot: Dictionary) -> void:
+	latest_shot_lab_tally_snapshot = snapshot.duplicate(true)
+	if shot_lab_panel != null:
+		shot_lab_panel.set_tally_snapshot(latest_shot_lab_tally_snapshot)
 
 
 func open_shot_lab_inspector() -> void:
@@ -610,6 +620,8 @@ func trigger_dev_option_action(option_id: String) -> bool:
 			_copy_last_shot_ledger_json()
 		"shot_ledger.run_self_test":
 			_run_shot_ledger_self_test()
+		"roguelite.run_build_self_test":
+			_run_eight_ball_build_self_test()
 		"shot_ledger.clear_diagnostics":
 			_clear_shot_ledger_diagnostics()
 		"shot_ledger.copy_lifecycle":
@@ -1362,6 +1374,46 @@ func _run_shot_ledger_self_test() -> void:
 	set_modular_debug_panel_visible(PANEL_SHOT_LEDGER, true)
 
 
+func _run_eight_ball_build_self_test() -> void:
+	if table == null or table.roguelite_build_system == null:
+		_report_debug_action_error("Eight Ball Build Self-Test: build system unavailable.")
+		return
+	var test_script_value: Variant = load(ROGUELITE_BUILD_TEST_SCRIPT_PATH)
+	if not test_script_value is Script:
+		_report_debug_action_error("Eight Ball Build Self-Test: test harness unavailable.")
+		return
+	var test_script: Script = test_script_value as Script
+	if not _script_resource_declares_method(test_script, "run_self_tests"):
+		_report_debug_action_error("Eight Ball Build Self-Test: test runner missing.")
+		return
+	var result_value: Variant = test_script.call("run_self_tests")
+	if not result_value is Dictionary:
+		_report_debug_action_error("Eight Ball Build Self-Test: invalid test result.")
+		return
+	var result: Dictionary = (result_value as Dictionary).duplicate(true)
+	if result.is_empty():
+		_report_debug_action_error("Eight Ball Build Self-Test: empty test result.")
+		return
+	table.roguelite_build_system.record_self_test_result(result)
+	var total: int = int(result.get("total_tests", result.get("total", 0)))
+	var passed: int = int(result.get("passed", result.get("passed_count", 0)))
+	var failed: int = int(result.get("failed", result.get("failed_count", 0)))
+	var summary: String = "Eight Ball Build Self-Test: %d/%d passed" % [passed, total]
+	if failed > 0:
+		summary += ", %d failed" % failed
+	print(summary)
+	for failure_value in _debug_array(result, "failures"):
+		print("- %s" % str(failure_value))
+	debug_notification_requested.emit(summary, "event")
+
+
+func _script_resource_declares_method(script: Script, method_name: String) -> bool:
+	for method_value in script.get_script_method_list():
+		if method_value is Dictionary and str((method_value as Dictionary).get("name", "")) == method_name:
+			return true
+	return false
+
+
 func _make_shot_ledger_self_test_summary(result: Dictionary) -> String:
 	var status: String = str(result.get("status", "ERROR"))
 	var total_count: int = int(result.get("total_count", 0))
@@ -1473,6 +1525,25 @@ func _make_shot_ledger_panel_text() -> String:
 	])
 
 	lines.append("")
+	lines.append("TAP EVENTS")
+	lines.append("Cue milestones: %d  |  Max strikes/ball: %d  |  Double/Triple balls: %d / %d" % [
+		int(derived.get("total_cue_recontact_milestones", 0)),
+		int(derived.get("maximum_cue_strikes_against_one_scoring_ball", 0)),
+		int(derived.get("scoring_balls_with_double_tap", 0)),
+		int(derived.get("scoring_balls_with_triple_tap_or_higher", 0)),
+	])
+	lines.append("Ball Tap milestones: %d  |  Max unique/ball: %d  |  Scoring balls: %d" % [
+		int(derived.get("total_unique_ball_tap_milestones", 0)),
+		int(derived.get("maximum_ball_taps_by_one_scoring_ball", 0)),
+		int(derived.get("scoring_balls_with_ball_tap", 0)),
+	])
+	lines.append("Repeated targets ignored: %d  |  Ambiguous rejected: %d  |  Direct disqualified: %d" % [
+		int(derived.get("repeated_ball_tap_contacts_ignored", 0)),
+		int(derived.get("ambiguous_qualifying_contact_rejection_count", 0)),
+		int(derived.get("tap_direct_pot_disqualifications", 0)),
+	])
+
+	lines.append("")
 	lines.append("POCKET FACTS")
 	var pocket_facts: Array = _debug_array(derived, "pocket_facts")
 	if pocket_facts.is_empty():
@@ -1493,6 +1564,17 @@ func _make_shot_ledger_panel_text() -> String:
 			"yes" if bool(fact.get("is_direct_pot", false)) else "no",
 			"yes" if bool(fact.get("is_combination_pot", false)) else "no",
 			float(fact.get("travel_distance", 0.0)),
+		])
+		lines.append("  cue strikes %d @ %s | unique Ball Taps %d -> %s" % [
+			int(fact.get("qualifying_cue_strike_count", 0)),
+			str(fact.get("qualifying_cue_strike_event_indices", [])),
+			int(fact.get("unique_object_tap_count", 0)),
+			str(fact.get("unique_object_tap_ball_ids", [])),
+		])
+		lines.append("  Tap events %s | repeats %d | Direct blockers %s" % [
+			str(fact.get("object_tap_event_indices", [])),
+			int(fact.get("repeated_object_tap_contact_count", 0)),
+			str(fact.get("direct_pot_disqualifiers", [])),
 		])
 
 	lines.append("")
@@ -1649,12 +1731,14 @@ func _ensure_on_table_debug_buttons() -> void:
 			"Debug: restart the current mode while preserving the aim-testing workspace."
 		)
 		reset_table_button.z_index = 121
+		reset_table_button.set_meta("allow_during_score_tally", true)
 	if reset_last_shot_button == null:
 		reset_last_shot_button = _make_table_event_test_button(
 			"Reset Last Shot",
 			"Reset unavailable: no committed shot yet."
 		)
 		reset_last_shot_button.z_index = 121
+		reset_last_shot_button.set_meta("allow_during_score_tally", true)
 	_update_table_event_test_button_layout()
 
 
@@ -2717,13 +2801,19 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 	var invalidation: Dictionary = snapshot.get("aim_cloned_invalidation", {})
 	var staged_prediction: Dictionary = snapshot.get("aim_staged_prediction", {})
 	var player_parity: Dictionary = snapshot.get("aim_player_parity", {})
+	var release_prediction: Dictionary = snapshot.get("aim_release_prediction", {})
 	if simulation.is_empty():
 		var unavailable_lines: Array = [
 			"No cloned trajectory has been built.",
 			"Enable Debug Aim Line, then drag the cue.",
 		]
 		_append_player_aim_parity_lines(unavailable_lines, player_parity)
+		_append_player_visibility_lines(
+			unavailable_lines,
+			player_parity.get("player_visibility", {})
+		)
 		_append_staged_aim_lines(unavailable_lines, staged_prediction)
+		_append_release_prediction_lines(unavailable_lines, release_prediction)
 		_append_aim_availability_lines(unavailable_lines, availability, invalidation)
 		return unavailable_lines
 	var warnings: Array = simulation.get("unsupported_warnings", [])
@@ -2736,6 +2826,7 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 			])
 	var lines: Array = []
 	_append_player_aim_parity_lines(lines, player_parity)
+	_append_player_visibility_lines(lines, player_parity.get("player_visibility", {}))
 	lines.append_array([
 		"Enabled: %s / valid: %s / complete: %s" % [
 			_debug_true_false_text(bool(simulation.get("configuration", {}).get("enabled", false))),
@@ -2791,6 +2882,7 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 		"Cap: %s" % str(simulation.get("cap_reached", "none")),
 	])
 	_append_staged_aim_lines(lines, staged_prediction)
+	_append_release_prediction_lines(lines, release_prediction)
 	_append_aim_availability_lines(lines, availability, invalidation)
 	var debug_mode: Dictionary = snapshot.get("debug_aim_mode", {})
 	if bool(debug_mode.get("enabled", false)):
@@ -2833,6 +2925,100 @@ func _make_aim_simulation_lines(snapshot: Dictionary) -> Array:
 		for warning_text in warning_texts:
 			lines.append("- %s" % warning_text)
 	return lines
+
+
+func _append_release_prediction_lines(lines: Array, release: Dictionary) -> void:
+	if release.is_empty():
+		return
+	lines.append("")
+	lines.append("PLAN AVAILABILITY")
+	lines.append("Queued / wait: %s / %.1f ms (last %.1f ms)" % [
+		_debug_true_false_text(bool(release.get("release_queued_for_prediction", false))),
+		float(release.get("current_queue_duration_ms", 0.0)),
+		float(release.get("last_queue_duration_ms", 0.0)),
+	])
+	lines.append("Release / commit: %s / %s" % [
+		release.get("last_release_status", "not_committed"),
+		release.get("last_commit_status", "not_committed"),
+	])
+	lines.append("Exact accepted / live plan: %s / %s" % [
+		_debug_true_false_text(bool(release.get("exact_clone_accepted", false))),
+		_debug_true_false_text(bool(release.get("live_anticipation_plan_available", false))),
+	])
+	lines.append("Prediction result mode: %s" % str(release.get(
+		"live_anticipation_prediction_result_mode",
+		"unknown"
+	)))
+	var rail_evidence_status: String = str(release.get(
+		"live_anticipation_rail_semantic_evidence_status",
+		"NOT_APPLICABLE"
+	))
+	lines.append("Rail semantic evidence: %s" % rail_evidence_status)
+	var missing_rail_fields: Array = _debug_array(
+		release,
+		"live_anticipation_rail_semantic_evidence_missing_fields"
+	)
+	if not missing_rail_fields.is_empty():
+		var missing_field_text: PackedStringArray = PackedStringArray()
+		for missing_field in missing_rail_fields:
+			missing_field_text.append(str(missing_field))
+		lines.append("Predicted rail semantic evidence incomplete: %s" % (
+			", ".join(missing_field_text)
+		))
+	lines.append("Last ready-now / after-wait / timed-out: %s / %s / %s" % [
+		_debug_true_false_text(bool(release.get("exact_prediction_ready_at_release", false))),
+		_debug_true_false_text(bool(release.get("accepted_after_wait", false))),
+		_debug_true_false_text(bool(release.get("timed_out", false))),
+	])
+	lines.append("Ready-now / after-wait / timeouts: %s / %s / %s" % [
+		release.get("exact_ready_at_release_total", 0),
+		release.get("accepted_after_wait_total", 0),
+		release.get("timeout_count", 0),
+	])
+	lines.append("Immediate / stale commits: %s / %s" % [
+		release.get("immediate_only_committed_count", 0),
+		release.get("stale_committed_count", 0),
+	])
+	var disable_reason: String = str(release.get("last_plan_disable_reason", ""))
+	if not disable_reason.is_empty():
+		lines.append("Plan disable: %s" % disable_reason)
+
+
+func _append_player_visibility_lines(lines: Array, visibility_value: Variant) -> void:
+	if not visibility_value is Dictionary:
+		return
+	var visibility: Dictionary = visibility_value
+	if visibility.is_empty():
+		return
+	lines.append("")
+	lines.append("PLAYER VISIBILITY")
+	lines.append("Full mode / enabled / active: %s / %s / %s" % [
+		_debug_true_false_text(bool(visibility.get("mode_full_prediction", false))),
+		_debug_true_false_text(bool(visibility.get("full_paths_enabled", false))),
+		_debug_true_false_text(bool(visibility.get("full_paths_active", false))),
+	])
+	lines.append("Depth internal / requested / actual: %d / %d / %d (cap %d)" % [
+		int(visibility.get("internal_simulated_depth", 0)),
+		int(visibility.get("requested_visible_depth", 0)),
+		int(visibility.get("actual_maximum_causal_depth", 0)),
+		int(visibility.get("predictor_depth_cap", 0)),
+	])
+	lines.append("Moving / displayed / hidden paths: %d / %d / %d" % [
+		int(visibility.get("predicted_moving_balls", 0)),
+		int(visibility.get("displayed_ball_paths", 0)),
+		int(visibility.get("hidden_ball_paths", 0)),
+	])
+	lines.append("Capped predicted/displayed / endpoint ghosts: %d / %d / %d" % [
+		int(visibility.get("predicted_capped_paths", 0)),
+		int(visibility.get("displayed_capped_paths", 0)),
+		int(visibility.get("endpoint_ghosts", 0)),
+	])
+	lines.append("Result: %s / truncated %s" % [
+		str(visibility.get("result_stop_reason", "none")),
+		_debug_true_false_text(bool(visibility.get("result_truncated", false))),
+	])
+	if bool(visibility.get("long_sight_adds_no_extra_depth_in_roguelite", false)):
+		lines.append("Long Sight: no additional trajectory depth in The Long Sink")
 
 
 func _append_player_aim_parity_lines(lines: Array, parity: Dictionary) -> void:

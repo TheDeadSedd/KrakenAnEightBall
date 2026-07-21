@@ -7,10 +7,17 @@ signal raw_events_requested
 signal exit_lab_requested
 
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
+const EIGHT_BALL_CATALOG := preload("res://scripts/RogueliteEightBallCatalog.gd")
 const DOCK_SIZE := Vector2(356.0, 824.0)
 const COLLAPSED_SIZE := Vector2(218.0, 126.0)
 const BANNER_SIZE := Vector2(720.0, 54.0)
 const VIEWPORT_MARGIN := 24.0
+const SCORE_HUD_BOTTOM := 128.0
+const BANNER_SCORE_GAP := 12.0
+const BANNER_MIN_WIDTH := 220.0
+const BANNER_WRAP_WIDTH := 520.0
+const BANNER_WRAPPED_HEIGHT := 74.0
+const DOCK_SINGLE_COLUMN_WIDTH := 330.0
 const PASS_COLOR := Color("7dd9a2")
 const FAIL_COLOR := Color("ef8a79")
 const GOLD_COLOR := Color("e6c66f")
@@ -20,10 +27,12 @@ const MUTED_COLOR := Color("9f9a8d")
 static var session_collapsed := false
 
 var shot_lab_system: ShotLabSystem
+var tally_presenter: RogueliteScoreTallyPresenter
 var latest_snapshot: Dictionary = {}
 var hover_ui_suppressed := false
 var advanced_visible := false
 var interactive_controls: Array[Control] = []
+var responsive_two_column_grids: Array[GridContainer] = []
 
 var banner_panel: PanelContainer
 var banner_label: Label
@@ -54,6 +63,14 @@ var inspect_score_button: Button
 var copy_score_summary_button: Button
 var copy_score_json_button: Button
 var scoring_self_test_button: Button
+var replay_tally_button: Button
+var instant_tally_check: CheckBox
+var eight_ball_loadout_selectors: Array[OptionButton] = []
+var eight_ball_loadout_buttons: Array[Button] = []
+var eight_ball_build_status_label: Label
+var build_diagnostics_button: Button
+var build_diagnostics_dialog: AcceptDialog
+var build_diagnostics_text: TextEdit
 var inspect_button: Button
 var raw_events_button: Button
 var copy_result_button: Button
@@ -64,6 +81,7 @@ var copy_resolved_button: Button
 var copy_reference_snippet_button: Button
 var aim_nudge_buttons: Array[Button] = []
 var power_nudge_buttons: Array[Button] = []
+var aim_nudge_grid: GridContainer
 var suite_progress_label: Label
 var run_suite_button: Button
 var repeat_suite_button: Button
@@ -73,8 +91,12 @@ var collapsed_result_label: Label
 var exit_confirmation: ConfirmationDialog
 
 
-func setup(system_ref: ShotLabSystem) -> void:
+func setup(
+	system_ref: ShotLabSystem,
+	tally_presenter_ref: RogueliteScoreTallyPresenter = null
+) -> void:
 	shot_lab_system = system_ref
+	tally_presenter = tally_presenter_ref
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	z_index = 52
@@ -82,6 +104,11 @@ func setup(system_ref: ShotLabSystem) -> void:
 	_build_ui()
 	if not shot_lab_system.state_changed.is_connected(_on_state_changed):
 		shot_lab_system.state_changed.connect(_on_state_changed)
+	if (
+		tally_presenter != null
+		and not tally_presenter.state_changed.is_connected(_on_tally_state_changed)
+	):
+		tally_presenter.state_changed.connect(_on_tally_state_changed)
 	visible = true
 	_refresh(shot_lab_system.get_snapshot())
 	_layout_hud()
@@ -110,6 +137,11 @@ func _build_ui() -> void:
 		remove_child(child)
 		child.queue_free()
 	interactive_controls.clear()
+	responsive_two_column_grids.clear()
+	aim_nudge_buttons.clear()
+	power_nudge_buttons.clear()
+	eight_ball_loadout_selectors.clear()
+	eight_ball_loadout_buttons.clear()
 
 	banner_panel = PanelContainer.new()
 	banner_panel.name = "LaboratoryBanner"
@@ -126,6 +158,8 @@ func _build_ui() -> void:
 	banner_label = _make_label("SHOT LAB", 16, GOLD_COLOR)
 	banner_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	banner_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	banner_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	banner_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	banner_margin.add_child(banner_label)
 
 	dock_panel = PanelContainer.new()
@@ -181,6 +215,7 @@ func _build_ui() -> void:
 	action_grid.columns = 2
 	action_grid.add_theme_constant_override("h_separation", 6)
 	action_grid.add_theme_constant_override("v_separation", 6)
+	responsive_two_column_grids.append(action_grid)
 	stack.add_child(action_grid)
 	load_button = _add_action_button(action_grid, "Load Setup", _on_load_pressed)
 	fire_button = _add_action_button(action_grid, "Fire Reference", _on_fire_pressed)
@@ -188,6 +223,8 @@ func _build_ui() -> void:
 	rerun_button = _add_action_button(action_grid, "Re-run", _on_rerun_pressed)
 	rewind_button = _add_action_button(action_grid, "Rewind Shot", _on_rewind_pressed)
 	exit_button = _add_action_button(action_grid, "Exit Lab", _on_exit_pressed)
+	rewind_button.set_meta("allow_during_score_tally", true)
+	exit_button.set_meta("allow_during_score_tally", true)
 
 	reference_aim_check = _make_check_box("Reference Aim", "show_reference_aim")
 	freeze_consequences_check = _make_check_box("Freeze Consequences", "freeze_unrelated_run_consequences")
@@ -215,14 +252,17 @@ func _build_ui() -> void:
 	authoring_grid.columns = 2
 	authoring_grid.add_theme_constant_override("h_separation", 5)
 	authoring_grid.add_theme_constant_override("v_separation", 5)
+	responsive_two_column_grids.append(authoring_grid)
 	advanced_stack.add_child(authoring_grid)
 	capture_aim_button = _add_action_button(authoring_grid, "Capture Aim", _on_capture_aim_pressed)
 	regenerate_preflight_button = _add_action_button(authoring_grid, "Preflight", _on_regenerate_preflight_pressed)
 	copy_resolved_button = _add_action_button(authoring_grid, "Copy Resolved", _on_copy_resolved_pressed)
 	copy_reference_snippet_button = _add_action_button(authoring_grid, "Copy Snippet", _on_copy_reference_snippet_pressed)
-	var aim_nudge_row := HBoxContainer.new()
-	aim_nudge_row.add_theme_constant_override("separation", 4)
-	advanced_stack.add_child(aim_nudge_row)
+	aim_nudge_grid = GridContainer.new()
+	aim_nudge_grid.columns = 4
+	aim_nudge_grid.add_theme_constant_override("h_separation", 4)
+	aim_nudge_grid.add_theme_constant_override("v_separation", 4)
+	advanced_stack.add_child(aim_nudge_grid)
 	for nudge_spec_value in [
 		{"label": "Aim L", "offset": Vector2(-2.0, 0.0)},
 		{"label": "R", "offset": Vector2(2.0, 0.0)},
@@ -231,21 +271,24 @@ func _build_ui() -> void:
 	]:
 		var nudge_spec: Dictionary = nudge_spec_value as Dictionary
 		var nudge_button: Button = _add_action_button(
-			aim_nudge_row,
+			aim_nudge_grid,
 			str(nudge_spec["label"]),
 			_on_nudge_aim_pressed.bind(nudge_spec["offset"])
 		)
 		aim_nudge_buttons.append(nudge_button)
-	var power_nudge_row := HBoxContainer.new()
-	power_nudge_row.add_theme_constant_override("separation", 4)
-	advanced_stack.add_child(power_nudge_row)
+	var power_nudge_grid := GridContainer.new()
+	power_nudge_grid.columns = 2
+	power_nudge_grid.add_theme_constant_override("h_separation", 4)
+	power_nudge_grid.add_theme_constant_override("v_separation", 4)
+	responsive_two_column_grids.append(power_nudge_grid)
+	advanced_stack.add_child(power_nudge_grid)
 	for power_spec_value in [
 		{"label": "Power -1%", "delta": -0.01},
 		{"label": "Power +1%", "delta": 0.01},
 	]:
 		var power_spec: Dictionary = power_spec_value as Dictionary
 		var power_button: Button = _add_action_button(
-			power_nudge_row,
+			power_nudge_grid,
 			str(power_spec["label"]),
 			_on_nudge_power_pressed.bind(float(power_spec["delta"]))
 		)
@@ -284,20 +327,105 @@ func _build_ui() -> void:
 	scoring_modifier_selector.item_selected.connect(_on_scoring_modifier_selected)
 	_register_interactive(scoring_modifier_selector)
 	stack.add_child(scoring_modifier_selector)
-	var scoring_actions := GridContainer.new()
-	scoring_actions.columns = 2
-	scoring_actions.add_theme_constant_override("h_separation", 6)
-	scoring_actions.add_theme_constant_override("v_separation", 6)
-	stack.add_child(scoring_actions)
-	inspect_score_button = _add_action_button(scoring_actions, "Inspect Score", _on_inspect_score_pressed)
-	copy_score_summary_button = _add_action_button(scoring_actions, "Copy Summary", _on_copy_score_summary_pressed)
-	copy_score_json_button = _add_action_button(scoring_actions, "Copy Score JSON", _on_copy_score_json_pressed)
-	scoring_self_test_button = _add_action_button(scoring_actions, "Scoring Self-Test", _on_scoring_self_test_pressed)
+	var scoring_quick_grid := GridContainer.new()
+	scoring_quick_grid.columns = 2
+	scoring_quick_grid.add_theme_constant_override("h_separation", 6)
+	scoring_quick_grid.add_theme_constant_override("v_separation", 6)
+	responsive_two_column_grids.append(scoring_quick_grid)
+	stack.add_child(scoring_quick_grid)
+	inspect_score_button = _add_action_button(scoring_quick_grid, "Inspect Score", _on_inspect_score_pressed)
+	copy_score_summary_button = _add_action_button(scoring_quick_grid, "Copy Summary", _on_copy_score_summary_pressed)
+	copy_score_json_button = _add_action_button(scoring_quick_grid, "Copy Score JSON", _on_copy_score_json_pressed)
+	instant_tally_check = CheckBox.new()
+	instant_tally_check.text = "Instant Tally"
+	instant_tally_check.custom_minimum_size = Vector2(0.0, 33.0)
+	instant_tally_check.add_theme_font_override("font", UI_FONT)
+	instant_tally_check.add_theme_font_size_override("font_size", 14)
+	instant_tally_check.toggled.connect(_on_instant_tally_toggled)
+	instant_tally_check.set_meta("allow_during_score_tally", true)
+	_register_interactive(instant_tally_check)
+	scoring_quick_grid.add_child(instant_tally_check)
+	var scoring_long_actions := VBoxContainer.new()
+	scoring_long_actions.add_theme_constant_override("separation", 6)
+	stack.add_child(scoring_long_actions)
+	scoring_self_test_button = _add_action_button(scoring_long_actions, "Score Test", _on_scoring_self_test_pressed)
+	scoring_self_test_button.tooltip_text = "Scoring Self-Test\nRun the complete Haul x Mult scoring self-test suite."
+	replay_tally_button = _add_action_button(scoring_long_actions, "Replay Narrative", _on_replay_tally_pressed)
+	replay_tally_button.tooltip_text = "Replay Ball Narrative\nReplay the last completed ball-by-ball scoring narrative."
+
+	stack.add_child(_make_section_heading("Eight Ball Loadout"))
+	eight_ball_build_status_label = _make_label("0 / 5 slots occupied", 13, TEXT_COLOR)
+	eight_ball_build_status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(eight_ball_build_status_label)
+	for tray_slot_index in range(5):
+		var selector: OptionButton = OptionButton.new()
+		selector.name = "EightBallLoadoutSlot%d" % (tray_slot_index + 1)
+		selector.custom_minimum_size = Vector2(0.0, 31.0)
+		selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		selector.add_theme_font_override("font", UI_FONT)
+		selector.add_theme_font_size_override("font_size", 13)
+		selector.item_selected.connect(
+			_on_eight_ball_loadout_selected.bind(tray_slot_index)
+		)
+		_register_interactive(selector)
+		stack.add_child(selector)
+		eight_ball_loadout_selectors.append(selector)
+	var loadout_preset_grid: GridContainer = GridContainer.new()
+	loadout_preset_grid.columns = 2
+	loadout_preset_grid.add_theme_constant_override("h_separation", 6)
+	loadout_preset_grid.add_theme_constant_override("v_separation", 6)
+	responsive_two_column_grids.append(loadout_preset_grid)
+	stack.add_child(loadout_preset_grid)
+	for preset_spec_value in [
+		{"label": "Single Bank Trio", "id": "single_bank_trio"},
+		{"label": "Double Bank Trio", "id": "double_bank_trio"},
+		{"label": "Triple Bank Trio", "id": "triple_bank_trio"},
+		{"label": "Combination Trio", "id": "combination_trio"},
+		{"label": "Bank/Combo Hybrid", "id": "bank_combo_hybrid"},
+		{"label": "Direct Pot Trio", "id": "direct_pot_trio"},
+		{"label": "Direct Trio + Dead Reckoning", "id": "direct_pot_trio_dead_reckoning"},
+		{"label": "Multi-Pot Trio", "id": "multi_pot_trio"},
+		{"label": "Same-Pocket Trio", "id": "same_pocket_trio"},
+		{"label": "Direct/Multi Hybrid", "id": "direct_multi_hybrid"},
+		{"label": "Multi/Same-Pocket Hybrid", "id": "multi_same_pocket_hybrid"},
+	]:
+		var preset_spec: Dictionary = preset_spec_value as Dictionary
+		var preset_button: Button = _add_action_button(
+			loadout_preset_grid,
+			str(preset_spec.get("label", "Loadout")),
+			_on_eight_ball_loadout_preset_pressed.bind(str(preset_spec.get("id", "")))
+		)
+		eight_ball_loadout_buttons.append(preset_button)
+	var loadout_action_grid: GridContainer = GridContainer.new()
+	loadout_action_grid.columns = 2
+	loadout_action_grid.add_theme_constant_override("h_separation", 6)
+	loadout_action_grid.add_theme_constant_override("v_separation", 6)
+	responsive_two_column_grids.append(loadout_action_grid)
+	stack.add_child(loadout_action_grid)
+	var clear_loadout_button: Button = _add_action_button(
+		loadout_action_grid,
+		"Clear Loadout",
+		_on_clear_eight_ball_loadout_pressed
+	)
+	var copy_loadout_button: Button = _add_action_button(
+		loadout_action_grid,
+		"Copy Loadout",
+		_on_copy_eight_ball_loadout_pressed
+	)
+	build_diagnostics_button = _add_action_button(
+		loadout_action_grid,
+		"Open Build Diagnostics",
+		_on_open_build_diagnostics_pressed
+	)
+	eight_ball_loadout_buttons.append(clear_loadout_button)
+	eight_ball_loadout_buttons.append(copy_loadout_button)
+	eight_ball_loadout_buttons.append(build_diagnostics_button)
 
 	var inspect_grid := GridContainer.new()
 	inspect_grid.columns = 2
 	inspect_grid.add_theme_constant_override("h_separation", 6)
 	inspect_grid.add_theme_constant_override("v_separation", 6)
+	responsive_two_column_grids.append(inspect_grid)
 	stack.add_child(inspect_grid)
 	inspect_button = _add_action_button(inspect_grid, "Inspect Result", _on_inspect_pressed)
 	raw_events_button = _add_action_button(inspect_grid, "Raw Events", _on_raw_events_pressed)
@@ -308,15 +436,19 @@ func _build_ui() -> void:
 	suite_progress_label = _make_label("Ready", 13, TEXT_COLOR)
 	suite_progress_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	stack.add_child(suite_progress_label)
-	var suite_row := HBoxContainer.new()
-	suite_row.add_theme_constant_override("separation", 6)
-	stack.add_child(suite_row)
-	run_suite_button = _add_action_button(suite_row, "Run Suite", _on_run_suite_pressed)
-	repeat_suite_button = _add_action_button(suite_row, "Run 5x", _on_run_repeatability_suite_pressed)
-	cancel_suite_button = _add_action_button(suite_row, "Cancel Suite", _on_cancel_suite_pressed)
+	var suite_run_grid := GridContainer.new()
+	suite_run_grid.columns = 2
+	suite_run_grid.add_theme_constant_override("h_separation", 6)
+	suite_run_grid.add_theme_constant_override("v_separation", 6)
+	responsive_two_column_grids.append(suite_run_grid)
+	stack.add_child(suite_run_grid)
+	run_suite_button = _add_action_button(suite_run_grid, "Run Suite", _on_run_suite_pressed)
+	repeat_suite_button = _add_action_button(suite_run_grid, "Run 5x", _on_run_repeatability_suite_pressed)
+	cancel_suite_button = _add_action_button(stack, "Cancel Suite", _on_cancel_suite_pressed)
 
 	_build_collapsed_panel()
 	_build_exit_confirmation()
+	_build_build_diagnostics_dialog()
 	_normalize_dock_mouse_filters()
 	_set_collapsed(session_collapsed)
 
@@ -362,6 +494,21 @@ func _build_exit_confirmation() -> void:
 	exit_confirmation.get_cancel_button().text = "Stay"
 
 
+func _build_build_diagnostics_dialog() -> void:
+	build_diagnostics_dialog = AcceptDialog.new()
+	build_diagnostics_dialog.title = "Eight Ball Build Diagnostics"
+	build_diagnostics_dialog.process_mode = Node.PROCESS_MODE_ALWAYS
+	add_child(build_diagnostics_dialog)
+	build_diagnostics_text = TextEdit.new()
+	build_diagnostics_text.custom_minimum_size = Vector2(700.0, 520.0)
+	build_diagnostics_text.editable = false
+	build_diagnostics_text.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	build_diagnostics_text.add_theme_font_override("font", UI_FONT)
+	build_diagnostics_text.add_theme_font_size_override("font_size", 14)
+	build_diagnostics_text.add_theme_color_override("font_color", TEXT_COLOR)
+	build_diagnostics_dialog.add_child(build_diagnostics_text)
+
+
 func _refresh(snapshot: Dictionary) -> void:
 	latest_snapshot = snapshot.duplicate(true)
 	_refresh_preset_selector(snapshot)
@@ -396,8 +543,15 @@ func _refresh(snapshot: Dictionary) -> void:
 	freeze_warning_label.visible = not frozen
 	_refresh_result(_dictionary_value(snapshot, "last_result"))
 	_refresh_scoring(_dictionary_value(snapshot, "scoring"))
+	_refresh_eight_ball_build(_dictionary_value(snapshot, "eight_ball_build"))
 	_refresh_suite(suite)
+	_refresh_tally_controls(suite)
 	_refresh_control_availability(snapshot)
+
+
+func _on_tally_state_changed(_snapshot: Dictionary) -> void:
+	if shot_lab_system != null:
+		_refresh(shot_lab_system.get_snapshot())
 
 
 func _refresh_reference_status(snapshot: Dictionary) -> void:
@@ -502,6 +656,11 @@ func _refresh_scoring(scoring_snapshot: Dictionary) -> void:
 			_format_mult(float(actual.get("final_mult", 1.0))),
 			int(actual.get("shot_score", 0)),
 		])
+		var payout: Dictionary = _dictionary_value(actual, "doubloon_payout")
+		lines.append("Base Haul: %d  Expected Doubloons: %d" % [
+			int(actual.get("base_haul", 0)),
+			int(payout.get("doubloons_awarded", 0)),
+		])
 	if not predicted.is_empty():
 		lines.append("Predicted: %d | Actual: %s" % [
 			int(predicted.get("shot_score", 0)),
@@ -534,6 +693,50 @@ func _refresh_scoring(scoring_snapshot: Dictionary) -> void:
 			selected_index = index
 	if scoring_modifier_selector.item_count > 0:
 		scoring_modifier_selector.select(selected_index)
+
+
+func _refresh_eight_ball_build(build_section: Dictionary) -> void:
+	var choices: Array = _array_value(build_section, "choices")
+	var build_snapshot: Dictionary = _dictionary_value(build_section, "snapshot")
+	var item_ids_value: Variant = build_snapshot.get("item_ids_by_slot", [])
+	var item_ids: Array = item_ids_value if item_ids_value is Array else []
+	for tray_slot_index in range(eight_ball_loadout_selectors.size()):
+		var selector: OptionButton = eight_ball_loadout_selectors[tray_slot_index]
+		var selected_item_id: String = (
+			str(item_ids[tray_slot_index])
+			if tray_slot_index < item_ids.size()
+			else ""
+		)
+		selector.clear()
+		var selected_index: int = 0
+		for choice_value in choices:
+			if not choice_value is Dictionary:
+				continue
+			var choice: Dictionary = choice_value as Dictionary
+			var choice_id: String = str(choice.get("value", ""))
+			var item_index: int = selector.item_count
+			selector.add_item("Slot %d: %s" % [
+				tray_slot_index + 1,
+				str(choice.get("label", "Empty")),
+			])
+			selector.set_item_metadata(item_index, choice_id)
+			selector.set_item_tooltip(item_index, str(choice.get("description", "")))
+			if choice_id == selected_item_id:
+				selected_index = item_index
+		if selector.item_count > 0:
+			selector.select(selected_index)
+	var occupied: int = maxi(int(build_snapshot.get("occupied_slots", 0)), 0)
+	var parity: Dictionary = _dictionary_value(
+		_dictionary_value(build_snapshot, "last_shot"),
+		"predicted_actual_build_parity"
+	)
+	var parity_text: String = "Not compared"
+	if bool(parity.get("available", false)):
+		parity_text = "PASS" if bool(parity.get("matches", false)) else "FAIL"
+	eight_ball_build_status_label.text = "%d / 5 slots occupied | Last parity: %s" % [
+		occupied,
+		parity_text,
+	]
 
 
 func _refresh_suite(suite: Dictionary) -> void:
@@ -588,14 +791,15 @@ func _refresh_control_availability(snapshot: Dictionary) -> void:
 		not last_result.is_empty()
 		and str(last_result.get("status", "")) != "NOT RUN"
 	)
-	var manual_locked: bool = shot_active or suite_running
+	var tally_active: bool = tally_presenter != null and tally_presenter.is_active()
+	var manual_locked: bool = shot_active or suite_running or tally_active
 	preset_selector.disabled = manual_locked
 	load_button.disabled = manual_locked
 	fire_button.disabled = manual_locked or not active or not selected_loaded or not balls_idle or not bool(snapshot.get("reference_can_fire", false))
 	reset_button.disabled = manual_locked or not active or not selected_loaded
 	rerun_button.disabled = manual_locked or not active or not selected_loaded or not bool(snapshot.get("last_reference_fired", false))
 	var rewind: Dictionary = _dictionary_value(snapshot, "rewind")
-	rewind_button.disabled = manual_locked or not selected_loaded or not bool(rewind.get("available", false))
+	rewind_button.disabled = shot_active or suite_running or not selected_loaded or not bool(rewind.get("available", false))
 	reference_aim_check.disabled = manual_locked
 	freeze_consequences_check.disabled = shot_active
 	ordinary_balls_check.disabled = manual_locked
@@ -609,10 +813,21 @@ func _refresh_control_availability(snapshot: Dictionary) -> void:
 	var last_scoring: Dictionary = _dictionary_value(scoring, "last")
 	var has_score: bool = not _dictionary_value(last_scoring, "authoritative").is_empty()
 	scoring_modifier_selector.disabled = manual_locked
+	for selector in eight_ball_loadout_selectors:
+		selector.disabled = manual_locked
+	for button in eight_ball_loadout_buttons:
+		button.disabled = manual_locked
 	inspect_score_button.disabled = not has_score
 	copy_score_summary_button.disabled = not has_score
 	copy_score_json_button.disabled = not has_score
 	scoring_self_test_button.disabled = shot_active
+	if replay_tally_button != null:
+		replay_tally_button.disabled = (
+			tally_presenter == null
+			or tally_active
+			or suite_running
+			or tally_presenter.get_last_score_result().is_empty()
+		)
 	run_suite_button.disabled = manual_locked
 	repeat_suite_button.disabled = manual_locked
 	cancel_suite_button.disabled = not suite_running
@@ -635,27 +850,67 @@ func _refresh_control_availability(snapshot: Dictionary) -> void:
 	repeat_suite_button.text = "Run 5x Again" if suite_completed else "Run 5x"
 
 
+func _refresh_tally_controls(suite: Dictionary) -> void:
+	if instant_tally_check == null:
+		return
+	instant_tally_check.set_pressed_no_signal(
+		tally_presenter != null and tally_presenter.is_instant_tally_enabled()
+	)
+	instant_tally_check.disabled = bool(suite.get("running", false))
+
+
 func _layout_hud() -> void:
 	if banner_panel == null or dock_panel == null or collapsed_panel == null:
 		return
 	var viewport_size: Vector2 = get_viewport_rect().size
-	var active_dock_width: float = COLLAPSED_SIZE.x if session_collapsed else DOCK_SIZE.x
-	var banner_area_width: float = maxf(viewport_size.x - active_dock_width - VIEWPORT_MARGIN * 2.0, 320.0)
-	var banner_size := Vector2(minf(BANNER_SIZE.x, banner_area_width), BANNER_SIZE.y)
-	banner_panel.size = banner_size
-	banner_panel.position = Vector2(
-		VIEWPORT_MARGIN + maxf((banner_area_width - banner_size.x) * 0.5, 0.0),
-		18.0
+	var horizontal_margin: float = minf(VIEWPORT_MARGIN, maxf(viewport_size.x * 0.025, 8.0))
+	var vertical_margin: float = minf(VIEWPORT_MARGIN, maxf(viewport_size.y * 0.025, 4.0))
+	var dock_size := Vector2(
+		minf(DOCK_SIZE.x, maxf(viewport_size.x - horizontal_margin * 2.0, 1.0)),
+		minf(DOCK_SIZE.y, maxf(viewport_size.y - vertical_margin * 2.0, 1.0))
 	)
-	dock_panel.size = DOCK_SIZE
+	var collapsed_size := Vector2(
+		minf(COLLAPSED_SIZE.x, maxf(viewport_size.x - horizontal_margin * 2.0, 1.0)),
+		minf(COLLAPSED_SIZE.y, maxf(viewport_size.y - vertical_margin * 2.0, 1.0))
+	)
+	var active_dock_width: float = collapsed_size.x if session_collapsed else dock_size.x
+	var banner_area_width: float = maxf(
+		viewport_size.x - active_dock_width - horizontal_margin * 3.0,
+		0.0
+	)
+	var banner_width: float = minf(BANNER_SIZE.x, banner_area_width)
+	var banner_height: float = (
+		BANNER_WRAPPED_HEIGHT if banner_width < BANNER_WRAP_WIDTH else BANNER_SIZE.y
+	)
+	var banner_size := Vector2(banner_width, banner_height)
+	var banner_top: float = SCORE_HUD_BOTTOM + BANNER_SCORE_GAP
+	banner_panel.visible = (
+		banner_size.x >= BANNER_MIN_WIDTH
+		and banner_top + banner_size.y + vertical_margin <= viewport_size.y
+	)
+	if banner_panel.visible:
+		banner_panel.size = banner_size
+		banner_panel.position = Vector2(
+			horizontal_margin + maxf((banner_area_width - banner_size.x) * 0.5, 0.0),
+			banner_top
+		)
+
+	var use_single_column: bool = dock_size.x < DOCK_SINGLE_COLUMN_WIDTH
+	for grid in responsive_two_column_grids:
+		if is_instance_valid(grid):
+			grid.columns = 1 if use_single_column else 2
+	if aim_nudge_grid != null:
+		aim_nudge_grid.columns = 2 if use_single_column else 4
+
+	dock_panel.size = dock_size
 	dock_panel.position = Vector2(
-		maxf(viewport_size.x - DOCK_SIZE.x - VIEWPORT_MARGIN, VIEWPORT_MARGIN),
-		maxf((viewport_size.y - DOCK_SIZE.y) * 0.5, 4.0)
+		viewport_size.x - dock_size.x - horizontal_margin,
+		(viewport_size.y - dock_size.y) * 0.5
 	)
-	collapsed_panel.size = COLLAPSED_SIZE
+	collapsed_panel.size = collapsed_size
 	collapsed_panel.position = Vector2(
-		maxf(viewport_size.x - COLLAPSED_SIZE.x - VIEWPORT_MARGIN, VIEWPORT_MARGIN),
-		maxf((viewport_size.y - COLLAPSED_SIZE.y) * 0.5, 4.0)
+		viewport_size.x - collapsed_size.x - horizontal_margin,
+		(viewport_size.y - collapsed_size.y) * 0.5
 	)
 
 
@@ -734,6 +989,51 @@ func _on_copy_score_json_pressed() -> void:
 
 func _on_scoring_self_test_pressed() -> void:
 	shot_lab_system.run_scoring_self_tests()
+
+
+func _on_eight_ball_loadout_selected(index: int, tray_slot_index: int) -> void:
+	if shot_lab_system == null or tray_slot_index < 0 or tray_slot_index >= eight_ball_loadout_selectors.size():
+		return
+	var selector: OptionButton = eight_ball_loadout_selectors[tray_slot_index]
+	if index < 0 or index >= selector.item_count:
+		return
+	shot_lab_system.set_eight_ball_loadout_slot(
+		tray_slot_index,
+		str(selector.get_item_metadata(index))
+	)
+
+
+func _on_eight_ball_loadout_preset_pressed(preset_id: String) -> void:
+	if shot_lab_system != null:
+		shot_lab_system.load_eight_ball_loadout_preset(preset_id)
+
+
+func _on_clear_eight_ball_loadout_pressed() -> void:
+	if shot_lab_system != null:
+		shot_lab_system.clear_eight_ball_loadout()
+
+
+func _on_copy_eight_ball_loadout_pressed() -> void:
+	if shot_lab_system != null:
+		shot_lab_system.copy_eight_ball_loadout()
+
+
+func _on_open_build_diagnostics_pressed() -> void:
+	if shot_lab_system == null or build_diagnostics_dialog == null:
+		return
+	var diagnostics: Dictionary = shot_lab_system.get_eight_ball_build_diagnostics()
+	build_diagnostics_text.text = _format_build_diagnostics(diagnostics)
+	build_diagnostics_dialog.popup_centered(Vector2i(760, 620))
+
+
+func _on_replay_tally_pressed() -> void:
+	if tally_presenter != null:
+		tally_presenter.replay_last_ball_narrative(false)
+
+
+func _on_instant_tally_toggled(enabled: bool) -> void:
+	if tally_presenter != null:
+		tally_presenter.set_instant_tally(enabled)
 
 
 func _on_raw_events_pressed() -> void:
@@ -843,6 +1143,72 @@ func _make_check_box(text_value: String, option_id: String) -> CheckBox:
 func _register_interactive(control: Control) -> void:
 	control.mouse_filter = Control.MOUSE_FILTER_STOP
 	interactive_controls.append(control)
+
+
+func _format_build_diagnostics(diagnostics: Dictionary) -> String:
+	if not bool(diagnostics.get("available", false)):
+		return "BUILD UNAVAILABLE\n%s" % str(diagnostics.get("reason", "Unknown reason"))
+	var catalog: Dictionary = _dictionary_value(diagnostics, "catalog")
+	var build: Dictionary = _dictionary_value(diagnostics, "build")
+	var last_shot: Dictionary = _dictionary_value(diagnostics, "last_shot")
+	var authoritative: Dictionary = _dictionary_value(last_shot, "authoritative")
+	var parity: Dictionary = _dictionary_value(last_shot, "predicted_actual_build_parity")
+	var slot_ids_value: Variant = build.get("item_ids_by_slot", [])
+	var slot_ids: Array = slot_ids_value if slot_ids_value is Array else []
+	var lines: Array[String] = [
+		"EIGHT BALL BUILD",
+		"Catalog: %s (%d / %d definitions)" % [
+			"VALID" if bool(catalog.get("valid", false)) else "INVALID",
+			int(catalog.get("definition_count", 0)),
+			int(catalog.get(
+				"expected_definition_count",
+				EIGHT_BALL_CATALOG.EXPECTED_DEFINITION_COUNT
+			)),
+		],
+		"Tray: %d / %d occupied" % [
+			int(build.get("occupied_slots", 0)),
+			int(build.get("tray_capacity", 5)),
+		],
+	]
+	for slot_index in range(5):
+		var item_id: String = str(slot_ids[slot_index]) if slot_index < slot_ids.size() else ""
+		lines.append("Slot %d: %s" % [slot_index + 1, item_id if not item_id.is_empty() else "<empty>"])
+	lines.append("")
+	lines.append("COUNTERS")
+	lines.append("Acquisitions: %d | Replacements: %d | Duplicate rejects: %d" % [
+		int(build.get("acquisitions", 0)),
+		int(build.get("replacements", 0)),
+		int(build.get("duplicate_rejection_count", 0)),
+	])
+	lines.append("Build generation/version: %d / %d" % [
+		int(build.get("build_generation", 0)),
+		int(build.get("build_version", 0)),
+	])
+	lines.append("")
+	lines.append("LAST SHOT")
+	lines.append("Trigger counts: %s" % JSON.stringify(authoritative.get("trigger_count_by_id", {})))
+	lines.append("Modifier activations: %d" % int(authoritative.get("modifier_activation_count", 0)))
+	lines.append("Activation counts by slot: %s" % JSON.stringify(authoritative.get("activation_count_by_tray_slot", {})))
+	lines.append("Add Haul: %s | Add Mult: %s | xMult: %s" % [
+		str(authoritative.get("add_haul_total", 0)),
+		str(authoritative.get("add_mult_total", 0)),
+		_format_mult(float(authoritative.get("xmult_product", 1.0))),
+	])
+	lines.append("Items not triggered: %s" % JSON.stringify(authoritative.get("items_not_triggered", [])))
+	if bool(parity.get("available", false)):
+		lines.append("Predicted / authoritative parity: %s" % (
+			"PASS" if bool(parity.get("matches", false)) else "FAIL"
+		))
+	else:
+		lines.append("Predicted / authoritative parity: NOT COMPARED")
+	var self_test: Dictionary = _dictionary_value(build, "last_self_test_result")
+	lines.append("")
+	lines.append("SELF-TEST: %s | %d passed | %d failed" % [
+		str(self_test.get("status", "NOT RUN")),
+		int(self_test.get("passed", 0)),
+		int(self_test.get("failed", 0)),
+	])
+	return "\n".join(lines)
 
 
 func _format_mult(value: float) -> String:

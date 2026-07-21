@@ -12,6 +12,7 @@ const PROGRESSIVE_DEEP_AIM_REVEAL := "progressive_deep_aim_reveal"
 const DEEP_AIM_REVEAL_DURATION_MS := "deep_aim_reveal_duration_ms"
 const KEEP_STALE_DEEP_AIM_FAINTLY_VISIBLE := "keep_stale_deep_aim_faintly_visible"
 const SHOW_STAGING_STATUS := "show_staging_status"
+const LONG_SINK_FULL_PREDICTION_PATHS := "long_sink_full_prediction_paths"
 
 
 static func get_configuration_schema() -> Array[Dictionary]:
@@ -97,6 +98,16 @@ static func get_configuration_schema() -> Array[Dictionary]:
 			"on_effect": "The stale route remains faint and is marked stale in Debug Aim Mode.",
 			"off_effect": "Old deep geometry hides immediately when aim changes.",
 			"keywords": ["stale route", "comparison", "old prediction"],
+		},
+		{
+			"key": LONG_SINK_FULL_PREDICTION_PATHS,
+			"label": "Long Sink Full Prediction Paths",
+			"type": "bool",
+			"default": true,
+			"description": "Shows every retained causally activated cloned trajectory in The Long Sink and Shot Lab. Passage aim scope is unchanged.",
+			"on_effect": "Long Sink and Shot Lab reveal all retained moving-ball paths and endpoint ghosts.",
+			"off_effect": "Long Sink and Shot Lab use the compact settled cloned route presentation.",
+			"keywords": ["full paths", "long sink aim", "shot lab trajectories", "causal routes"],
 		},
 		{
 			"key": SHOW_STAGING_STATUS,

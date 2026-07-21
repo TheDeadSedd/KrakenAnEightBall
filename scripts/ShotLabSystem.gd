@@ -8,6 +8,7 @@ signal reference_suite_completed(result: Dictionary)
 
 const PRESET_CATALOG := preload("res://scripts/ShotLabPresetCatalog.gd")
 const GAME_MODE_SCRIPT := preload("res://scripts/GameModeSystem.gd")
+const EIGHT_BALL_CATALOG := preload("res://scripts/RogueliteEightBallCatalog.gd")
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const DEFAULT_OPTIONS := {
 	"auto_fire_after_load": false,
@@ -25,6 +26,9 @@ const REFERENCE_POWER_NUDGE := 0.01
 const REPEATABILITY_ATTEMPTS := 5
 const REFERENCE_LAUNCH_SPEED_EPSILON := 0.001
 const REFERENCE_LAUNCH_DIRECTION_DOT_MIN := 0.999999
+const REFERENCE_COMMIT_ORIGIN_TOLERANCE_PX := 0.01
+const REFERENCE_COMMIT_VELOCITY_TOLERANCE := 0.01
+const REFERENCE_COMMIT_POWER_TOLERANCE := 0.000001
 
 const AIM_ROLE_CENTER := "role_center"
 const AIM_ROLE_OFFSET := "role_offset"
@@ -52,6 +56,71 @@ const SCORING_MODIFIER_CHOICES := [
 	{"label": "All Test Modifiers", "value": SCORING_MODIFIER_ALL},
 ]
 
+const EIGHT_BALL_LOADOUT_PRESETS := {
+	"single_bank_trio": [
+		"single_bank_haul_crooked_coin",
+		"single_bank_mult_first_toll",
+		"single_bank_xmult_rogue_current",
+	],
+	"double_bank_trio": [
+		"double_bank_haul_twin_tribute",
+		"double_bank_mult_second_bell",
+		"double_bank_xmult_crossed_tides",
+	],
+	"triple_bank_trio": [
+		"triple_bank_haul_threefold_plunder",
+		"triple_bank_mult_third_toll",
+		"triple_bank_xmult_krakens_trine",
+	],
+	"combination_trio": [
+		"combination_haul_shared_spoils",
+		"combination_mult_chain_of_command",
+		"combination_xmult_conspirators_cut",
+	],
+	"bank_combo_hybrid": [
+		"single_bank_haul_crooked_coin",
+		"double_bank_mult_second_bell",
+		"double_bank_xmult_crossed_tides",
+		"combination_haul_shared_spoils",
+		"combination_xmult_conspirators_cut",
+	],
+	"direct_pot_trio": [
+		"direct_pot_haul_clean_plunder",
+		"direct_pot_mult_true_bearing",
+		"direct_pot_xmult_unerring_course",
+	],
+	"direct_pot_trio_dead_reckoning": [
+		"direct_pot_haul_clean_plunder",
+		"direct_pot_mult_true_bearing",
+		"direct_pot_xmult_unerring_course",
+		"direct_pot_legendary_dead_reckoning",
+	],
+	"multi_pot_trio": [
+		"multi_pot_haul_loaded_hold",
+		"multi_pot_mult_all_hands",
+		"multi_pot_xmult_broadside_dividend",
+	],
+	"same_pocket_trio": [
+		"same_pocket_haul_shared_grave",
+		"same_pocket_mult_feeding_frenzy",
+		"same_pocket_xmult_the_maw_below",
+	],
+	"direct_multi_hybrid": [
+		"direct_pot_haul_clean_plunder",
+		"direct_pot_mult_true_bearing",
+		"multi_pot_haul_loaded_hold",
+		"multi_pot_mult_all_hands",
+		"multi_pot_xmult_broadside_dividend",
+	],
+	"multi_same_pocket_hybrid": [
+		"multi_pot_haul_loaded_hold",
+		"multi_pot_mult_all_hands",
+		"same_pocket_haul_shared_grave",
+		"same_pocket_mult_feeding_frenzy",
+		"same_pocket_xmult_the_maw_below",
+	],
+}
+
 var table: BilliardsTable
 var presets: Array[Dictionary] = []
 var selected_preset_id := "direct_pot"
@@ -67,6 +136,8 @@ var last_load_error := ""
 var setup_generation := 0
 var resolved_reference: Dictionary = {}
 var reference_preflight: Dictionary = {}
+var reference_prediction_commit_bundle: Dictionary = {}
+var reference_preflight_generation := 0
 var active_reference_attempt: Dictionary = {}
 var suite_running := false
 var suite_cancel_requested := false
@@ -101,6 +172,15 @@ func setup(table_ref: BilliardsTable) -> void:
 		table.shot_ledger_system.shot_ledger_completed.connect(_on_shot_ledger_completed)
 	if not table.shot_rewind_system.rewind_completed.is_connected(_on_shot_rewind_completed):
 		table.shot_rewind_system.rewind_completed.connect(_on_shot_rewind_completed)
+	if (
+		table.roguelite_build_system != null
+		and not table.roguelite_build_system.diagnostics_changed.is_connected(
+			_on_eight_ball_build_changed
+		)
+	):
+		table.roguelite_build_system.diagnostics_changed.connect(
+			_on_eight_ball_build_changed
+		)
 	_sync_scoring_modifier_context()
 	set_process(false)
 	_emit_state()
@@ -121,6 +201,8 @@ func enter_dedicated_session(configuration: Dictionary = {}) -> bool:
 	setup_generation = 0
 	resolved_reference.clear()
 	reference_preflight.clear()
+	reference_prediction_commit_bundle.clear()
+	reference_preflight_generation = 0
 	active_reference_attempt.clear()
 	suite_running = false
 	suite_cancel_requested = false
@@ -138,6 +220,8 @@ func enter_dedicated_session(configuration: Dictionary = {}) -> bool:
 	cue_restoration_failures = 0
 	last_cue_restoration_error = ""
 	scoring_test_modifier_mode = SCORING_MODIFIER_NONE
+	if table != null and table.roguelite_build_system != null:
+		table.roguelite_build_system.clear_shot_lab_loadout("shot_lab_session_start")
 	_sync_scoring_modifier_context()
 	var requested_preset_id: String = str(configuration.get("selected_preset_id", selected_preset_id))
 	if not PRESET_CATALOG.get_preset(requested_preset_id).is_empty():
@@ -210,6 +294,106 @@ func get_active_preset_id() -> String:
 
 func get_scoring_modifier_choices() -> Array:
 	return SCORING_MODIFIER_CHOICES.duplicate(true)
+
+
+func get_eight_ball_loadout_choices() -> Array[Dictionary]:
+	var choices: Array[Dictionary] = [{
+		"label": "Empty",
+		"value": "",
+		"description": "Leave this tray slot empty.",
+	}]
+	for definition in EIGHT_BALL_CATALOG.get_all_definitions():
+		choices.append({
+			"label": str(definition.get("display_name", "Eight Ball")),
+			"value": str(definition.get("eight_ball_item_id", "")),
+			"description": str(definition.get("short_effect", "")),
+		})
+	return choices
+
+
+func get_eight_ball_loadout_snapshot() -> Dictionary:
+	if table == null or table.roguelite_build_system == null:
+		return {}
+	return table.roguelite_build_system.get_shot_lab_loadout_snapshot()
+
+
+func set_eight_ball_loadout_slot(tray_slot_index: int, eight_ball_item_id: String) -> Dictionary:
+	if _is_authoritative_shot_active() or suite_running:
+		status_changed.emit("Shot Lab: Eight Ball loadout is locked while a test is active.")
+		return {"success": false, "reason": "shot_lab_busy"}
+	var build_system: RogueliteBuildSystem = _get_eight_ball_build_system()
+	if build_system == null:
+		status_changed.emit("Shot Lab: Eight Ball build system unavailable.")
+		return {"success": false, "reason": "build_system_unavailable"}
+	if tray_slot_index < 0 or tray_slot_index >= RogueliteBuildSystem.TRAY_CAPACITY:
+		return {"success": false, "reason": "invalid_tray_slot"}
+	var item_ids: Array[String] = _get_shot_lab_loadout_ids(build_system)
+	item_ids[tray_slot_index] = eight_ball_item_id.strip_edges()
+	var result: Dictionary = build_system.set_shot_lab_loadout(item_ids)
+	if not bool(result.get("success", false)):
+		status_changed.emit("Shot Lab loadout rejected: %s." % str(result.get("reason", "invalid loadout")))
+		return result
+	_refresh_reference_for_build_change("eight_ball_loadout_slot_changed")
+	status_changed.emit("Shot Lab Eight Ball slot %d updated." % (tray_slot_index + 1))
+	_emit_state()
+	return result
+
+
+func clear_eight_ball_loadout() -> void:
+	if _is_authoritative_shot_active() or suite_running:
+		status_changed.emit("Shot Lab: Eight Ball loadout is locked while a test is active.")
+		return
+	var build_system: RogueliteBuildSystem = _get_eight_ball_build_system()
+	if build_system == null:
+		return
+	build_system.clear_shot_lab_loadout("shot_lab_manual_clear")
+	_refresh_reference_for_build_change("eight_ball_loadout_cleared")
+	status_changed.emit("Shot Lab Eight Ball loadout cleared.")
+	_emit_state()
+
+
+func load_eight_ball_loadout_preset(preset_id: String) -> Dictionary:
+	if _is_authoritative_shot_active() or suite_running:
+		status_changed.emit("Shot Lab: Eight Ball loadout is locked while a test is active.")
+		return {"success": false, "reason": "shot_lab_busy"}
+	var preset_value: Variant = EIGHT_BALL_LOADOUT_PRESETS.get(preset_id, [])
+	if not preset_value is Array:
+		return {"success": false, "reason": "unknown_loadout_preset"}
+	var build_system: RogueliteBuildSystem = _get_eight_ball_build_system()
+	if build_system == null:
+		return {"success": false, "reason": "build_system_unavailable"}
+	var result: Dictionary = build_system.set_shot_lab_loadout((preset_value as Array).duplicate())
+	if not bool(result.get("success", false)):
+		status_changed.emit("Shot Lab loadout rejected: %s." % str(result.get("reason", "invalid loadout")))
+		return result
+	_refresh_reference_for_build_change("eight_ball_loadout_preset_changed")
+	status_changed.emit("Shot Lab Eight Ball preset loaded: %s." % preset_id.replace("_", " ").capitalize())
+	_emit_state()
+	return result
+
+
+func copy_eight_ball_loadout() -> bool:
+	var snapshot: Dictionary = get_eight_ball_loadout_snapshot()
+	if snapshot.is_empty():
+		return false
+	DisplayServer.clipboard_set(JSON.stringify(_to_json_safe({
+		"item_ids_by_slot": snapshot.get("item_ids_by_slot", []),
+		"slots": snapshot.get("slots", []),
+	}), "  "))
+	status_changed.emit("Shot Lab Eight Ball loadout copied.")
+	return true
+
+
+func get_eight_ball_build_diagnostics() -> Dictionary:
+	var build_system: RogueliteBuildSystem = _get_eight_ball_build_system()
+	if build_system == null:
+		return {"available": false, "reason": "build_system_unavailable"}
+	return {
+		"available": true,
+		"catalog": EIGHT_BALL_CATALOG.validate_catalog(),
+		"build": build_system.get_shot_lab_loadout_snapshot(),
+		"last_shot": build_system.get_last_shot_diagnostics(),
+	}
 
 
 func set_scoring_test_modifier_mode(mode_id: String) -> void:
@@ -342,18 +526,30 @@ func fire_reference_shot() -> bool:
 	active_reference_attempt = {
 		"resolved_reference": resolved_reference.duplicate(true),
 		"preflight": reference_preflight.duplicate(true),
+		"committed_prediction": {
+			"generation": int(reference_prediction_commit_bundle.get("prediction_generation", 0)),
+			"key": str(reference_prediction_commit_bundle.get("prediction_key", "")),
+			"request_snapshot": _dictionary_value(
+				reference_prediction_commit_bundle,
+				"request_snapshot"
+			).duplicate(true),
+		},
 		"setup_generation": setup_generation,
 		"suite_repeat_index": suite_repeat_index,
 		"commit_requested_usec": Time.get_ticks_usec(),
 	}
 	last_reference_fired = table.commit_debug_reference_shot(
 		direction,
-		power_normalized
+		power_normalized,
+		reference_prediction_commit_bundle.duplicate(true)
 	)
 	if not last_reference_fired:
 		active_reference_attempt["commit_succeeded"] = false
 		status_changed.emit("Shot Lab: reference shot could not be committed.")
 	else:
+		# The exact preflight is a one-shot commitment token. Rewind/setup refresh
+		# produces a fresh token for the next physical attempt.
+		reference_prediction_commit_bundle.clear()
 		active_reference_attempt["commit_succeeded"] = true
 		var actual_launch_velocity: Vector2 = (
 			table.cue_ball.velocity
@@ -411,6 +607,8 @@ func clear_shot_lab() -> void:
 	role_to_ball_id.clear()
 	resolved_reference.clear()
 	reference_preflight.clear()
+	reference_prediction_commit_bundle.clear()
+	reference_preflight_generation = 0
 	active_reference_attempt.clear()
 	last_result.clear()
 	last_reference_fired = false
@@ -593,6 +791,8 @@ func run_reference_repeatability_suite() -> bool:
 func _start_reference_suite(repeat_target: int) -> bool:
 	if suite_running or _is_authoritative_shot_active():
 		return false
+	if table != null and table.roguelite_scoring_system != null:
+		table.roguelite_scoring_system.set_shot_lab_apply_test_doubloon_payout(false)
 	suite_running = true
 	suite_cancel_requested = false
 	suite_index = 0
@@ -661,6 +861,16 @@ func get_snapshot() -> Dictionary:
 		"reference_fire_blocker": reference_fire_blocker,
 		"resolved_reference": resolved_reference.duplicate(true),
 		"reference_preflight": reference_preflight.duplicate(true),
+		"reference_prediction_commit": {
+			"ready": _get_reference_prediction_commit_blocker().is_empty(),
+			"generation": int(reference_prediction_commit_bundle.get("prediction_generation", 0)),
+			"key": str(reference_prediction_commit_bundle.get("prediction_key", "")),
+			"blocker": _get_reference_prediction_commit_blocker(),
+			"request_snapshot": _dictionary_value(
+				reference_prediction_commit_bundle,
+				"request_snapshot"
+			).duplicate(true),
+		},
 		"active_reference_attempt": active_reference_attempt.duplicate(true),
 		"setup_generation": setup_generation,
 		"rewind": rewind_snapshot,
@@ -684,6 +894,11 @@ func get_snapshot() -> Dictionary:
 				else {}
 			),
 		},
+		"eight_ball_build": {
+			"choices": get_eight_ball_loadout_choices(),
+			"presets": EIGHT_BALL_LOADOUT_PRESETS.duplicate(true),
+			"snapshot": get_eight_ball_loadout_snapshot(),
+		},
 		"suite": {
 			"running": suite_running,
 			"completed": suite_completed,
@@ -704,6 +919,37 @@ func get_snapshot() -> Dictionary:
 			"current_preset_name": _get_suite_current_preset_name(),
 		},
 	}
+
+
+func _on_eight_ball_build_changed(_snapshot: Dictionary) -> void:
+	if not dedicated_session:
+		return
+	_emit_state()
+
+
+func _get_eight_ball_build_system() -> RogueliteBuildSystem:
+	if table == null:
+		return null
+	return table.roguelite_build_system
+
+
+func _get_shot_lab_loadout_ids(build_system: RogueliteBuildSystem) -> Array[String]:
+	var snapshot: Dictionary = build_system.get_shot_lab_loadout_snapshot()
+	var values: Variant = snapshot.get("item_ids_by_slot", [])
+	var item_ids: Array[String] = []
+	if values is Array:
+		for value in values as Array:
+			item_ids.append(str(value))
+	while item_ids.size() < RogueliteBuildSystem.TRAY_CAPACITY:
+		item_ids.append("")
+	if item_ids.size() > RogueliteBuildSystem.TRAY_CAPACITY:
+		item_ids.resize(RogueliteBuildSystem.TRAY_CAPACITY)
+	return item_ids
+
+
+func _refresh_reference_for_build_change(reason: String) -> void:
+	if active and not loaded_preset.is_empty():
+		_refresh_reference_state(reason)
 
 
 func notify_authoritative_shot_started() -> void:
@@ -1144,6 +1390,7 @@ func _resolve_reference_pocket_index(reference: Dictionary) -> int:
 
 
 func _build_reference_preflight(resolved: Dictionary) -> Dictionary:
+	reference_prediction_commit_bundle.clear()
 	var preflight: Dictionary = {
 		"status": PREFLIGHT_NOT_RUN,
 		"failure_reason": "",
@@ -1175,6 +1422,7 @@ func _build_reference_preflight(resolved: Dictionary) -> Dictionary:
 	preflight["expected_first_contact_role"] = expected_first if not expected_first.is_empty() else "none"
 	preflight["expected_pocket_roles"] = expected_pockets.duplicate()
 
+	reference_preflight_generation += 1
 	var prediction: Dictionary = table.aim_preview.simulate_shot_lab_reference(
 		resolved.get("cue_world_position", Vector2.ZERO),
 		resolved.get("launch_velocity", Vector2.ZERO)
@@ -1187,6 +1435,11 @@ func _build_reference_preflight(resolved: Dictionary) -> Dictionary:
 	preflight["prediction_event_count"] = _array_value(prediction, "events").size()
 	preflight["prediction_ball_count"] = _array_value(prediction, "balls").size()
 	preflight["prediction_unsupported_warnings"] = _array_value(prediction, "unsupported_warnings").duplicate(true)
+	if prediction_valid:
+		reference_prediction_commit_bundle = _make_reference_prediction_commit_bundle(
+			resolved,
+			prediction
+		)
 
 	var issues: Array[String] = []
 	var warnings: Array[String] = []
@@ -1279,6 +1532,42 @@ func _build_reference_preflight(resolved: Dictionary) -> Dictionary:
 	preflight["warnings"] = warnings
 	preflight["failure_policy"] = failure_policy
 	return preflight
+
+
+func _make_reference_prediction_commit_bundle(
+	resolved: Dictionary,
+	prediction: Dictionary
+) -> Dictionary:
+	var request_value: Variant = prediction.get("reference_request_snapshot", {})
+	if not request_value is Dictionary:
+		return {}
+	var request_snapshot: Dictionary = (request_value as Dictionary).duplicate(true)
+	request_snapshot.merge({
+		"source": "shot_lab_reference_preflight",
+		"request_id": reference_preflight_generation,
+		"setup_generation": setup_generation,
+		"preflight_generation": reference_preflight_generation,
+		"preset_id": str(loaded_preset.get("preset_id", "")),
+		"cue_ball_id": int(resolved.get("cue_ball_id", -1)),
+		"cue_origin": resolved.get("cue_world_position", Vector2.ZERO),
+		"world_direction": resolved.get("world_direction", Vector2.ZERO),
+		"launch_velocity": resolved.get("launch_velocity", Vector2.ZERO),
+		"launch_speed": float(resolved.get("launch_speed", 0.0)),
+		"power_normalized": float(resolved.get("power_normalized", 0.0)),
+		"player_request_class": "shot_lab_reference",
+	}, true)
+	return {
+		"accepted": true,
+		"status": "shot_lab_reference_preflight_at_commit",
+		"prediction_generation": reference_preflight_generation,
+		"prediction_key": "%s:%d:%d" % [
+			str(prediction.get("reference_prediction_key", "shot_lab_reference")),
+			setup_generation,
+			reference_preflight_generation,
+		],
+		"request_snapshot": request_snapshot,
+		"prediction_result": prediction.duplicate(true),
+	}
 
 
 func _make_predicted_reference_ledger(prediction: Dictionary) -> Dictionary:
@@ -1394,6 +1683,66 @@ func _get_reference_fire_blocker() -> String:
 		return "Wait for all balls to stop."
 	if str(reference_preflight.get("status", PREFLIGHT_NOT_RUN)) == PREFLIGHT_FAIL:
 		return "REFERENCE INVALID: %s" % str(reference_preflight.get("failure_reason", "Preflight failed."))
+	var prediction_blocker: String = _get_reference_prediction_commit_blocker()
+	if not prediction_blocker.is_empty():
+		return "REFERENCE PREDICTION STALE: %s" % prediction_blocker
+	return ""
+
+
+func _get_reference_prediction_commit_blocker() -> String:
+	if reference_prediction_commit_bundle.is_empty():
+		return "No validated cloned preflight result is available."
+	if not bool(reference_prediction_commit_bundle.get("accepted", false)):
+		return "The cloned preflight result was not accepted."
+	var request_value: Variant = reference_prediction_commit_bundle.get("request_snapshot", {})
+	var result_value: Variant = reference_prediction_commit_bundle.get("prediction_result", {})
+	if not request_value is Dictionary or not result_value is Dictionary:
+		return "The cloned preflight bundle is malformed."
+	var request_snapshot: Dictionary = request_value
+	var prediction_result: Dictionary = result_value
+	if not bool(prediction_result.get("valid", false)):
+		return "The cloned preflight result is invalid."
+	if int(request_snapshot.get("setup_generation", -1)) != setup_generation:
+		return "The setup generation changed."
+	if int(request_snapshot.get("preflight_generation", -1)) != reference_preflight_generation:
+		return "A newer reference preflight exists."
+	if str(request_snapshot.get("preset_id", "")) != str(loaded_preset.get("preset_id", "")):
+		return "The loaded preset changed."
+	var cue: Ball = _get_authoritative_role_ball("cue")
+	if cue == null or cue != table.cue_ball:
+		return "The authoritative cue changed."
+	if int(request_snapshot.get("cue_ball_id", -1)) != table.get_run_ball_id(cue):
+		return "The cue identity changed."
+	var origin_value: Variant = request_snapshot.get("cue_origin", null)
+	var direction_value: Variant = request_snapshot.get("world_direction", null)
+	var velocity_value: Variant = request_snapshot.get("launch_velocity", null)
+	if not origin_value is Vector2 or not direction_value is Vector2 or not velocity_value is Vector2:
+		return "The cloned preflight launch snapshot is incomplete."
+	if (origin_value as Vector2).distance_to(cue.global_position) > REFERENCE_COMMIT_ORIGIN_TOLERANCE_PX:
+		return "The cue origin moved."
+	var expected_direction: Vector2 = resolved_reference.get("world_direction", Vector2.ZERO)
+	var preflight_direction: Vector2 = (direction_value as Vector2).normalized()
+	if (
+		expected_direction == Vector2.ZERO
+		or preflight_direction == Vector2.ZERO
+		or preflight_direction.dot(expected_direction.normalized()) < REFERENCE_LAUNCH_DIRECTION_DOT_MIN
+	):
+		return "The reference direction changed."
+	var expected_velocity: Vector2 = resolved_reference.get("launch_velocity", Vector2.ZERO)
+	if (velocity_value as Vector2).distance_to(expected_velocity) > REFERENCE_COMMIT_VELOCITY_TOLERANCE:
+		return "The reference launch velocity changed."
+	if (
+		absf(
+			float(request_snapshot.get("power_normalized", -1.0))
+			- float(resolved_reference.get("power_normalized", 0.0))
+		) > REFERENCE_COMMIT_POWER_TOLERANCE
+	):
+		return "The reference power changed."
+	var current_revision: int = table.get_aim_prediction_state_revision()
+	if int(request_snapshot.get("table_prediction_revision", -1)) != current_revision:
+		return "The table prediction revision changed."
+	if int(prediction_result.get("table_revision", -1)) != current_revision:
+		return "The cloned result belongs to a stale table revision."
 	return ""
 
 
@@ -2108,6 +2457,8 @@ func capture_rewind_state() -> Dictionary:
 		"last_reference_fired": last_reference_fired,
 		"active_reference_attempt": active_reference_attempt.duplicate(true),
 		"reference_preflight": reference_preflight.duplicate(true),
+		"reference_prediction_commit_bundle": reference_prediction_commit_bundle.duplicate(true),
+		"reference_preflight_generation": reference_preflight_generation,
 	}
 
 
@@ -2116,6 +2467,11 @@ func restore_rewind_state(state: Dictionary) -> void:
 	last_reference_fired = bool(state.get("last_reference_fired", false))
 	active_reference_attempt = _dictionary_value(state, "active_reference_attempt").duplicate(true)
 	reference_preflight = _dictionary_value(state, "reference_preflight").duplicate(true)
+	reference_prediction_commit_bundle = _dictionary_value(
+		state,
+		"reference_prediction_commit_bundle"
+	).duplicate(true)
+	reference_preflight_generation = int(state.get("reference_preflight_generation", 0))
 
 
 func restore_completed_observation_after_rewind(state: Dictionary) -> void:

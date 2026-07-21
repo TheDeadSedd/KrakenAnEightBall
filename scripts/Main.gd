@@ -7,6 +7,20 @@ const GAMEPLAY_SCENE_PATH := "res://scenes/Main.tscn"
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const GAME_MODE_SCRIPT := preload("res://scripts/GameModeSystem.gd")
 const SHOT_LAB_HUD_SCRIPT := preload("res://scripts/ShotLabHUD.gd")
+const ROGUELITE_SCORE_TALLY_HUD_SCRIPT := preload("res://scripts/RogueliteScoreTallyHUD.gd")
+const ROGUELITE_SCORE_TALLY_PRESENTER_SCRIPT := preload("res://scripts/RogueliteScoreTallyPresenter.gd")
+const ROGUELITE_PROGRESS_HUD_SCRIPT := preload("res://scripts/RogueliteProgressHUD.gd")
+const ROGUELITE_WORLD_SCORE_PRESENTER_SCRIPT := preload("res://scripts/RogueliteWorldScorePresenter.gd")
+const ROGUELITE_BUILD_TRAY_HUD_SCRIPT := preload("res://scripts/RogueliteBuildTrayHUD.gd")
+const ROGUELITE_BALANCE_ANALYZER_SCRIPT := preload(
+	"res://scripts/RogueliteBalanceAnalyzer.gd"
+)
+const ROGUELITE_BALANCE_REPORT_PANEL_SCRIPT := preload(
+	"res://scripts/RogueliteBalanceReportPanel.gd"
+)
+const ROGUELITE_BALANCE_ANALYZER_TESTS_PATH := (
+	"res://scripts/RogueliteBalanceAnalyzerTests.gd"
+)
 const COMPLETION_PANEL_SIZE := Vector2(620.0, 710.0)
 const BACK_ROOM_PANEL_VIEWPORT_MARGIN := 24.0
 
@@ -51,10 +65,18 @@ var roguelite_hud: RogueliteHUD
 var roguelite_round_panel: RogueliteRoundPanel
 var roguelite_reward_panel: RogueliteRewardPanel
 var shot_lab_hud: ShotLabHUD
+var roguelite_score_tally_hud: RogueliteScoreTallyHUD
+var roguelite_score_tally_presenter: RogueliteScoreTallyPresenter
+var roguelite_progress_hud: RogueliteProgressHUD
+var roguelite_world_score_presenter: RogueliteWorldScorePresenter
+var roguelite_build_tray_hud: RogueliteBuildTrayHUD
+var roguelite_balance_report_panel
+var pending_roguelite_follow_up: Dictionary = {}
 var game_mode_id: String = GAME_MODE_SCRIPT.MODE_PASSAGE
 var pending_debug_session_snapshot: Dictionary = {}
 var pending_shot_lab_session_config: Dictionary = {}
 var reset_table_in_progress := false
+var balance_report_return_to_pause := false
 
 
 func _enter_tree() -> void:
@@ -66,6 +88,20 @@ func _enter_tree() -> void:
 	if table_node != null:
 		table_node.set_game_mode_id(game_mode_id)
 		table_node.set_shot_lab_session_config(pending_shot_lab_session_config)
+		table_node.set_pending_roguelite_balance_tuning_configuration(
+			_get_pending_roguelite_balance_tuning_configuration()
+		)
+
+
+func _get_pending_roguelite_balance_tuning_configuration() -> Dictionary:
+	var pause_value: Variant = pending_debug_session_snapshot.get("pause_menu", {})
+	if not pause_value is Dictionary:
+		return {}
+	var tuning_value: Variant = (pause_value as Dictionary).get(
+		"roguelite_balance_tuning_configuration",
+		{}
+	)
+	return (tuning_value as Dictionary).duplicate(true) if tuning_value is Dictionary else {}
 
 
 func get_game_mode_id() -> String:
@@ -216,6 +252,14 @@ func _connect_pause_menu_signals() -> void:
 		pause_menu.debug_reset_last_shot_button_toggled.connect(_on_pause_debug_reset_last_shot_button_toggled)
 	if not pause_menu.quartermaster_cancel_placement_requested.is_connected(_on_pause_quartermaster_cancel_placement_requested):
 		pause_menu.quartermaster_cancel_placement_requested.connect(_on_pause_quartermaster_cancel_placement_requested)
+	if not pause_menu.debug_balance_report_requested.is_connected(_on_balance_report_requested):
+		pause_menu.debug_balance_report_requested.connect(_on_balance_report_requested)
+	if not pause_menu.debug_balance_analyzer_self_test_requested.is_connected(
+		_on_balance_analyzer_self_test_requested
+	):
+		pause_menu.debug_balance_analyzer_self_test_requested.connect(
+			_on_balance_analyzer_self_test_requested
+		)
 
 
 func _connect_hud_signals() -> void:
@@ -258,8 +302,11 @@ func _setup_hud_presenters() -> void:
 	kraken_boon_hud.setup(table.kraken_boon_system)
 	_build_sunken_spoils_ui()
 	_build_roguelite_hud()
+	_build_roguelite_build_tray_hud()
 	_build_roguelite_round_panel()
 	_build_roguelite_reward_panel()
+	_build_roguelite_balance_report_panel()
+	_build_roguelite_score_tally()
 	_on_run_stats_changed(table.run_stats_system.get_run_stats_snapshot())
 	reserve_slots_ui.setup(table.reserve_system, table)
 	quartermaster_hud.setup(table.quartermaster_system, table)
@@ -270,8 +317,12 @@ func _setup_hud_presenters() -> void:
 	_build_shot_lab_hud()
 	pause_menu.configure_dev_options_debug_overlay(debug_overlay)
 	pause_menu.configure_dev_options_ball_audio(table.ball_audio_system)
+	pause_menu.configure_dev_options_score_tally(roguelite_score_tally_presenter)
+	pause_menu.configure_dev_options_roguelite_balance(table.roguelite_balance_tuning)
 	table.shot_rewind_system.set_ui_bridge(self)
 	debug_overlay.set_shot_rewind_state(table.shot_rewind_system.get_state_snapshot())
+	if not table.shot_rewind_system.rewind_completed.is_connected(_on_shot_rewind_completed):
+		table.shot_rewind_system.rewind_completed.connect(_on_shot_rewind_completed)
 	_apply_mode_visibility()
 
 
@@ -282,7 +333,7 @@ func _build_shot_lab_hud() -> void:
 	shot_lab_hud.name = "ShotLabHUD"
 	shot_lab_hud.process_mode = Node.PROCESS_MODE_ALWAYS
 	debug_overlay.add_child(shot_lab_hud)
-	shot_lab_hud.setup(table.shot_lab_system)
+	shot_lab_hud.setup(table.shot_lab_system, roguelite_score_tally_presenter)
 	shot_lab_hud.inspect_result_requested.connect(_on_shot_lab_inspect_result_requested)
 	shot_lab_hud.inspect_score_requested.connect(_on_shot_lab_inspect_score_requested)
 	shot_lab_hud.raw_events_requested.connect(_on_shot_lab_raw_events_requested)
@@ -389,6 +440,27 @@ func _build_roguelite_hud() -> void:
 	roguelite_hud.set_visible_for_roguelite(table.is_roguelite_mode())
 
 
+func _build_roguelite_build_tray_hud() -> void:
+	if table == null or table.roguelite_build_system == null:
+		return
+	if roguelite_build_tray_hud == null:
+		roguelite_build_tray_hud = (
+			ROGUELITE_BUILD_TRAY_HUD_SCRIPT.new() as RogueliteBuildTrayHUD
+		)
+		roguelite_build_tray_hud.name = "RogueliteBuildTrayHUD"
+		roguelite_build_tray_hud.process_mode = Node.PROCESS_MODE_ALWAYS
+		debug_overlay.add_child(roguelite_build_tray_hud)
+	if not table.roguelite_build_system.diagnostics_changed.is_connected(
+		_on_roguelite_build_changed
+	):
+		table.roguelite_build_system.diagnostics_changed.connect(
+			_on_roguelite_build_changed
+		)
+	roguelite_build_tray_hud.set_build_snapshot(table.get_roguelite_build_snapshot())
+	roguelite_build_tray_hud.set_layout_on_left(_is_shot_lab_mode())
+	roguelite_build_tray_hud.set_hover_ui_suppressed(table.should_suppress_hover_ui())
+
+
 func _build_roguelite_round_panel() -> void:
 	if roguelite_round_panel != null:
 		return
@@ -400,6 +472,7 @@ func _build_roguelite_round_panel() -> void:
 	roguelite_round_panel.continue_requested.connect(_on_roguelite_continue_requested)
 	roguelite_round_panel.restart_requested.connect(_on_roguelite_restart_requested)
 	roguelite_round_panel.abandon_requested.connect(_on_roguelite_abandon_requested)
+	roguelite_round_panel.balance_report_requested.connect(_on_balance_report_requested)
 
 
 func _build_roguelite_reward_panel() -> void:
@@ -411,6 +484,94 @@ func _build_roguelite_reward_panel() -> void:
 	roguelite_reward_panel.process_mode = Node.PROCESS_MODE_ALWAYS
 	debug_overlay.add_child(roguelite_reward_panel)
 	roguelite_reward_panel.reward_selected.connect(_on_roguelite_reward_selected)
+	roguelite_reward_panel.replacement_selected.connect(
+		_on_roguelite_reward_replacement_selected
+	)
+	roguelite_reward_panel.keep_current_course_requested.connect(
+		_on_roguelite_keep_current_course_requested
+	)
+	roguelite_reward_panel.replacement_canceled.connect(
+		_on_roguelite_reward_replacement_canceled
+	)
+
+
+func _build_roguelite_balance_report_panel() -> void:
+	if roguelite_balance_report_panel != null:
+		return
+	roguelite_balance_report_panel = ROGUELITE_BALANCE_REPORT_PANEL_SCRIPT.new()
+	roguelite_balance_report_panel.name = "RogueliteBalanceReportPanel"
+	roguelite_balance_report_panel.process_mode = Node.PROCESS_MODE_ALWAYS
+	debug_overlay.add_child(roguelite_balance_report_panel)
+	roguelite_balance_report_panel.close_requested.connect(
+		_on_balance_report_closed
+	)
+
+
+func _build_roguelite_score_tally() -> void:
+	if roguelite_score_tally_presenter != null or table == null:
+		return
+
+	roguelite_score_tally_hud = ROGUELITE_SCORE_TALLY_HUD_SCRIPT.new() as RogueliteScoreTallyHUD
+	roguelite_score_tally_hud.name = "RogueliteScoreTallyHUD"
+	roguelite_score_tally_hud.process_mode = Node.PROCESS_MODE_ALWAYS
+	debug_overlay.add_child(roguelite_score_tally_hud)
+
+	roguelite_progress_hud = ROGUELITE_PROGRESS_HUD_SCRIPT.new() as RogueliteProgressHUD
+	roguelite_progress_hud.name = "RogueliteProgressHUD"
+	roguelite_progress_hud.process_mode = Node.PROCESS_MODE_ALWAYS
+	debug_overlay.add_child(roguelite_progress_hud)
+
+	roguelite_world_score_presenter = (
+		ROGUELITE_WORLD_SCORE_PRESENTER_SCRIPT.new() as RogueliteWorldScorePresenter
+	)
+	roguelite_world_score_presenter.name = "RogueliteWorldScorePresenter"
+	roguelite_world_score_presenter.process_mode = Node.PROCESS_MODE_ALWAYS
+	debug_overlay.add_child(roguelite_world_score_presenter)
+	roguelite_world_score_presenter.setup(table, roguelite_progress_hud)
+
+	roguelite_score_tally_presenter = (
+		ROGUELITE_SCORE_TALLY_PRESENTER_SCRIPT.new() as RogueliteScoreTallyPresenter
+	)
+	roguelite_score_tally_presenter.name = "RogueliteScoreTallyPresenter"
+	add_child(roguelite_score_tally_presenter)
+	roguelite_score_tally_presenter.setup(table, roguelite_score_tally_hud)
+	roguelite_score_tally_presenter.set_world_presenter(roguelite_world_score_presenter)
+	roguelite_score_tally_presenter.set_live_scoring_system(
+		table.roguelite_live_scoring_system
+	)
+	if table.roguelite_live_scoring_system != null:
+		if not table.roguelite_live_scoring_system.live_cue_requested.is_connected(
+			roguelite_world_score_presenter.show_live_cue
+		):
+			table.roguelite_live_scoring_system.live_cue_requested.connect(
+				roguelite_world_score_presenter.show_live_cue
+			)
+		if not table.roguelite_live_scoring_system.shot_plan_frozen.is_connected(
+			_on_live_scoring_shot_plan_frozen
+		):
+			table.roguelite_live_scoring_system.shot_plan_frozen.connect(
+				_on_live_scoring_shot_plan_frozen
+			)
+		if not table.roguelite_live_scoring_system.shot_finalized.is_connected(
+			_on_live_scoring_shot_finalized
+		):
+			table.roguelite_live_scoring_system.shot_finalized.connect(
+				_on_live_scoring_shot_finalized
+			)
+	roguelite_score_tally_presenter.tally_completed.connect(_on_roguelite_score_tally_completed)
+	roguelite_score_tally_presenter.tally_canceled.connect(_on_roguelite_score_tally_canceled)
+	roguelite_score_tally_presenter.state_changed.connect(_on_roguelite_score_tally_state_changed)
+	roguelite_score_tally_presenter.tally_step_changed.connect(
+		_on_roguelite_score_tally_step_changed
+	)
+	if table.roguelite_run_system != null:
+		roguelite_world_score_presenter.sync_run_snapshot(
+			table.roguelite_run_system.get_snapshot(),
+			true
+		)
+	_on_roguelite_score_tally_state_changed(
+		roguelite_score_tally_presenter.get_diagnostics_snapshot()
+	)
 
 
 func _set_sunken_spoils_snapshot(snapshot: Dictionary) -> void:
@@ -525,8 +686,20 @@ func _apply_mode_visibility() -> void:
 		roguelite_round_panel.close_panel()
 	if roguelite_reward_panel != null and not roguelite_active:
 		roguelite_reward_panel.close_panel()
+	if roguelite_balance_report_panel != null and not roguelite_active:
+		roguelite_balance_report_panel.close_panel()
+		balance_report_return_to_pause = false
+	if roguelite_build_tray_hud != null:
+		roguelite_build_tray_hud.set_visible_for_build_mode(
+			roguelite_active or shot_lab_active
+		)
 	if shot_lab_hud != null:
 		shot_lab_hud.visible = shot_lab_active
+	if roguelite_world_score_presenter != null:
+		roguelite_world_score_presenter.set_mode(
+			GAME_MODE_SCRIPT.MODE_SHOT_LAB if shot_lab_active else GAME_MODE_SCRIPT.MODE_ROGUELITE,
+			roguelite_active or shot_lab_active
+		)
 
 
 func _setup_cue_progression_runtime_bridge() -> void:
@@ -692,10 +865,18 @@ func _on_sunken_spoils_status_changed(text: String) -> void:
 func _on_roguelite_state_changed(snapshot: Dictionary) -> void:
 	if roguelite_hud != null:
 		roguelite_hud.set_snapshot(snapshot)
+	if roguelite_world_score_presenter != null:
+		roguelite_world_score_presenter.sync_run_snapshot(snapshot, false)
 	_apply_mode_visibility()
 
 
 func _on_roguelite_round_cleared(snapshot: Dictionary) -> void:
+	if _queue_roguelite_follow_up("round_cleared", snapshot):
+		return
+	_present_roguelite_round_cleared(snapshot)
+
+
+func _present_roguelite_round_cleared(snapshot: Dictionary) -> void:
 	hud_feed.add_message("Round Cleared", "status")
 	if table != null and table.should_offer_roguelite_reward(snapshot):
 		var reward_snapshot: Dictionary = table.generate_roguelite_reward_offers(snapshot)
@@ -704,7 +885,10 @@ func _on_roguelite_round_cleared(snapshot: Dictionary) -> void:
 		if offers_value is Array:
 			offers = offers_value
 		if roguelite_reward_panel != null and not offers.is_empty():
-			roguelite_reward_panel.open_panel(reward_snapshot)
+			roguelite_reward_panel.open_panel(
+				reward_snapshot,
+				table.get_roguelite_build_snapshot()
+			)
 			return
 
 	if roguelite_round_panel != null:
@@ -712,20 +896,171 @@ func _on_roguelite_round_cleared(snapshot: Dictionary) -> void:
 
 
 func _on_roguelite_run_failed(snapshot: Dictionary) -> void:
+	if _queue_roguelite_follow_up("run_failed", snapshot):
+		return
+	_present_roguelite_run_failed(snapshot)
+
+
+func _present_roguelite_run_failed(snapshot: Dictionary) -> void:
 	result_label.text = ""
 	if roguelite_reward_panel != null:
 		roguelite_reward_panel.close_panel()
+	if roguelite_balance_report_panel != null:
+		roguelite_balance_report_panel.close_panel()
+		balance_report_return_to_pause = false
 	if roguelite_round_panel != null:
 		roguelite_round_panel.open_run_failed(snapshot)
 	hud_feed.add_message("Run Failed", "status")
 
 
 func _on_roguelite_run_completed(snapshot: Dictionary) -> void:
+	if _queue_roguelite_follow_up("run_completed", snapshot):
+		return
+	_present_roguelite_run_completed(snapshot)
+
+
+func _present_roguelite_run_completed(snapshot: Dictionary) -> void:
 	if roguelite_reward_panel != null:
 		roguelite_reward_panel.close_panel()
 	if roguelite_round_panel != null:
 		roguelite_round_panel.open_run_completed(snapshot)
 	hud_feed.add_message("Run Complete", "status")
+
+
+func _on_balance_report_requested() -> void:
+	if table == null:
+		hud_feed.add_message("Balance Report unavailable: table missing.", "event")
+		return
+	var telemetry_source: Dictionary = table.get_roguelite_balance_report_source()
+	if telemetry_source.is_empty():
+		hud_feed.add_message("Balance Report unavailable: no Long Sink telemetry yet.", "event")
+		return
+	var report: Dictionary = ROGUELITE_BALANCE_ANALYZER_SCRIPT.analyze(
+		telemetry_source
+	)
+	if report.is_empty() or bool(report.get("excluded", false)):
+		hud_feed.add_message("Balance Report unavailable for this mode.", "event")
+		return
+	if roguelite_balance_report_panel == null:
+		_build_roguelite_balance_report_panel()
+	if roguelite_balance_report_panel == null:
+		hud_feed.add_message("Balance Report unavailable: panel could not open.", "event")
+		return
+	balance_report_return_to_pause = pause_menu.visible
+	if balance_report_return_to_pause:
+		pause_menu.set_pause_visible(false)
+	roguelite_balance_report_panel.open_report(report)
+
+
+func _on_balance_report_closed() -> void:
+	if roguelite_balance_report_panel != null:
+		roguelite_balance_report_panel.close_panel()
+	if balance_report_return_to_pause:
+		balance_report_return_to_pause = false
+		get_tree().paused = true
+		pause_menu.set_pause_visible(true)
+
+
+func _on_balance_analyzer_self_test_requested() -> void:
+	var test_script_value: Variant = load(ROGUELITE_BALANCE_ANALYZER_TESTS_PATH)
+	if not test_script_value is Script:
+		var missing_message := "Balance Analyzer Self-Test unavailable: test harness failed to load."
+		print(missing_message)
+		hud_feed.add_message(missing_message, "event")
+		return
+	var result_value: Variant = (test_script_value as Script).call("run_all")
+	if not result_value is Dictionary:
+		var empty_message := "Balance Analyzer Self-Test failed: no result returned."
+		print(empty_message)
+		hud_feed.add_message(empty_message, "event")
+		return
+	var result: Dictionary = (result_value as Dictionary).duplicate(true)
+	var passed: int = int(result.get("passed", 0))
+	var total: int = int(result.get("total", 0))
+	var failed: int = int(result.get("failed", 0))
+	var summary := "Balance Analyzer Self-Test: %d/%d passed" % [passed, total]
+	if failed > 0:
+		summary += ", %d failed" % failed
+	print(summary)
+	var failures_value: Variant = result.get("failures", [])
+	if failures_value is Array:
+		for failure_value in failures_value as Array:
+			if not failure_value is Dictionary:
+				continue
+			var failure: Dictionary = failure_value as Dictionary
+			print("- %s" % str(failure.get("name", "Unnamed test")))
+			print("  Expected: %s" % var_to_str(failure.get("expected", {})))
+			print("  Actual:   %s" % var_to_str(failure.get("actual", {})))
+	hud_feed.add_message(summary, "event")
+
+
+func _queue_roguelite_follow_up(kind: String, snapshot: Dictionary) -> bool:
+	if (
+		roguelite_score_tally_presenter == null
+		or not roguelite_score_tally_presenter.is_active()
+	):
+		return false
+	pending_roguelite_follow_up = {
+		"kind": kind,
+		"snapshot": snapshot.duplicate(true),
+	}
+	roguelite_score_tally_presenter.set_queued_follow_up(kind)
+	return true
+
+
+func _on_roguelite_score_tally_completed(_snapshot: Dictionary) -> void:
+	_flush_queued_roguelite_follow_up()
+
+
+func _on_roguelite_score_tally_canceled(_reason: String, _snapshot: Dictionary) -> void:
+	pending_roguelite_follow_up.clear()
+	if roguelite_score_tally_presenter != null:
+		roguelite_score_tally_presenter.set_queued_follow_up("none")
+
+
+func _flush_queued_roguelite_follow_up() -> void:
+	if pending_roguelite_follow_up.is_empty():
+		if roguelite_score_tally_presenter != null:
+			roguelite_score_tally_presenter.set_queued_follow_up("none")
+		return
+	var follow_up: Dictionary = pending_roguelite_follow_up.duplicate(true)
+	pending_roguelite_follow_up.clear()
+	if roguelite_score_tally_presenter != null:
+		roguelite_score_tally_presenter.set_queued_follow_up("none")
+	var snapshot: Dictionary = {}
+	var snapshot_value: Variant = follow_up.get("snapshot", {})
+	if snapshot_value is Dictionary:
+		snapshot = (snapshot_value as Dictionary).duplicate(true)
+	match str(follow_up.get("kind", "")):
+		"round_cleared":
+			_present_roguelite_round_cleared(snapshot)
+		"run_failed":
+			_present_roguelite_run_failed(snapshot)
+		"run_completed":
+			_present_roguelite_run_completed(snapshot)
+
+
+func _on_roguelite_score_tally_state_changed(snapshot: Dictionary) -> void:
+	if debug_overlay != null:
+		debug_overlay.set_shot_lab_tally_snapshot(snapshot)
+
+
+func _on_roguelite_score_tally_step_changed(snapshot: Dictionary) -> void:
+	if roguelite_build_tray_hud == null:
+		return
+	var step_value: Variant = snapshot.get("current_step", {})
+	if step_value is Dictionary:
+		roguelite_build_tray_hud.pulse_slot_for_step(step_value as Dictionary)
+
+
+func _on_live_scoring_shot_plan_frozen(_snapshot: Dictionary) -> void:
+	if roguelite_world_score_presenter != null:
+		roguelite_world_score_presenter.set_shot_in_motion(true)
+
+
+func _on_live_scoring_shot_finalized(_snapshot: Dictionary) -> void:
+	if roguelite_world_score_presenter != null:
+		roguelite_world_score_presenter.set_shot_in_motion(false)
 
 
 func _on_roguelite_continue_requested() -> void:
@@ -740,6 +1075,8 @@ func _on_roguelite_continue_requested() -> void:
 		roguelite_reward_panel.close_panel()
 	if roguelite_hud != null:
 		roguelite_hud.set_snapshot(table.get_roguelite_run_snapshot())
+	if roguelite_world_score_presenter != null:
+		roguelite_world_score_presenter.sync_run_snapshot(table.get_roguelite_run_snapshot(), true)
 	result_label.text = ""
 	_apply_mode_visibility()
 
@@ -749,13 +1086,20 @@ func _on_roguelite_restart_requested() -> void:
 		return
 
 	end_run_in_progress = true
+	if table != null:
+		table.abandon_roguelite_balance_telemetry("restart_run")
+	_cancel_roguelite_score_tally("restart_run", true)
 	if roguelite_round_panel != null:
 		roguelite_round_panel.close_panel()
 	if roguelite_reward_panel != null:
 		roguelite_reward_panel.close_panel()
+	if roguelite_balance_report_panel != null:
+		roguelite_balance_report_panel.close_panel()
+		balance_report_return_to_pause = false
 	result_label.text = ""
 	get_tree().paused = false
 	GAME_MODE_SCRIPT.set_pending_mode(get_tree(), GAME_MODE_SCRIPT.MODE_ROGUELITE)
+	GAME_MODE_SCRIPT.set_pending_debug_session(get_tree(), _capture_debug_session_snapshot())
 	var error_code: int = get_tree().change_scene_to_file(GAMEPLAY_SCENE_PATH)
 	if error_code != OK:
 		end_run_in_progress = false
@@ -767,8 +1111,59 @@ func _on_roguelite_restart_requested() -> void:
 func _on_roguelite_reward_selected(reward_id: String) -> void:
 	if table == null or not table.is_roguelite_mode():
 		return
-	if not table.choose_roguelite_reward(reward_id):
+	var result: Dictionary = table.choose_roguelite_reward(reward_id)
+	if result.is_empty():
 		return
+	if bool(result.get("requires_replacement", false)):
+		if roguelite_reward_panel != null:
+			var reward_value: Variant = result.get("reward", {})
+			var reward: Dictionary = (
+				(reward_value as Dictionary)
+				if reward_value is Dictionary
+				else {}
+			)
+			var build_value: Variant = result.get("build_snapshot", {})
+			var build_snapshot: Dictionary = (
+				(build_value as Dictionary)
+				if build_value is Dictionary
+				else table.get_roguelite_build_snapshot()
+			)
+			roguelite_reward_panel.open_replacement_view(reward, build_snapshot)
+		return
+	if not bool(result.get("completed", false)):
+		return
+	_complete_roguelite_reward_flow()
+
+
+func _on_roguelite_reward_replacement_selected(
+	_item_id: String,
+	tray_slot_index: int
+) -> void:
+	if table == null or not table.is_roguelite_mode():
+		return
+	var result: Dictionary = table.confirm_roguelite_eight_ball_replacement(
+		tray_slot_index
+	)
+	if not bool(result.get("completed", false)):
+		return
+	_complete_roguelite_reward_flow()
+
+
+func _on_roguelite_reward_replacement_canceled() -> void:
+	if table != null:
+		table.cancel_roguelite_eight_ball_replacement()
+
+
+func _on_roguelite_keep_current_course_requested() -> void:
+	if table == null or not table.is_roguelite_mode():
+		return
+	var result: Dictionary = table.keep_current_roguelite_course()
+	if not bool(result.get("completed", false)):
+		return
+	_complete_roguelite_reward_flow()
+
+
+func _complete_roguelite_reward_flow() -> void:
 
 	if roguelite_reward_panel != null:
 		roguelite_reward_panel.close_panel()
@@ -777,15 +1172,26 @@ func _on_roguelite_reward_selected(reward_id: String) -> void:
 	_on_roguelite_continue_requested()
 
 
+func _on_roguelite_build_changed(snapshot: Dictionary) -> void:
+	if roguelite_build_tray_hud != null:
+		roguelite_build_tray_hud.set_build_snapshot(snapshot)
+
+
 func _on_roguelite_abandon_requested() -> void:
 	if end_run_in_progress:
 		return
 
 	end_run_in_progress = true
+	if table != null:
+		table.abandon_roguelite_balance_telemetry("main_menu")
+	_cancel_roguelite_score_tally("abandon_run", true)
 	if roguelite_round_panel != null:
 		roguelite_round_panel.close_panel()
 	if roguelite_reward_panel != null:
 		roguelite_reward_panel.close_panel()
+	if roguelite_balance_report_panel != null:
+		roguelite_balance_report_panel.close_panel()
+		balance_report_return_to_pause = false
 	get_tree().paused = false
 	var error_code: int = get_tree().change_scene_to_file(MAIN_MENU_SCENE_PATH)
 	if error_code != OK:
@@ -812,6 +1218,10 @@ func _on_gameplay_mouse_lock_changed(locked: bool) -> void:
 		sunken_spoils_panel.set_hover_ui_suppressed(locked)
 	if shot_lab_hud != null:
 		shot_lab_hud.set_hover_ui_suppressed(locked)
+	if roguelite_build_tray_hud != null:
+		roguelite_build_tray_hud.set_hover_ui_suppressed(locked)
+	if roguelite_reward_panel != null:
+		roguelite_reward_panel.set_hover_ui_suppressed(locked)
 
 
 func _on_cue_start_selection_changed(snapshot: Dictionary) -> void:
@@ -837,6 +1247,7 @@ func _on_shot_lab_exit_requested() -> void:
 	if end_run_in_progress:
 		return
 	end_run_in_progress = true
+	_cancel_roguelite_score_tally("exit_shot_lab", true)
 	if debug_overlay != null:
 		debug_overlay.close_shot_lab_inspectors()
 	if table != null and table.shot_lab_system != null:
@@ -943,6 +1354,7 @@ func _transition_to_shot_lab_session(run_suite: bool) -> void:
 	if end_run_in_progress:
 		return
 	end_run_in_progress = true
+	_cancel_roguelite_score_tally("mode_transition", true)
 	var selected_preset_id := "direct_pot"
 	if table != null and table.shot_lab_system != null:
 		selected_preset_id = table.shot_lab_system.get_selected_preset_id()
@@ -980,6 +1392,7 @@ func _on_pause_end_run_requested() -> void:
 		return
 
 	end_run_in_progress = true
+	_cancel_roguelite_score_tally("end_run", true)
 	if table_event_menu != null and table_event_menu.visible:
 		table_event_menu.close_menu()
 	if table != null and table.is_ball_placement_active():
@@ -1331,13 +1744,24 @@ func _on_pause_debug_reset_last_shot_button_toggled(enabled: bool) -> void:
 
 
 func _on_shot_rewind_state_changed(snapshot: Dictionary) -> void:
+	if bool(snapshot.get("restoring", false)):
+		_cancel_roguelite_score_tally("rewind_restore", false)
 	debug_overlay.set_shot_rewind_state(snapshot)
+
+
+func _on_shot_rewind_completed() -> void:
+	if roguelite_score_tally_presenter == null or table == null:
+		return
+	roguelite_score_tally_presenter.restore_last_result_observation(
+		table.roguelite_scoring_system.get_last_score_result()
+	)
 
 
 func _on_debug_reset_table_requested() -> void:
 	if reset_table_in_progress or end_run_in_progress:
 		return
 	reset_table_in_progress = true
+	_cancel_roguelite_score_tally("reset_table", true)
 	if table != null and table.shot_ledger_system != null:
 		table.shot_ledger_system.cancel_active_shot("reset_table")
 	GAME_MODE_SCRIPT.set_pending_mode(get_tree(), game_mode_id)
@@ -1388,10 +1812,19 @@ func capture_shot_rewind_ui_state() -> Dictionary:
 			else {}
 		),
 		"passage_completion_progression_award": passage_completion_progression_award.duplicate(true),
+		"roguelite_score_observation": (
+			roguelite_world_score_presenter.capture_observation()
+			if roguelite_world_score_presenter != null
+			else {}
+		),
 	}
 
 
 func restore_shot_rewind_ui_state(state: Dictionary) -> void:
+	_cancel_roguelite_score_tally("rewind_restore", false)
+	var score_observation_value: Variant = state.get("roguelite_score_observation", {})
+	if roguelite_world_score_presenter != null and score_observation_value is Dictionary:
+		roguelite_world_score_presenter.restore_observation(score_observation_value as Dictionary)
 	var progression_value: Variant = state.get("progression", {})
 	if (
 		progression_system != null
@@ -1416,6 +1849,9 @@ func restore_shot_rewind_ui_state(state: Dictionary) -> void:
 		roguelite_round_panel.close_panel()
 	if roguelite_reward_panel != null:
 		roguelite_reward_panel.close_panel()
+	if roguelite_balance_report_panel != null:
+		roguelite_balance_report_panel.close_panel()
+		balance_report_return_to_pause = false
 	if passage_completion_panel != null:
 		passage_completion_panel.visible = false
 	if passage_completion_blocker != null:
@@ -1429,6 +1865,14 @@ func restore_shot_rewind_ui_state(state: Dictionary) -> void:
 	get_tree().paused = false
 	pause_menu.set_pause_visible(false)
 	_apply_mode_visibility()
+
+
+func _cancel_roguelite_score_tally(reason: String, clear_last_result: bool) -> void:
+	pending_roguelite_follow_up.clear()
+	if roguelite_score_tally_presenter == null:
+		return
+	roguelite_score_tally_presenter.set_queued_follow_up("none")
+	roguelite_score_tally_presenter.cancel_tally(reason, clear_last_result)
 
 
 func get_shot_rewind_transition_blocker() -> String:

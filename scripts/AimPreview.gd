@@ -35,6 +35,12 @@ const PLAYER_CLONED_AIM_SOURCE := "Cloned Deterministic Predictor"
 const PLAYER_LEGACY_AIM_SOURCE := "Legacy Linear Predictor - Debug A/B"
 const PLAYER_NORMAL_AIM_VISIBLE_SCOPE := "Cue First Contact + Full First-Ball Route"
 const NORMAL_AIM_VISIBLE_DEPTH := 1
+const FULL_MODE_MAX_CAUSAL_DEPTH := 64
+const FULL_MODE_PATH_WIDTH_SCALE := 0.5
+const FULL_MODE_PATH_MIN_ALPHA := 0.26
+const FULL_MODE_PATH_DEPTH_ALPHA_STEP := 0.09
+const FULL_MODE_PATH_MIN_WIDTH := 0.65
+const FULL_MODE_PATH_MIN_GLOW_WIDTH := 1.7
 const SETTLED_CORRECTION_ENDPOINT_EPSILON_PX := 1.0
 const SETTLED_CORRECTION_ANGLE_EPSILON_DEGREES := 1.0
 
@@ -340,11 +346,13 @@ var benchmark_session: AimBenchmarkSession
 var cloned_trajectory_configuration: Dictionary = {}
 var current_cloned_prediction: Dictionary = {}
 var current_player_cloned_view: Dictionary = {}
+var _last_full_prediction_draw_snapshot: Dictionary = {}
 var _settled_aim_blend_start_usec: int = 0
 var _settled_aim_blend_progress := 1.0
 var _settled_aim_blend_active := false
 var _last_player_aim_commit_status := "immediate_only_at_commit"
 var _last_player_aim_commit_snapshot: Dictionary = {}
+var _last_committed_scoring_prediction: Dictionary = {}
 var _last_settled_correction: Dictionary = {}
 var _settled_routes_accepted := 0
 var _settled_routes_effectively_identical := 0
@@ -498,8 +506,26 @@ func simulate_shot_lab_reference(origin: Vector2, launch_velocity: Vector2) -> D
 		input_snapshot,
 		configuration
 	)
+	var configuration_hash: int = hash(var_to_str(configuration))
+	var request_snapshot: Dictionary = {
+		"source": "shot_lab_reference_preflight",
+		"cue_origin": origin,
+		"launch_velocity": launch_velocity,
+		"world_direction": launch_velocity.normalized(),
+		"launch_speed": launch_velocity.length(),
+		"table_prediction_revision": int(input_snapshot.get("table_prediction_revision", -1)),
+		"boundary_geometry_revision": int(input_snapshot.get("boundary_geometry_revision", -1)),
+		"pocket_geometry_revision": int(input_snapshot.get("pocket_geometry_revision", -1)),
+		"configuration_hash": configuration_hash,
+	}
 	result["shot_lab_reference_preflight"] = true
 	result["modifiers_bypassed"] = true
+	result["reference_request_snapshot"] = request_snapshot
+	result["reference_prediction_key"] = "shot_lab_reference:%d:%d:%d" % [
+		int(request_snapshot.get("table_prediction_revision", -1)),
+		configuration_hash,
+		hash(var_to_str([origin, launch_velocity])),
+	]
 	return result
 
 
@@ -554,6 +580,7 @@ func clear_for_authoritative_table_reset(reason: String) -> void:
 	current_cloned_prediction = {}
 	current_player_cloned_view = {}
 	_stale_cloned_prediction = {}
+	_last_committed_scoring_prediction.clear()
 	long_sight_chain_links.clear()
 	bank_debug_markers.clear()
 	last_predicted_aim_path.clear()
@@ -673,13 +700,42 @@ func update_debug(delta: float, is_dragging: bool, input_refresh_pending: bool =
 		_queue_aim_redraw()
 
 
-func start_path_comparison(origin: Vector2, initial_velocity: Vector2) -> void:
-	var commit_status: String = _get_deep_prediction_commit_status(origin, initial_velocity)
+func start_path_comparison(
+	origin: Vector2,
+	initial_velocity: Vector2,
+	committed_prediction_override: Dictionary = {}
+) -> void:
+	var override_result: Dictionary = _duplicate_dictionary_field(
+		committed_prediction_override,
+		"prediction_result"
+	)
+	var use_committed_override: bool = (
+		bool(committed_prediction_override.get("accepted", false))
+		and bool(override_result.get("valid", false))
+	)
+	var commit_status: String = (
+		str(committed_prediction_override.get("status", "shot_lab_reference_preflight_at_commit"))
+		if use_committed_override
+		else _get_deep_prediction_commit_status(origin, initial_velocity)
+	)
 	_last_player_aim_commit_status = commit_status
 	var committed_snapshot: Dictionary = (
-		_accepted_deep_request_snapshot
-		if commit_status == "settled_cloned_at_commit"
-		else {}
+		_duplicate_dictionary_field(committed_prediction_override, "request_snapshot")
+		if use_committed_override
+		else (
+			_accepted_deep_request_snapshot
+			if commit_status == "settled_cloned_at_commit"
+			else {}
+		)
+	)
+	var committed_result: Dictionary = (
+		override_result.duplicate(true)
+		if use_committed_override
+		else (
+			current_cloned_prediction.duplicate(true)
+			if commit_status == "settled_cloned_at_commit"
+			else {}
+		)
 	)
 	_last_player_aim_commit_snapshot = {
 		"status": commit_status,
@@ -692,22 +748,37 @@ func start_path_comparison(origin: Vector2, initial_velocity: Vector2) -> void:
 			"requested_visible_depth",
 			0
 		)),
-		"cache_hit": _accepted_deep_cache_hit if not committed_snapshot.is_empty() else false,
+		"cache_hit": (
+			bool(committed_result.get("cache_hit", false))
+			if use_committed_override
+			else (_accepted_deep_cache_hit if not committed_snapshot.is_empty() else false)
+		),
 		"table_prediction_revision": int(committed_snapshot.get(
 			"table_prediction_revision",
 			-1
 		)),
 		"result_stop_reason": str(
-			current_cloned_prediction.get("stop_reason", "none")
+			committed_result.get("stop_reason", "none")
 			if not committed_snapshot.is_empty()
 			else "none"
 		),
 		"result_truncated": bool(
-			current_cloned_prediction.get("truncated", false)
+			committed_result.get("truncated", false)
 			if not committed_snapshot.is_empty()
 			else false
 		),
 	}
+	if use_committed_override:
+		_last_committed_scoring_prediction = committed_prediction_override.duplicate(true)
+	else:
+		_last_committed_scoring_prediction = {
+			"accepted": not committed_result.is_empty(),
+			"status": commit_status,
+			"prediction_generation": int(committed_snapshot.get("request_id", 0)),
+			"prediction_key": _make_committed_prediction_key(committed_snapshot),
+			"request_snapshot": committed_snapshot.duplicate(true),
+			"prediction_result": committed_result,
+		}
 	if not debug_aim_path_comparison_enabled and not debug_aim_line_enabled:
 		return
 	if not _full_debug_result_evidence_enabled():
@@ -722,9 +793,9 @@ func start_path_comparison(origin: Vector2, initial_velocity: Vector2) -> void:
 	_finalize_debug_first_hit_candidate_selection(prediction)
 	var committed_deep_result: Dictionary = {}
 	var committed_request_snapshot: Dictionary = {}
-	if commit_status == "settled_cloned_at_commit":
-		committed_deep_result = current_cloned_prediction
-		committed_request_snapshot = _accepted_deep_request_snapshot
+	if not committed_result.is_empty():
+		committed_deep_result = committed_result
+		committed_request_snapshot = committed_snapshot
 	if debug_aim_line_enabled:
 		debug_persisted_shot = _make_debug_shot_overlay(
 			prediction,
@@ -749,6 +820,76 @@ func start_path_comparison(origin: Vector2, initial_velocity: Vector2) -> void:
 		aim_path_debug_timer = AIM_PATH_DEBUG_LIFETIME
 		_print_predicted_bank_debug(prediction)
 	_queue_aim_redraw()
+
+
+func get_last_committed_scoring_prediction() -> Dictionary:
+	return _last_committed_scoring_prediction.duplicate(true)
+
+
+func get_exact_commit_prediction_bundle(
+	origin: Vector2,
+	launch_velocity: Vector2
+) -> Dictionary:
+	var unaccepted_bundle: Dictionary = _make_unaccepted_commit_prediction_bundle(
+		_get_deep_prediction_commit_status(origin, launch_velocity)
+	)
+	if (
+		staged_prediction_state != STAGED_STATE_DEEP_READY
+		or not bool(current_cloned_prediction.get("valid", false))
+		or not _deep_request_snapshot_matches_commit(
+			_accepted_deep_request_snapshot,
+			origin,
+			launch_velocity
+		)
+	):
+		return unaccepted_bundle
+	return {
+		"accepted": true,
+		"status": "settled_cloned_at_commit",
+		"prediction_generation": int(_accepted_deep_request_snapshot.get("request_id", 0)),
+		"prediction_key": _make_committed_prediction_key(_accepted_deep_request_snapshot),
+		"request_snapshot": _accepted_deep_request_snapshot.duplicate(true),
+		"prediction_result": current_cloned_prediction.duplicate(true),
+	}
+
+
+func force_exact_commit_prediction(
+	origin: Vector2,
+	launch_velocity: Vector2
+) -> Dictionary:
+	var accepted_bundle: Dictionary = get_exact_commit_prediction_bundle(origin, launch_velocity)
+	if bool(accepted_bundle.get("accepted", false)):
+		return accepted_bundle
+	if not preview_active or not _has_staged_input:
+		return _make_unaccepted_commit_prediction_bundle("no_current_staged_input")
+	if not _staged_input_matches_exact_commit(origin, launch_velocity):
+		return _make_unaccepted_commit_prediction_bundle("exact_staged_input_mismatch")
+	if not _is_deep_prediction_requested():
+		return _make_unaccepted_commit_prediction_bundle("deep_prediction_not_requested")
+	_request_deep_prediction("forced_exact_commit_prediction", true)
+	return get_exact_commit_prediction_bundle(origin, launch_velocity)
+
+
+func _staged_input_matches_exact_commit(
+	origin: Vector2,
+	launch_velocity: Vector2
+) -> bool:
+	return (
+		_has_staged_input
+		and _latest_staged_origin.distance_to(origin) <= 0.001
+		and _latest_staged_launch_velocity.distance_to(launch_velocity) <= 0.001
+	)
+
+
+func _make_unaccepted_commit_prediction_bundle(status: String) -> Dictionary:
+	return {
+		"accepted": false,
+		"status": status,
+		"prediction_generation": 0,
+		"prediction_key": "",
+		"request_snapshot": {},
+		"prediction_result": {},
+	}
 
 
 func record_actual_bank_debug(
@@ -1070,6 +1211,27 @@ func set_debug_aim_line_enabled(enabled: bool) -> void:
 		debug_actual_trace_recording = false
 		_reset_debug_first_hit_candidate_log()
 	_queue_aim_redraw()
+
+
+func set_long_sink_full_prediction_paths_enabled(enabled: bool) -> void:
+	if is_long_sink_full_prediction_paths_enabled() == enabled:
+		return
+	staged_prediction_configuration[
+		AIM_STAGING_CONFIGURATION_SCRIPT.LONG_SINK_FULL_PREDICTION_PATHS
+	] = enabled
+	cloned_trajectory_configuration[
+		AIM_STAGING_CONFIGURATION_SCRIPT.LONG_SINK_FULL_PREDICTION_PATHS
+	] = enabled
+	if not enabled:
+		_last_full_prediction_draw_snapshot.clear()
+	_queue_aim_redraw()
+
+
+func is_long_sink_full_prediction_paths_enabled() -> bool:
+	return bool(staged_prediction_configuration.get(
+		AIM_STAGING_CONFIGURATION_SCRIPT.LONG_SINK_FULL_PREDICTION_PATHS,
+		true
+	))
 
 
 func set_cloned_trajectory_configuration(configuration: Dictionary) -> void:
@@ -1611,6 +1773,7 @@ func _make_deep_request_snapshot(request_id: int) -> Dictionary:
 		"result_detail_mode": _get_requested_deep_result_mode(),
 		"player_request_class": _get_current_cloned_request_class(),
 		"requested_visible_depth": _get_player_cloned_request_depth(),
+		"requested_simulation_depth": _get_player_cloned_simulation_depth(),
 		"use_debug_limits": use_debug_limits,
 		"effective_configuration_hash": hash(var_to_str(effective_configuration)),
 	}
@@ -1630,6 +1793,8 @@ func _deep_request_snapshot_matches_current(snapshot: Dictionary) -> bool:
 	if str(snapshot.get("player_request_class", "")) != _get_current_cloned_request_class():
 		return false
 	if int(snapshot.get("requested_visible_depth", -1)) != _get_player_cloned_request_depth():
+		return false
+	if int(snapshot.get("requested_simulation_depth", -1)) != _get_player_cloned_simulation_depth():
 		return false
 	var use_debug_limits: bool = debug_aim_line_enabled
 	if bool(snapshot.get("use_debug_limits", false)) != use_debug_limits:
@@ -1663,24 +1828,33 @@ func _get_requested_deep_result_mode() -> String:
 			"result_detail_mode",
 			AimTrajectoryPredictor.RESULT_MODE_FULL_DEBUG
 		))
+	var production_result_mode: String = _get_player_production_result_mode()
 	return str(AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_player_aim_configuration(
-		_get_player_cloned_request_depth(),
-		int(table.PHYSICS_SUBSTEPS) if table != null else 4
-	).get("result_detail_mode", AimTrajectoryPredictor.RESULT_MODE_PLAYER_MINIMAL))
+		_get_player_cloned_simulation_depth(),
+		int(table.PHYSICS_SUBSTEPS) if table != null else 4,
+		production_result_mode
+	).get("result_detail_mode", production_result_mode))
 
 
 func _get_effective_cloned_configuration(use_debug_limits: bool) -> Dictionary:
 	if use_debug_limits:
 		return cloned_trajectory_configuration.duplicate(true)
 	var configuration: Dictionary = AIM_TRAJECTORY_PREDICTOR_SCRIPT.get_player_aim_configuration(
-		_get_player_cloned_request_depth(),
-		int(table.PHYSICS_SUBSTEPS) if table != null else 4
+		_get_player_cloned_simulation_depth(),
+		int(table.PHYSICS_SUBSTEPS) if table != null else 4,
+		_get_player_production_result_mode()
 	)
 	configuration["enabled"] = true
 	configuration["profile_enabled"] = bool(
 		cloned_trajectory_configuration.get("profile_enabled", false)
 	)
 	return configuration
+
+
+func _get_player_production_result_mode() -> String:
+	if table != null and (table.is_roguelite_mode() or table.is_shot_lab_mode()):
+		return AimTrajectoryPredictor.RESULT_MODE_PLAYER_SCORING
+	return AimTrajectoryPredictor.RESULT_MODE_PLAYER_MINIMAL
 
 
 func _is_deep_prediction_requested() -> bool:
@@ -1703,10 +1877,58 @@ func _use_cloned_settled_normal_aim() -> bool:
 
 
 func _get_player_cloned_request_depth() -> int:
+	if _is_full_prediction_mode():
+		return _get_full_mode_causal_depth()
 	var effect_depth: int = _get_active_aim_chain_depth()
 	if effect_depth > 0 and not _is_legacy_long_sight_debug_active():
 		return effect_depth
 	return 0
+
+
+func _get_player_cloned_simulation_depth() -> int:
+	return _get_player_cloned_request_depth()
+
+
+func _is_full_prediction_mode() -> bool:
+	return table != null and (table.is_roguelite_mode() or table.is_shot_lab_mode())
+
+
+func _is_full_mode_player_visibility_enabled() -> bool:
+	return _is_full_prediction_mode() and is_long_sink_full_prediction_paths_enabled()
+
+
+func _get_full_mode_causal_depth() -> int:
+	return clampi(_get_authoritative_active_ball_count(), 1, FULL_MODE_MAX_CAUSAL_DEPTH)
+
+
+func _get_authoritative_active_ball_count() -> int:
+	if table == null or table.balls == null:
+		return 1
+	var active_ball_count := 0
+	for child in table.balls.get_children():
+		var ball: Ball = child as Ball
+		if (
+			ball != null
+			and is_instance_valid(ball)
+			and not ball.is_queued_for_deletion()
+			and ball.is_gameplay_active()
+		):
+			active_ball_count += 1
+	return maxi(active_ball_count, 1)
+
+
+func _make_committed_prediction_key(snapshot: Dictionary) -> String:
+	if snapshot.is_empty():
+		return ""
+	return "%d:%d:%d:%d" % [
+		int(snapshot.get("request_id", 0)),
+		int(snapshot.get("table_prediction_revision", -1)),
+		int(snapshot.get("effective_configuration_hash", 0)),
+		hash(var_to_str([
+			snapshot.get("cue_origin", Vector2.ZERO),
+			snapshot.get("launch_velocity", Vector2.ZERO),
+		])),
+	]
 
 
 func _get_current_cloned_request_class() -> String:
@@ -3956,6 +4178,8 @@ func _get_player_settled_aim_metrics_snapshot() -> Dictionary:
 
 
 func _get_current_player_display_source() -> String:
+	if _is_cloned_full_mode_prediction_active():
+		return "Cloned Full Causal Paths"
 	if _should_display_cloned_normal_view():
 		if _settled_aim_blend_active:
 			return "Blending Immediate -> Cloned"
@@ -4004,7 +4228,7 @@ func _get_player_aim_parity_snapshot() -> Dictionary:
 		"settled_source": PLAYER_CLONED_AIM_SOURCE,
 		"normal_visible_scope": PLAYER_NORMAL_AIM_VISIBLE_SCOPE,
 		"normal_visible_depth": NORMAL_AIM_VISIBLE_DEPTH,
-		"extended_visible_depth": _get_active_aim_chain_depth(),
+		"extended_visible_depth": _get_player_cloned_request_depth(),
 		"current_display_source": _get_current_player_display_source(),
 		"last_commit_status": _last_player_aim_commit_status,
 		"last_commit_snapshot": _last_player_aim_commit_snapshot.duplicate(true),
@@ -4049,6 +4273,74 @@ func _get_player_aim_parity_snapshot() -> Dictionary:
 		},
 		"settled_correction": _last_settled_correction.duplicate(true),
 		"settled_metrics": _get_player_settled_aim_metrics_snapshot(),
+		"player_visibility": _get_player_prediction_visibility_snapshot(),
+	}
+
+
+func _get_player_prediction_visibility_snapshot() -> Dictionary:
+	var requested_depth: int = _get_player_cloned_request_depth()
+	var configuration: Dictionary = current_cloned_prediction.get("configuration", {})
+	var internal_depth: int = int(configuration.get(
+		"max_child_generation_depth",
+		_get_player_cloned_simulation_depth()
+	))
+	var cue_source_id: int = _get_cloned_cue_source_id(current_cloned_prediction)
+	var predicted_moving_balls: int = 0
+	var predicted_capped_paths: int = 0
+	for ball_value in current_cloned_prediction.get("balls", []):
+		if not ball_value is Dictionary:
+			continue
+		var ball_result: Dictionary = ball_value
+		if not _is_retained_causal_player_path(ball_result, cue_source_id, requested_depth):
+			continue
+		predicted_moving_balls += 1
+		if _is_cloned_ball_path_capped(ball_result):
+			predicted_capped_paths += 1
+
+	var full_paths_active: bool = _is_cloned_full_mode_prediction_active()
+	var displayed_paths: int = (
+		int(_last_full_prediction_draw_snapshot.get("displayed_ball_paths", 0))
+		if full_paths_active
+		else 0
+	)
+	var endpoint_ghosts: int = (
+		int(_last_full_prediction_draw_snapshot.get("endpoint_ghosts", 0))
+		if full_paths_active
+		else 0
+	)
+	var displayed_capped_paths: int = (
+		int(_last_full_prediction_draw_snapshot.get("capped_paths", 0))
+		if full_paths_active
+		else 0
+	)
+	var long_sight_depth: int = _get_active_aim_chain_depth()
+	return {
+		"mode_full_prediction": _is_full_prediction_mode(),
+		"full_paths_enabled": is_long_sink_full_prediction_paths_enabled(),
+		"full_paths_active": full_paths_active,
+		"internal_simulated_depth": internal_depth,
+		"requested_visible_depth": requested_depth,
+		"actual_maximum_causal_depth": int(current_cloned_prediction.get(
+			"maximum_causal_depth",
+			0
+		)),
+		"authoritative_active_ball_count": _get_authoritative_active_ball_count(),
+		"predictor_depth_cap": FULL_MODE_MAX_CAUSAL_DEPTH,
+		"predicted_moving_balls": predicted_moving_balls,
+		"displayed_ball_paths": displayed_paths,
+		"hidden_ball_paths": maxi(predicted_moving_balls - displayed_paths, 0),
+		"predicted_capped_paths": predicted_capped_paths,
+		"displayed_capped_paths": displayed_capped_paths,
+		"endpoint_ghosts": endpoint_ghosts,
+		"result_truncated": bool(current_cloned_prediction.get("truncated", false)),
+		"result_stop_reason": str(current_cloned_prediction.get("stop_reason", "none")),
+		"long_sight_depth": long_sight_depth,
+		"long_sight_adds_no_extra_depth_in_roguelite": (
+			table != null
+			and table.is_roguelite_mode()
+			and is_long_sink_full_prediction_paths_enabled()
+			and long_sight_depth > 0
+		),
 	}
 
 
@@ -4095,6 +4387,7 @@ func get_debug_snapshot() -> Dictionary:
 		"cloned_profiler": _get_cloned_profiler_snapshot(),
 		"staged_prediction": _get_staged_prediction_snapshot(),
 		"player_aim_parity": _get_player_aim_parity_snapshot(),
+		"player_visibility": _get_player_prediction_visibility_snapshot(),
 		"prediction_ms": prediction_ms,
 		"prediction_frame_ms": prediction_frame_ms,
 		"prediction_recalculations": prediction_recalculations_this_frame,
@@ -4218,6 +4511,8 @@ func _draw() -> void:
 	_player_ghost_keys_drawn.clear()
 	_deep_reveal_visible_branches = 0
 	_deep_draw_cpu_us_in_progress = 0
+	if not _is_cloned_full_mode_prediction_active():
+		_last_full_prediction_draw_snapshot.clear()
 	_draw_bank_debug_markers()
 	_draw_aim_path_comparison_debug()
 	if not preview_active:
@@ -4240,7 +4535,15 @@ func _draw() -> void:
 
 
 func _draw_prediction(prediction: AimPrediction) -> void:
-	if _should_display_cloned_normal_view():
+	var full_mode_prediction_active: bool = _is_cloned_full_mode_prediction_active()
+	if full_mode_prediction_active:
+		var deep_draw_start_usec: int = Time.get_ticks_usec()
+		_draw_cloned_full_mode_prediction_paths(current_cloned_prediction)
+		_deep_draw_cpu_us_in_progress += maxi(
+			Time.get_ticks_usec() - deep_draw_start_usec,
+			0
+		)
+	elif _should_display_cloned_normal_view():
 		if _settled_aim_blend_active:
 			var cloned_alpha: float = clampf(_settled_aim_blend_progress, 0.0, 1.0)
 			_draw_immediate_player_view(prediction, 1.0 - cloned_alpha, false)
@@ -4250,15 +4553,178 @@ func _draw_prediction(prediction: AimPrediction) -> void:
 	else:
 		_draw_immediate_player_view(prediction, 1.0)
 
-	if _is_cloned_long_sight_active():
+	if not full_mode_prediction_active and _is_cloned_long_sight_active():
 		var deep_draw_start_usec: int = Time.get_ticks_usec()
 		_draw_cloned_long_sight_paths()
 		_deep_draw_cpu_us_in_progress += maxi(
 			Time.get_ticks_usec() - deep_draw_start_usec,
 			0
 		)
-	elif _is_legacy_long_sight_debug_active():
+	elif not full_mode_prediction_active and _is_legacy_long_sight_debug_active():
 		_draw_long_sight_chain()
+
+
+func _is_cloned_full_mode_prediction_active() -> bool:
+	return (
+		_is_full_mode_player_visibility_enabled()
+		and staged_prediction_state == STAGED_STATE_DEEP_READY
+		and bool(current_cloned_prediction.get("valid", false))
+	)
+
+
+func _draw_cloned_full_mode_prediction_paths(result: Dictionary) -> void:
+	var cue_source_id: int = _get_cloned_cue_source_id(result)
+	if cue_source_id < 0:
+		_last_full_prediction_draw_snapshot = {}
+		return
+	var requested_depth: int = _get_full_mode_causal_depth()
+	var retained_paths: Array[Dictionary] = []
+	for ball_value in result.get("balls", []):
+		if not ball_value is Dictionary:
+			continue
+		var ball_result: Dictionary = ball_value
+		if _is_retained_causal_player_path(ball_result, cue_source_id, requested_depth):
+			retained_paths.append(ball_result)
+	retained_paths.sort_custom(_sort_full_prediction_paths)
+
+	var displayed_paths := 0
+	var hidden_paths := 0
+	var capped_paths := 0
+	var endpoint_ghosts := 0
+	for ball_result in retained_paths:
+		var is_cue: bool = bool(ball_result.get("is_cue_ball", false))
+		var generation_depth: int = int(ball_result.get("generation_depth", 0))
+		var reveal_alpha: float = (
+			1.0
+			if is_cue or generation_depth <= 1
+			else _get_deep_reveal_alpha(generation_depth, false)
+		)
+		if reveal_alpha <= 0.001:
+			hidden_paths += 1
+			continue
+		var source_ball_id: int = int(ball_result.get("source_ball_id", -1))
+		var source_ball: Ball = _get_live_ball_by_instance_id(source_ball_id)
+		var points: Array[Vector2] = _to_vector2_points(ball_result.get("path_points", []))
+		var endpoint: Vector2 = points[points.size() - 1]
+		var ending_position_value: Variant = ball_result.get("ending_position", endpoint)
+		if ending_position_value is Vector2:
+			endpoint = ending_position_value
+		if not points[points.size() - 1].is_equal_approx(endpoint):
+			points.append(endpoint)
+		var depth_alpha: float = (
+			1.0
+			if is_cue
+			else maxf(
+				FULL_MODE_PATH_MIN_ALPHA,
+				0.86 - float(maxi(generation_depth - 1, 0)) * FULL_MODE_PATH_DEPTH_ALPHA_STEP
+			)
+		)
+		var alpha_multiplier: float = depth_alpha * reveal_alpha
+		var path_color: Color = _get_full_prediction_path_color(
+			source_ball_id,
+			cue_source_id,
+			source_ball
+		)
+		var line_width: float = maxf(
+			FULL_MODE_PATH_MIN_WIDTH,
+			(AIM_LINE_WIDTH - float(generation_depth) * 0.34) * FULL_MODE_PATH_WIDTH_SCALE
+		)
+		var glow_width: float = maxf(
+			FULL_MODE_PATH_MIN_GLOW_WIDTH,
+			(AIM_LINE_GLOW_WIDTH - float(generation_depth) * 0.82) * FULL_MODE_PATH_WIDTH_SCALE
+		)
+		var glow_alpha: float = maxf(
+			0.10,
+			AIM_LINE_GLOW_ALPHA - float(generation_depth) * 0.025
+		)
+		var segment_count: int = points.size() - 1
+		for segment_index in range(segment_count):
+			_draw_guidance_line_segment(
+				points[segment_index],
+				points[segment_index + 1],
+				path_color,
+				path_color,
+				_get_path_fade_ratio(segment_index, segment_count),
+				alpha_multiplier,
+				line_width,
+				glow_width,
+				glow_alpha,
+				FULL_MODE_PATH_MIN_WIDTH
+			)
+		var endpoint_type: String = _get_player_ghost_event_type(str(
+			ball_result.get("final_stop_reason", "cap")
+		))
+		_draw_player_ghost_ball(
+			endpoint,
+			float(ball_result.get("radius", _get_debug_cue_ball_radius())),
+			source_ball,
+			path_color,
+			endpoint_type,
+			alpha_multiplier,
+			source_ball_id
+		)
+		displayed_paths += 1
+		endpoint_ghosts += 1
+		if endpoint_type == "cap":
+			capped_paths += 1
+		_draw_predicted_balls_in_progress += 1
+		_draw_visible_paths_in_progress += 1
+		_deep_reveal_visible_branches += 1
+	_last_full_prediction_draw_snapshot = {
+		"displayed_ball_paths": displayed_paths,
+		"hidden_ball_paths": hidden_paths,
+		"capped_paths": capped_paths,
+		"endpoint_ghosts": endpoint_ghosts,
+	}
+
+
+func _is_retained_causal_player_path(
+	ball_result: Dictionary,
+	cue_source_id: int,
+	requested_depth: int
+) -> bool:
+	if cue_source_id < 0:
+		return false
+	if int(ball_result.get("causal_root_ball_id", -1)) != cue_source_id:
+		return false
+	if int(ball_result.get("generation_depth", 0)) > requested_depth:
+		return false
+	var points: Array[Vector2] = _to_vector2_points(ball_result.get("path_points", []))
+	if points.size() < 2:
+		return false
+	for point_index in range(points.size() - 1):
+		if points[point_index].distance_squared_to(points[point_index + 1]) > 0.01:
+			return true
+	return false
+
+
+func _sort_full_prediction_paths(a: Dictionary, b: Dictionary) -> bool:
+	var a_depth: int = int(a.get("generation_depth", 0))
+	var b_depth: int = int(b.get("generation_depth", 0))
+	if a_depth != b_depth:
+		return a_depth < b_depth
+	return int(a.get("source_index", 0)) < int(b.get("source_index", 0))
+
+
+func _get_full_prediction_path_color(
+	source_ball_id: int,
+	cue_source_id: int,
+	source_ball: Ball
+) -> Color:
+	if source_ball_id == cue_source_id:
+		return _get_aim_power_color(preview_power_ratio)
+	var path_color: Color = _get_cloned_ball_color(source_ball_id, cue_source_id)
+	if is_instance_valid(source_ball):
+		var identity_color: Color = source_ball.get_aim_preview_display_color()
+		path_color = path_color.lerp(identity_color, 0.24)
+	path_color.a = 1.0
+	return path_color
+
+
+func _is_cloned_ball_path_capped(ball_result: Dictionary) -> bool:
+	return _get_player_ghost_event_type(str(
+		ball_result.get("final_stop_reason", "cap")
+	)) == "cap"
 
 
 func _draw_immediate_player_view(
@@ -4822,7 +5288,8 @@ func _draw_guidance_line_segment(
 	alpha_multiplier: float,
 	inner_base_width: float,
 	glow_width: float,
-	glow_alpha: float
+	glow_alpha: float,
+	minimum_inner_width: float = 1.25
 ) -> void:
 	if start.distance_squared_to(end) <= 0.001:
 		return
@@ -4831,7 +5298,10 @@ func _draw_guidance_line_segment(
 	var fade_alpha: float = lerp(1.0, AIM_LINE_MIN_ALPHA, clamped_fade)
 	var inner_color := Color(inner_base_color.r, inner_base_color.g, inner_base_color.b, inner_base_color.a * fade_alpha * alpha_multiplier)
 	var glow_color := Color(glow_base_color.r, glow_base_color.g, glow_base_color.b, glow_alpha * fade_alpha * alpha_multiplier)
-	var inner_width: float = max(1.25, inner_base_width * lerp(1.0, 0.62, clamped_fade))
+	var inner_width: float = maxf(
+		minimum_inner_width,
+		inner_base_width * lerp(1.0, 0.62, clamped_fade)
+	)
 
 	_draw_segments_in_progress += 1
 	_draw_calls_in_progress += 2

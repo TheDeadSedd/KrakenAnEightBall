@@ -84,6 +84,13 @@ const FAILURE_REASON_SHOTS := "shots"
 const FAILURE_REASON_HULL := "hull"
 const FAILURE_REASON_EMPTY_TABLE := "empty_table"
 const FAILURE_REASON_UNKNOWN := "unknown"
+const OUTCOME_CONTINUE := "continue"
+const OUTCOME_ROUND_WON := "round_won"
+const OUTCOME_RUN_FAILED_HULL := "run_failed_hull"
+const OUTCOME_RUN_FAILED_SHOTS := "run_failed_shots"
+const OUTCOME_RUN_FAILED_EMPTY_TABLE := "run_failed_empty_table"
+const MAX_RESOLVED_SHOT_TRANSACTION_KEYS := 256
+const BALANCE_TUNING_SCRIPT := preload("res://scripts/RogueliteBalanceTuning.gd")
 
 var current_round_index := 0
 var round_number := 1
@@ -99,17 +106,46 @@ var run_completed_state := false
 var failure_reason: String = FAILURE_REASON_UNKNOWN
 var total_quota_score_earned: int = 0
 var highest_single_round_score: int = 0
+var pending_shot_hull_damage: int = 0
+var pending_shot_transaction_key: String = ""
+var resolved_shot_transaction_keys: Dictionary = {}
+var resolved_shot_transaction_key_order: Array[String] = []
+var last_completed_shot_transaction: Dictionary = {}
+var last_rejected_shot_transaction: Dictionary = {}
+var completed_shot_transaction_count: int = 0
+var duplicate_shot_transaction_suppressions: int = 0
+var rejected_shot_transaction_count: int = 0
+var queued_hull_damage_count: int = 0
+var duplicate_hull_damage_queue_suppressions: int = 0
+var shot_transaction_state_emit_count: int = 0
+var shot_transaction_terminal_signal_count: int = 0
+var unkeyed_shot_transaction_serial: int = 0
+var doubloon_payout_applier: Callable
+var last_doubloon_payout_result: Dictionary = {}
+var doubloon_payout_application_count: int = 0
+var doubloon_payout_duplicate_suppressions: int = 0
+var doubloons_awarded_from_shot_payouts: int = 0
 var reward_system: RogueliteRewardSystem
+var active_balance_tuning_snapshot: Dictionary = {}
 
 
 func set_reward_system(system: RogueliteRewardSystem) -> void:
 	reward_system = system
 
 
+func set_doubloon_payout_applier(applier: Callable) -> void:
+	doubloon_payout_applier = applier
+
+
+func set_balance_tuning_snapshot(snapshot: Dictionary) -> void:
+	active_balance_tuning_snapshot = snapshot.duplicate(true)
+
+
 func start_run() -> void:
 	current_round_index = 0
 	if reward_system != null:
 		reward_system.reset_run_state()
+	_reset_shot_transaction_state()
 	hull = _get_current_max_hull()
 	failure_reason = FAILURE_REASON_UNKNOWN
 	total_quota_score_earned = 0
@@ -120,14 +156,13 @@ func start_run() -> void:
 
 
 func start_current_round() -> void:
+	_clear_queued_shot_consequences()
 	var setup: Dictionary = get_current_round_setup()
 	round_number = int(setup.get("round_number", 1))
 	round_target = maxi(int(setup.get("target", 0)), 0)
 	round_score = 0
 	shots_left = maxi(int(setup.get("shots", 0)), 0)
 	object_ball_count = maxi(int(setup.get("object_balls", 0)), 0)
-	if reward_system != null:
-		reward_system.begin_round(round_number)
 	round_active = true
 	round_won_state = false
 	run_failed_state = false
@@ -163,95 +198,192 @@ func get_current_round_setup() -> Dictionary:
 		return {}
 	var safe_index: int = clampi(current_round_index, 0, ROUND_SETUPS.size() - 1)
 	var setup: Dictionary = ROUND_SETUPS[safe_index] as Dictionary
-	var base_setup: Dictionary = setup.duplicate(true)
-	if reward_system != null:
-		return reward_system.get_effective_round_setup(base_setup)
-	return base_setup
+	var effective_setup: Dictionary = setup.duplicate(true)
+	var authored_target: int = maxi(int(setup.get("target", 0)), 0)
+	var quota_multiplier: float = BALANCE_TUNING_SCRIPT.get_quota_multiplier_from_snapshot(
+		active_balance_tuning_snapshot
+	)
+	effective_setup["authored_target"] = authored_target
+	effective_setup["quota_multiplier"] = quota_multiplier
+	effective_setup["target"] = maxi(
+		int(roundf(float(authored_target) * quota_multiplier)),
+		0
+	)
+	return effective_setup
 
 
 func get_round_count() -> int:
 	return ROUND_SETUPS.size()
 
 
-func add_round_score(amount: int) -> void:
-	if not round_active or round_won_state or run_failed_state or run_completed_state:
-		return
-	if amount <= 0:
-		return
-
-	round_score += amount
-	total_quota_score_earned += amount
-	highest_single_round_score = maxi(highest_single_round_score, round_score)
-	if round_score >= round_target:
-		round_won_state = true
-		round_active = false
-		_emit_state()
-		round_won.emit(get_snapshot())
-		return
-
-	_emit_state()
-
-
-func consume_shot() -> void:
-	if run_failed_state or run_completed_state:
-		return
-
-	shots_left = maxi(0, shots_left - 1)
-	if not round_won_state and shots_left <= 0 and round_score < round_target:
-		failure_reason = FAILURE_REASON_SHOTS
-		run_failed_state = true
-		round_active = false
-		_emit_state()
-		run_failed.emit(get_snapshot())
-		return
-
-	_emit_state()
-
-
-func apply_reward_effect_snapshot(effect_snapshot: Dictionary) -> void:
-	var restore_hull_amount: int = maxi(int(effect_snapshot.get("restore_hull", 0)), 0)
-	if restore_hull_amount > 0:
-		hull = mini(hull + restore_hull_amount, _get_current_max_hull())
-		_emit_state()
-
-
-func damage_hull(amount: int = 1) -> Dictionary:
-	if run_failed_state or run_completed_state:
-		return get_snapshot()
-
+# Production callers should pass the stable ledger attempt key. Blank keys stay
+# safe for compatibility and receive a bounded run-local identity at settlement.
+func queue_shot_hull_damage(amount: int = 1, transaction_key: String = "") -> Dictionary:
+	var normalized_key: String = transaction_key.strip_edges()
 	var damage_amount: int = maxi(amount, 0)
 	if damage_amount <= 0:
-		return get_snapshot()
+		return _make_hull_queue_result(false, false, normalized_key, "damage_not_positive")
+	if not _is_round_eligible_for_shot_resolution():
+		return _make_hull_queue_result(false, false, normalized_key, "round_not_eligible")
+	if not normalized_key.is_empty() and resolved_shot_transaction_keys.has(normalized_key):
+		duplicate_hull_damage_queue_suppressions += 1
+		return _make_hull_queue_result(false, true, normalized_key, "transaction_already_resolved")
+	if (
+		pending_shot_hull_damage > 0
+		and not pending_shot_transaction_key.is_empty()
+		and not normalized_key.is_empty()
+		and pending_shot_transaction_key != normalized_key
+	):
+		return _make_hull_queue_result(false, false, normalized_key, "pending_transaction_mismatch")
 
-	hull = maxi(hull - damage_amount, 0)
-	if hull <= 0:
-		failure_reason = FAILURE_REASON_HULL
-		run_failed_state = true
-		round_active = false
-		_emit_state()
-		run_failed.emit(get_snapshot())
-		return get_snapshot()
+	var duplicate_queue: bool = pending_shot_hull_damage > 0
+	if duplicate_queue:
+		pending_shot_hull_damage = maxi(pending_shot_hull_damage, damage_amount)
+		duplicate_hull_damage_queue_suppressions += 1
+	else:
+		pending_shot_hull_damage = damage_amount
+		queued_hull_damage_count += 1
+	if pending_shot_transaction_key.is_empty() and not normalized_key.is_empty():
+		pending_shot_transaction_key = normalized_key
+	return _make_hull_queue_result(true, duplicate_queue, pending_shot_transaction_key, "")
 
+
+func resolve_completed_shot(
+	score_amount: int,
+	scoreable_ball_count: int,
+	transaction_key: String = "",
+	doubloon_payout: Dictionary = {}
+) -> Dictionary:
+	var normalized_key: String = transaction_key.strip_edges()
+	if normalized_key.is_empty() and not pending_shot_transaction_key.is_empty():
+		normalized_key = pending_shot_transaction_key
+	if not normalized_key.is_empty() and resolved_shot_transaction_keys.has(normalized_key):
+		duplicate_shot_transaction_suppressions += 1
+		if _get_doubloon_payout_amount(doubloon_payout) > 0:
+			doubloon_payout_duplicate_suppressions += 1
+		return _reject_completed_shot_transaction(
+			normalized_key,
+			true,
+			"transaction_already_resolved",
+			scoreable_ball_count,
+			doubloon_payout
+		)
+	if not _is_round_eligible_for_shot_resolution():
+		return _reject_completed_shot_transaction(
+			normalized_key,
+			false,
+			"round_not_eligible",
+			scoreable_ball_count,
+			doubloon_payout
+		)
+	if (
+		pending_shot_hull_damage > 0
+		and not pending_shot_transaction_key.is_empty()
+		and not normalized_key.is_empty()
+		and pending_shot_transaction_key != normalized_key
+	):
+		return _reject_completed_shot_transaction(
+			normalized_key,
+			false,
+			"pending_transaction_mismatch",
+			scoreable_ball_count,
+			doubloon_payout
+		)
+	if normalized_key.is_empty():
+		normalized_key = _make_unkeyed_shot_transaction_key()
+
+	var score_before: int = round_score
+	var score_delta: int = maxi(score_amount, 0)
+	var hull_before: int = hull
+	var shots_before: int = shots_left
+	var queued_hull_damage: int = pending_shot_hull_damage
+	var safe_scoreable_ball_count: int = maxi(scoreable_ball_count, 0)
+	var safe_payout: Dictionary = _normalize_doubloon_payout(doubloon_payout)
+
+	round_score += score_delta
+	total_quota_score_earned += score_delta
+	highest_single_round_score = maxi(highest_single_round_score, round_score)
+	var payout_application: Dictionary = _apply_doubloon_payout(safe_payout, normalized_key)
+	hull = maxi(hull - queued_hull_damage, 0)
+	shots_left = maxi(shots_left - 1, 0)
+	_clear_queued_shot_consequences()
+
+	var outcome: String = _select_completed_shot_outcome(safe_scoreable_ball_count)
+	var terminal_shot_payout: bool = (
+		outcome != OUTCOME_CONTINUE
+		and bool(payout_application.get("applied", false))
+		and int(payout_application.get("amount", 0)) > 0
+	)
+	payout_application["terminal_shot_payout"] = terminal_shot_payout
+	payout_application["outcome"] = outcome
+	last_doubloon_payout_result = payout_application.duplicate(true)
+	_apply_completed_shot_outcome(outcome)
+	_remember_resolved_shot_transaction(normalized_key)
+	completed_shot_transaction_count += 1
+	shot_transaction_state_emit_count += 1
+	var terminal_signal_count: int = 0 if outcome == OUTCOME_CONTINUE else 1
+	shot_transaction_terminal_signal_count += terminal_signal_count
+
+	var transaction: Dictionary = {
+		"accepted": true,
+		"duplicate": false,
+		"transaction_key": normalized_key,
+		"score_before": score_before,
+		"score_delta": score_delta,
+		"score_after": round_score,
+		"round_quota": round_target,
+		"doubloon_payout": safe_payout.duplicate(true),
+		"doubloon_payout_application": payout_application.duplicate(true),
+		"doubloon_payout_amount": int(safe_payout.get("doubloons_awarded", 0)),
+		"doubloon_payout_applied": bool(payout_application.get("applied", false)),
+		"doubloon_wallet_before": int(payout_application.get("wallet_before", 0)),
+		"doubloon_wallet_after": int(payout_application.get("wallet_after", 0)),
+		"doubloon_payout_application_key": str(payout_application.get("application_key", "")),
+		"terminal_shot_payout": terminal_shot_payout,
+		"pending_hull_damage": queued_hull_damage,
+		"hull_before": hull_before,
+		"hull_after": hull,
+		"shots_before": shots_before,
+		"shots_after": shots_left,
+		"scoreable_ball_count": safe_scoreable_ball_count,
+		"outcome": outcome,
+		"failure_reason": failure_reason,
+		"state_emit_count": 1,
+		"terminal_signal_count": terminal_signal_count,
+		"rejection_reason": "",
+	}
+	last_completed_shot_transaction = transaction.duplicate(true)
 	_emit_state()
-	return get_snapshot()
+	var resolved_snapshot: Dictionary = get_snapshot()
+	transaction["snapshot"] = resolved_snapshot
+	_emit_completed_shot_outcome_signal(outcome, resolved_snapshot)
+	return transaction.duplicate(true)
 
 
-func fail_empty_table_if_needed(scoreable_ball_count: int) -> Dictionary:
-	if run_failed_state or run_completed_state or round_won_state:
-		return get_snapshot()
-	if not round_active:
-		return get_snapshot()
-	if round_score >= round_target:
-		return get_snapshot()
-	if scoreable_ball_count > 0:
-		return get_snapshot()
+func has_pending_shot_hull_damage() -> bool:
+	return pending_shot_hull_damage > 0
 
-	failure_reason = FAILURE_REASON_EMPTY_TABLE
-	run_failed_state = true
-	round_active = false
-	_emit_state()
-	run_failed.emit(get_snapshot())
-	return get_snapshot()
+
+func get_shot_transaction_diagnostics() -> Dictionary:
+	return {
+		"pending_hull_damage": pending_shot_hull_damage,
+		"pending_transaction_key": pending_shot_transaction_key,
+		"shot_transaction_pending": pending_shot_hull_damage > 0,
+		"completed_transactions": completed_shot_transaction_count,
+		"resolved_transaction_key_count": resolved_shot_transaction_keys.size(),
+		"duplicate_transaction_suppressions": duplicate_shot_transaction_suppressions,
+		"rejected_transactions": rejected_shot_transaction_count,
+		"queued_hull_damage_count": queued_hull_damage_count,
+		"duplicate_hull_queue_suppressions": duplicate_hull_damage_queue_suppressions,
+		"state_emit_count": shot_transaction_state_emit_count,
+		"terminal_signal_count": shot_transaction_terminal_signal_count,
+		"doubloon_payout_application_count": doubloon_payout_application_count,
+		"doubloon_payout_duplicate_suppressions": doubloon_payout_duplicate_suppressions,
+		"doubloons_awarded_from_shot_payouts": doubloons_awarded_from_shot_payouts,
+		"last_doubloon_payout": last_doubloon_payout_result.duplicate(true),
+		"last_transaction": last_completed_shot_transaction.duplicate(true),
+		"last_rejected_transaction": last_rejected_shot_transaction.duplicate(true),
+	}
 
 
 func get_snapshot() -> Dictionary:
@@ -274,6 +406,11 @@ func get_snapshot() -> Dictionary:
 		"total_quota_score_earned": total_quota_score_earned,
 		"highest_single_round_score": highest_single_round_score,
 		"has_next_round": has_next_round(),
+		"pending_shot_hull_damage": pending_shot_hull_damage,
+		"pending_shot_transaction_key": pending_shot_transaction_key,
+		"shot_transaction_pending": pending_shot_hull_damage > 0,
+		"shot_transaction_diagnostics": get_shot_transaction_diagnostics(),
+		"active_balance_tuning": active_balance_tuning_snapshot.duplicate(true),
 	}
 
 
@@ -293,6 +430,25 @@ func get_rewind_state() -> Dictionary:
 		"failure_reason": failure_reason,
 		"total_quota_score_earned": total_quota_score_earned,
 		"highest_single_round_score": highest_single_round_score,
+		"pending_shot_hull_damage": pending_shot_hull_damage,
+		"pending_shot_transaction_key": pending_shot_transaction_key,
+		"resolved_shot_transaction_keys": resolved_shot_transaction_keys.duplicate(true),
+		"resolved_shot_transaction_key_order": resolved_shot_transaction_key_order.duplicate(),
+		"last_completed_shot_transaction": last_completed_shot_transaction.duplicate(true),
+		"last_rejected_shot_transaction": last_rejected_shot_transaction.duplicate(true),
+		"completed_shot_transaction_count": completed_shot_transaction_count,
+		"duplicate_shot_transaction_suppressions": duplicate_shot_transaction_suppressions,
+		"rejected_shot_transaction_count": rejected_shot_transaction_count,
+		"queued_hull_damage_count": queued_hull_damage_count,
+		"duplicate_hull_damage_queue_suppressions": duplicate_hull_damage_queue_suppressions,
+		"shot_transaction_state_emit_count": shot_transaction_state_emit_count,
+		"shot_transaction_terminal_signal_count": shot_transaction_terminal_signal_count,
+		"unkeyed_shot_transaction_serial": unkeyed_shot_transaction_serial,
+		"last_doubloon_payout_result": last_doubloon_payout_result.duplicate(true),
+		"doubloon_payout_application_count": doubloon_payout_application_count,
+		"doubloon_payout_duplicate_suppressions": doubloon_payout_duplicate_suppressions,
+		"doubloons_awarded_from_shot_payouts": doubloons_awarded_from_shot_payouts,
+		"active_balance_tuning": active_balance_tuning_snapshot.duplicate(true),
 	}
 
 
@@ -311,6 +467,68 @@ func restore_rewind_state(state: Dictionary) -> void:
 	failure_reason = str(state.get("failure_reason", FAILURE_REASON_UNKNOWN))
 	total_quota_score_earned = maxi(int(state.get("total_quota_score_earned", 0)), 0)
 	highest_single_round_score = maxi(int(state.get("highest_single_round_score", 0)), 0)
+	pending_shot_hull_damage = maxi(int(state.get("pending_shot_hull_damage", 0)), 0)
+	pending_shot_transaction_key = str(state.get("pending_shot_transaction_key", ""))
+	_restore_resolved_shot_transaction_keys(state)
+	last_completed_shot_transaction = _dictionary_from_state(
+		state,
+		"last_completed_shot_transaction"
+	)
+	last_rejected_shot_transaction = _dictionary_from_state(
+		state,
+		"last_rejected_shot_transaction"
+	)
+	completed_shot_transaction_count = maxi(
+		int(state.get("completed_shot_transaction_count", 0)),
+		0
+	)
+	duplicate_shot_transaction_suppressions = maxi(
+		int(state.get("duplicate_shot_transaction_suppressions", 0)),
+		0
+	)
+	rejected_shot_transaction_count = maxi(
+		int(state.get("rejected_shot_transaction_count", 0)),
+		0
+	)
+	queued_hull_damage_count = maxi(int(state.get("queued_hull_damage_count", 0)), 0)
+	duplicate_hull_damage_queue_suppressions = maxi(
+		int(state.get("duplicate_hull_damage_queue_suppressions", 0)),
+		0
+	)
+	shot_transaction_state_emit_count = maxi(
+		int(state.get("shot_transaction_state_emit_count", 0)),
+		0
+	)
+	shot_transaction_terminal_signal_count = maxi(
+		int(state.get("shot_transaction_terminal_signal_count", 0)),
+		0
+	)
+	unkeyed_shot_transaction_serial = maxi(
+		int(state.get("unkeyed_shot_transaction_serial", 0)),
+		0
+	)
+	last_doubloon_payout_result = _dictionary_from_state(
+		state,
+		"last_doubloon_payout_result"
+	)
+	doubloon_payout_application_count = maxi(
+		int(state.get("doubloon_payout_application_count", 0)),
+		0
+	)
+	doubloon_payout_duplicate_suppressions = maxi(
+		int(state.get("doubloon_payout_duplicate_suppressions", 0)),
+		0
+	)
+	doubloons_awarded_from_shot_payouts = maxi(
+		int(state.get("doubloons_awarded_from_shot_payouts", 0)),
+		0
+	)
+	var balance_tuning_value: Variant = state.get("active_balance_tuning", {})
+	active_balance_tuning_snapshot = (
+		(balance_tuning_value as Dictionary).duplicate(true)
+		if balance_tuning_value is Dictionary
+		else {}
+	)
 	_emit_state()
 
 
@@ -337,6 +555,7 @@ func get_terminal_summary_snapshot(result_override: String = "") -> Dictionary:
 		"total_quota_score_earned": total_quota_score_earned,
 		"highest_single_round_score": highest_single_round_score,
 		"final_object_ball_count": object_ball_count,
+		"active_balance_tuning": active_balance_tuning_snapshot.duplicate(true),
 	}
 
 
@@ -345,10 +564,7 @@ func _emit_state() -> void:
 
 
 func _get_current_max_hull() -> int:
-	var max_hull: int = STARTING_HULL
-	if reward_system != null:
-		max_hull += reward_system.get_max_hull_bonus()
-	return maxi(max_hull, 1)
+	return STARTING_HULL
 
 
 func _get_terminal_result() -> String:
@@ -367,3 +583,234 @@ func _get_reward_terminal_snapshot() -> Dictionary:
 			"chosen_reward_ids": [],
 		}
 	return reward_system.get_reward_snapshot()
+
+
+func _is_round_eligible_for_shot_resolution() -> bool:
+	return (
+		round_active
+		and not round_won_state
+		and not run_failed_state
+		and not run_completed_state
+	)
+
+
+func _select_completed_shot_outcome(scoreable_ball_count: int) -> String:
+	if hull <= 0:
+		return OUTCOME_RUN_FAILED_HULL
+	if round_score >= round_target:
+		return OUTCOME_ROUND_WON
+	if shots_left <= 0:
+		return OUTCOME_RUN_FAILED_SHOTS
+	if scoreable_ball_count <= 0:
+		return OUTCOME_RUN_FAILED_EMPTY_TABLE
+	return OUTCOME_CONTINUE
+
+
+func _apply_completed_shot_outcome(outcome: String) -> void:
+	round_won_state = outcome == OUTCOME_ROUND_WON
+	run_failed_state = outcome in [
+		OUTCOME_RUN_FAILED_HULL,
+		OUTCOME_RUN_FAILED_SHOTS,
+		OUTCOME_RUN_FAILED_EMPTY_TABLE,
+	]
+	round_active = outcome == OUTCOME_CONTINUE
+	failure_reason = FAILURE_REASON_UNKNOWN
+	match outcome:
+		OUTCOME_RUN_FAILED_HULL:
+			failure_reason = FAILURE_REASON_HULL
+		OUTCOME_RUN_FAILED_SHOTS:
+			failure_reason = FAILURE_REASON_SHOTS
+		OUTCOME_RUN_FAILED_EMPTY_TABLE:
+			failure_reason = FAILURE_REASON_EMPTY_TABLE
+
+
+func _emit_completed_shot_outcome_signal(outcome: String, snapshot: Dictionary) -> void:
+	match outcome:
+		OUTCOME_ROUND_WON:
+			round_won.emit(snapshot)
+		OUTCOME_RUN_FAILED_HULL, OUTCOME_RUN_FAILED_SHOTS, OUTCOME_RUN_FAILED_EMPTY_TABLE:
+			run_failed.emit(snapshot)
+
+
+func _remember_resolved_shot_transaction(transaction_key: String) -> void:
+	if transaction_key.is_empty() or resolved_shot_transaction_keys.has(transaction_key):
+		return
+	resolved_shot_transaction_keys[transaction_key] = true
+	resolved_shot_transaction_key_order.append(transaction_key)
+	while resolved_shot_transaction_key_order.size() > MAX_RESOLVED_SHOT_TRANSACTION_KEYS:
+		var oldest_key: String = str(resolved_shot_transaction_key_order.pop_front())
+		resolved_shot_transaction_keys.erase(oldest_key)
+
+
+func _make_unkeyed_shot_transaction_key() -> String:
+	unkeyed_shot_transaction_serial += 1
+	return "unkeyed:%d:%d" % [current_round_index, unkeyed_shot_transaction_serial]
+
+
+func _clear_queued_shot_consequences() -> void:
+	pending_shot_hull_damage = 0
+	pending_shot_transaction_key = ""
+
+
+func _reset_shot_transaction_state() -> void:
+	_clear_queued_shot_consequences()
+	resolved_shot_transaction_keys.clear()
+	resolved_shot_transaction_key_order.clear()
+	last_completed_shot_transaction.clear()
+	last_rejected_shot_transaction.clear()
+	completed_shot_transaction_count = 0
+	duplicate_shot_transaction_suppressions = 0
+	rejected_shot_transaction_count = 0
+	queued_hull_damage_count = 0
+	duplicate_hull_damage_queue_suppressions = 0
+	shot_transaction_state_emit_count = 0
+	shot_transaction_terminal_signal_count = 0
+	unkeyed_shot_transaction_serial = 0
+	last_doubloon_payout_result.clear()
+	doubloon_payout_application_count = 0
+	doubloon_payout_duplicate_suppressions = 0
+	doubloons_awarded_from_shot_payouts = 0
+
+
+func _make_hull_queue_result(
+	accepted: bool,
+	duplicate: bool,
+	transaction_key: String,
+	rejection_reason: String
+) -> Dictionary:
+	return {
+		"accepted": accepted,
+		"duplicate": duplicate,
+		"transaction_key": transaction_key,
+		"pending_hull_damage": pending_shot_hull_damage,
+		"hull_before": hull,
+		"projected_hull_after": maxi(hull - pending_shot_hull_damage, 0),
+		"rejection_reason": rejection_reason,
+	}
+
+
+func _reject_completed_shot_transaction(
+	transaction_key: String,
+	duplicate: bool,
+	rejection_reason: String,
+	scoreable_ball_count: int,
+	doubloon_payout: Dictionary = {}
+) -> Dictionary:
+	rejected_shot_transaction_count += 1
+	var transaction: Dictionary = {
+		"accepted": false,
+		"duplicate": duplicate,
+		"transaction_key": transaction_key,
+		"score_before": round_score,
+		"score_delta": 0,
+		"score_after": round_score,
+		"round_quota": round_target,
+		"doubloon_payout": _normalize_doubloon_payout(doubloon_payout),
+		"doubloon_payout_applied": false,
+		"doubloon_payout_duplicate_suppressed": duplicate,
+		"pending_hull_damage": pending_shot_hull_damage,
+		"hull_before": hull,
+		"hull_after": hull,
+		"shots_before": shots_left,
+		"shots_after": shots_left,
+		"scoreable_ball_count": maxi(scoreable_ball_count, 0),
+		"outcome": "rejected",
+		"failure_reason": failure_reason,
+		"state_emit_count": 0,
+		"terminal_signal_count": 0,
+		"rejection_reason": rejection_reason,
+	}
+	last_rejected_shot_transaction = transaction.duplicate(true)
+	transaction["snapshot"] = get_snapshot()
+	return transaction.duplicate(true)
+
+
+func _normalize_doubloon_payout(payout: Dictionary) -> Dictionary:
+	if payout.is_empty():
+		return {
+			"schema_version": 1,
+			"source": "haul_mult_base_haul_v1",
+			"shot_id": -1,
+			"attempt_id": -1,
+			"base_haul": 0,
+			"scoring_object_ball_count": 0,
+			"doubloons_awarded": 0,
+			"warnings": [],
+		}
+	var normalized: Dictionary = payout.duplicate(true)
+	normalized["base_haul"] = maxi(int(normalized.get("base_haul", 0)), 0)
+	normalized["scoring_object_ball_count"] = maxi(
+		int(normalized.get("scoring_object_ball_count", 0)),
+		0
+	)
+	normalized["doubloons_awarded"] = _get_doubloon_payout_amount(normalized)
+	return normalized
+
+
+func _get_doubloon_payout_amount(payout: Dictionary) -> int:
+	return maxi(int(payout.get("doubloons_awarded", 0)), 0)
+
+
+func _apply_doubloon_payout(payout: Dictionary, transaction_key: String) -> Dictionary:
+	var amount: int = _get_doubloon_payout_amount(payout)
+	var application_key: String = "%s|payout:%s" % [
+		transaction_key,
+		str(payout.get("source", "unknown")),
+	]
+	var application: Dictionary = payout.duplicate(true)
+	application["applied"] = false
+	application["amount"] = amount
+	application["application_key"] = application_key
+	application["wallet_before"] = 0
+	application["wallet_after"] = 0
+	application["reason"] = "zero_payout" if amount <= 0 else "payout_applier_unavailable"
+	application["duplicate_suppression"] = false
+	application["terminal_shot_payout"] = false
+	if not doubloon_payout_applier.is_valid():
+		return application
+
+	var application_value: Variant = doubloon_payout_applier.call(
+		payout.duplicate(true),
+		application_key
+	)
+	if not application_value is Dictionary:
+		application["reason"] = "invalid_payout_application_result"
+		return application
+	var wallet_result: Dictionary = (application_value as Dictionary).duplicate(true)
+	for key_value in wallet_result.keys():
+		application[key_value] = wallet_result[key_value]
+	if bool(application.get("applied", false)):
+		doubloon_payout_application_count += 1
+		doubloons_awarded_from_shot_payouts += amount
+	return application
+
+
+func _restore_resolved_shot_transaction_keys(state: Dictionary) -> void:
+	resolved_shot_transaction_keys.clear()
+	resolved_shot_transaction_key_order.clear()
+	var order_value: Variant = state.get("resolved_shot_transaction_key_order", [])
+	if order_value is Array:
+		for key_value in order_value:
+			var transaction_key: String = str(key_value)
+			if transaction_key.is_empty() or resolved_shot_transaction_keys.has(transaction_key):
+				continue
+			resolved_shot_transaction_keys[transaction_key] = true
+			resolved_shot_transaction_key_order.append(transaction_key)
+	var key_map_value: Variant = state.get("resolved_shot_transaction_keys", {})
+	if key_map_value is Dictionary:
+		for key_value in (key_map_value as Dictionary).keys():
+			var map_transaction_key: String = str(key_value)
+			if map_transaction_key.is_empty() or resolved_shot_transaction_keys.has(map_transaction_key):
+				continue
+			resolved_shot_transaction_keys[map_transaction_key] = true
+			resolved_shot_transaction_key_order.append(map_transaction_key)
+	while resolved_shot_transaction_key_order.size() > MAX_RESOLVED_SHOT_TRANSACTION_KEYS:
+		var oldest_key: String = str(resolved_shot_transaction_key_order.pop_front())
+		resolved_shot_transaction_keys.erase(oldest_key)
+
+
+func _dictionary_from_state(state: Dictionary, key: String) -> Dictionary:
+	var value: Variant = state.get(key, {})
+	if value is Dictionary:
+		return (value as Dictionary).duplicate(true)
+	return {}

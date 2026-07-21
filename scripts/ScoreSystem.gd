@@ -12,6 +12,7 @@ signal score_feed_message(text: String)
 # This owns lightweight score presentation, but not coin sprays or pocket VFX.
 const DEBUG_SCORE_BREAKDOWNS := false
 const DEBUG_SCORE_POPUP_ROUTING_LOGS := false
+const GAME_MODE_SCRIPT := preload("res://scripts/GameModeSystem.gd")
 const UI_FONT := preload("res://assets/fonts/NotJamOldStyle11.ttf")
 const BASE_SINK_REWARD := 10
 const BANK_REWARD := 5
@@ -282,6 +283,10 @@ var score_stack_yields := 0
 var special_popup_path_count := 0
 var pocket_streak_feed_message_index := 0
 var last_score_popup_route := "none"
+var legacy_non_passage_feed_entries_suppressed := 0
+var legacy_non_passage_popup_requests_suppressed := 0
+var legacy_non_passage_event_signals_suppressed := 0
+var legacy_non_passage_wallet_award_requests_suppressed := 0
 
 
 func setup(table_ref) -> void:
@@ -293,6 +298,10 @@ func setup(table_ref) -> void:
 func _process(delta: float) -> void:
 	if Engine.is_editor_hint():
 		return
+	if not is_legacy_score_presentation_enabled():
+		if not active_score_popups.is_empty() or not active_score_stacks.is_empty():
+			_clear_score_presentation_for_rewind()
+		return
 
 	for popup in active_score_popups.duplicate():
 		_update_score_popup(popup, delta)
@@ -303,6 +312,46 @@ func _process(delta: float) -> void:
 
 func get_doubloons_total() -> int:
 	return doubloons_total
+
+
+# ScoreSystem classifies and presents Passage scoring only. Long Sink and Shot
+# Lab retain the shared wallet signals, but use their semantic scoring presenters.
+func legacy_score_presentation_enabled_for_mode(mode_id: String) -> bool:
+	return GAME_MODE_SCRIPT.is_passage(GAME_MODE_SCRIPT.normalize_mode_id(mode_id))
+
+
+func is_legacy_score_presentation_enabled() -> bool:
+	return legacy_score_presentation_enabled_for_mode(_get_current_game_mode_id())
+
+
+func get_legacy_presentation_diagnostics() -> Dictionary:
+	return {
+		"mode_id": _get_current_game_mode_id(),
+		"legacy_score_presentation_enabled": is_legacy_score_presentation_enabled(),
+		"legacy_long_sink_doubloon_awards": 0,
+		"legacy_long_sink_callouts_emitted": 0,
+		"legacy_long_sink_feed_entries_emitted": 0,
+		"legacy_long_sink_popups_emitted": 0,
+		"legacy_scoring_audio_emitted": 0,
+		"legacy_non_passage_feed_entries_suppressed": legacy_non_passage_feed_entries_suppressed,
+		"legacy_non_passage_popup_requests_suppressed": legacy_non_passage_popup_requests_suppressed,
+		"legacy_non_passage_event_signals_suppressed": legacy_non_passage_event_signals_suppressed,
+		"legacy_non_passage_wallet_award_requests_suppressed": legacy_non_passage_wallet_award_requests_suppressed,
+	}
+
+
+func _get_current_game_mode_id() -> String:
+	if table != null and table.has_method("get_game_mode_id"):
+		return GAME_MODE_SCRIPT.normalize_mode_id(str(table.call("get_game_mode_id")))
+	return GAME_MODE_SCRIPT.MODE_PASSAGE
+
+
+func _emit_legacy_score_feed_message(text: String) -> void:
+	if not is_legacy_score_presentation_enabled():
+		legacy_non_passage_feed_entries_suppressed += 1
+		return
+	if not text.is_empty():
+		score_feed_message.emit(text)
 
 
 func get_rewind_state() -> Dictionary:
@@ -370,8 +419,45 @@ func grant_doubloons(amount: int, source_label: String = "Reward") -> int:
 	doubloons_total += grant_amount
 	doubloons_changed.emit(doubloons_total)
 	doubloons_awarded.emit(grant_amount, doubloons_total)
-	score_feed_message.emit("%s: +%s Doubloons" % [source_label, grant_amount])
+	_emit_legacy_score_feed_message("%s: +%s Doubloons" % [source_label, grant_amount])
 	return grant_amount
+
+
+# Applies a result-derived Long Sink/Shot Lab wallet award without invoking
+# Passage score classification or its popup/callout presentation.
+func apply_roguelite_shot_payout(
+	payout: Dictionary,
+	application_key: String = ""
+) -> Dictionary:
+	var mode_id: String = _get_current_game_mode_id()
+	var wallet_before: int = doubloons_total
+	var amount: int = maxi(int(payout.get("doubloons_awarded", 0)), 0)
+	var result: Dictionary = {
+		"applied": false,
+		"application_key": application_key,
+		"amount": amount,
+		"wallet_before": wallet_before,
+		"wallet_after": wallet_before,
+		"reason": "",
+	}
+	if mode_id not in [GAME_MODE_SCRIPT.MODE_ROGUELITE, GAME_MODE_SCRIPT.MODE_SHOT_LAB]:
+		result["reason"] = "mode_not_eligible"
+		return result
+	if str(payout.get("source", "")) != "haul_mult_base_haul_v1":
+		result["reason"] = "invalid_payout_source"
+		return result
+	if amount <= 0:
+		result["reason"] = "zero_payout"
+		return result
+
+	doubloons_total += amount
+	doubloons_changed.emit(doubloons_total)
+	doubloons_awarded.emit(amount, doubloons_total)
+	var unit: String = "Doubloon" if amount == 1 else "Doubloons"
+	score_feed_message.emit("Shot Haul: +%d %s" % [amount, unit])
+	result["applied"] = true
+	result["wallet_after"] = doubloons_total
+	return result
 
 
 func apply_doubloons_penalty(amount: int) -> int:
@@ -425,13 +511,16 @@ func award_treasure_claim(amount: int, sink_context: Dictionary = {}) -> int:
 			"event_type": EVENT_TREASURE_CLAIM,
 		},
 	]
-	score_feed_message.emit("Treasure claimed! +%s Doubloons" % treasure_amount)
+	_emit_legacy_score_feed_message("Treasure claimed! +%s Doubloons" % treasure_amount)
 	if ball_id != 0:
 		_add_line_items_to_score_popup(ball_id, "Treasure Ball", treasure_items)
 	return treasure_amount
 
 
 func award_pocket_streak(multiplier: int, streak_context: Dictionary = {}) -> int:
+	if not is_legacy_score_presentation_enabled():
+		legacy_non_passage_wallet_award_requests_suppressed += 1
+		return 0
 	var streak_multiplier: int = maxi(multiplier, 0)
 	if streak_multiplier < 2:
 		return 0
@@ -446,7 +535,9 @@ func award_pocket_streak(multiplier: int, streak_context: Dictionary = {}) -> in
 	doubloons_total += streak_reward
 	doubloons_changed.emit(doubloons_total)
 	doubloons_awarded.emit(streak_reward, doubloons_total)
-	score_feed_message.emit(_get_pocket_streak_feed_message(streak_multiplier, streak_reward, same_pocket_subtotal))
+	_emit_legacy_score_feed_message(
+		_get_pocket_streak_feed_message(streak_multiplier, streak_reward, same_pocket_subtotal)
+	)
 	last_score_popup_route = "pocket_streak x%s subtotal %s +%s" % [
 		streak_multiplier,
 		same_pocket_subtotal,
@@ -456,6 +547,9 @@ func award_pocket_streak(multiplier: int, streak_context: Dictionary = {}) -> in
 
 
 func _get_pocket_streak_feed_message(multiplier: int, reward: int, pocket_base: int) -> String:
+	if not is_legacy_score_presentation_enabled():
+		return ""
+
 	var template_index: int = pocket_streak_feed_message_index % POCKET_STREAK_FEED_TEMPLATES.size()
 	var template: String = POCKET_STREAK_FEED_TEMPLATES[template_index]
 	pocket_streak_feed_message_index = (pocket_streak_feed_message_index + 1) % POCKET_STREAK_FEED_TEMPLATES.size()
@@ -626,6 +720,9 @@ func get_active_score_popup_tween_count() -> int:
 
 
 func score_sunk_ball_snapshot(snapshot: Dictionary, sink_context: Dictionary = {}) -> int:
+	if not is_legacy_score_presentation_enabled():
+		legacy_non_passage_wallet_award_requests_suppressed += 1
+		return 0
 	_store_sink_context(sink_context)
 	return _score_sunk_ball_snapshot(snapshot)
 
@@ -711,7 +808,10 @@ func _append_grouped_event_rewards(
 			"amount": int(reward_data["amount"]),
 			"event_type": event_type,
 		})
-		scoring_event_awarded.emit(event_type, int(reward_data["amount"]))
+		if is_legacy_score_presentation_enabled():
+			scoring_event_awarded.emit(event_type, int(reward_data["amount"]))
+		else:
+			legacy_non_passage_event_signals_suppressed += 1
 
 
 func _get_grouped_reward_label(label_text: String, event_count: int) -> String:
@@ -848,6 +948,10 @@ func _get_popup_hold_time(popup: ScorePopup) -> float:
 # The old multi-segment popup path remains as a defensive fallback for future
 # or unclassified rewards that have not been assigned a stack tier yet.
 func _add_line_items_to_score_popup(ball_id: int, ball_label: String, line_items: Array[Dictionary]) -> void:
+	if not is_legacy_score_presentation_enabled():
+		legacy_non_passage_popup_requests_suppressed += 1
+		return
+
 	var remaining_line_items: Array[Dictionary] = _route_foundational_line_items_to_score_stack(
 		ball_id,
 		ball_label,
@@ -1755,9 +1859,11 @@ func _emit_score_feed_message(ball_label: String, line_items: Array[Dictionary],
 
 	var summary: String = _make_score_route_summary(line_items)
 	if summary == "none":
-		score_feed_message.emit("%s: +%s Doubloons" % [ball_label, amount])
+		_emit_legacy_score_feed_message("%s: +%s Doubloons" % [ball_label, amount])
 	else:
-		score_feed_message.emit("%s: +%s Doubloons (%s)" % [ball_label, amount, summary])
+		_emit_legacy_score_feed_message(
+			"%s: +%s Doubloons (%s)" % [ball_label, amount, summary]
+		)
 
 
 func _get_or_create_score_popup(ball_id: int) -> ScorePopup:
@@ -1844,7 +1950,7 @@ func _print_score_breakdown(
 	gained_total: int,
 	includes_base_reward: bool
 ) -> void:
-	if not DEBUG_SCORE_BREAKDOWNS:
+	if not DEBUG_SCORE_BREAKDOWNS or not is_legacy_score_presentation_enabled():
 		return
 
 	print("%s %s:" % [ball_label, "sunk" if includes_base_reward else "bonus update"])

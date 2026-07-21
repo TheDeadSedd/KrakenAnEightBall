@@ -97,6 +97,10 @@ func request_rewind(preserve_last_completed_ledger: bool = false) -> bool:
 			table.roguelite_reward_system.restore_rewind_state(_get_state(system_states, "roguelite_rewards"))
 		if table.roguelite_run_system != null:
 			table.roguelite_run_system.restore_rewind_state(_get_state(system_states, "roguelite_run"))
+		if table.roguelite_balance_telemetry != null:
+			table.roguelite_balance_telemetry.restore_rewind_state(
+				_get_state(system_states, "roguelite_balance_telemetry")
+			)
 	table.spawn_system.restore_rewind_state(_get_state(system_states, "spawn"))
 	table.pocket_streak_system.restore_rewind_state(_get_state(system_states, "pocket_streak"))
 	table.restore_shot_rewind_balls(checkpoint.get("ball_states", []))
@@ -155,10 +159,14 @@ func get_rewind_blocker() -> String:
 		and bool(checkpoint.get("contains_anomaly_state", false))
 	):
 		return DEBUG_AIM_CHECKPOINT_BLOCKER
-	if table.shot_active:
-		return "Reset unavailable: shot is still resolving."
-	if not table.are_all_balls_stopped_for_rewind():
-		return "Reset unavailable: balls are still moving."
+	if not table.is_roguelite_mode():
+		if table.shot_active:
+			return "Reset unavailable: shot is still resolving."
+		if not table.are_all_balls_stopped_for_rewind():
+			return "Reset unavailable: balls are still moving."
+	# Long Sink checkpoints are captured before launch, and restoration cancels
+	# the active ledger/presentation before rebuilding that snapshot. Transient
+	# spawns and unsupported system state remain guarded by the checks below.
 	var unsupported_state_blocker: String = table.get_shot_rewind_unsupported_state_blocker()
 	if not unsupported_state_blocker.is_empty():
 		return unsupported_state_blocker
@@ -219,6 +227,10 @@ func _capture_system_states() -> Dictionary:
 			states["roguelite_run"] = table.roguelite_run_system.get_rewind_state()
 		if table.roguelite_reward_system != null:
 			states["roguelite_rewards"] = table.roguelite_reward_system.get_rewind_state()
+		if table.roguelite_balance_telemetry != null:
+			states["roguelite_balance_telemetry"] = (
+				table.roguelite_balance_telemetry.capture_rewind_state()
+			)
 	return states
 
 

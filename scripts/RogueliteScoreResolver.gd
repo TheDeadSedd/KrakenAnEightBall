@@ -12,7 +12,10 @@ const SUPPORTED_ANALYZED_SCHEMA_VERSION := ShotLedgerAnalyzer.SCHEMA_VERSION
 const BASE_OBJECT_BALL_HAUL := 10
 const BASE_MULT := 1.0
 const MAX_RAIL_MULT_PER_BALL := 3
-const SELF_TEST_CASE_COUNT := 17
+const SELF_TEST_CASE_COUNT := 26
+
+const SOURCE_BASE_CUE_RECONTACT := "base_cue_recontact"
+const SOURCE_BASE_OBJECT_BALL_TAP := "base_object_ball_tap"
 
 const PHASE_ADD_HAUL := "add_haul"
 const PHASE_ADD_MULT := "add_mult"
@@ -33,6 +36,11 @@ static func resolve(analyzed_ledger: Dictionary, ordered_modifiers: Array = []) 
 		"rejected_pocket_fact_count": 0,
 		"uncapped_rail_contact_count": 0,
 		"capped_rail_mult_count": 0,
+		"cue_recontact_mult_count": 0,
+		"object_ball_tap_mult_count": 0,
+		"cue_recontact_fact_mismatch_count": 0,
+		"object_ball_tap_fact_mismatch_count": 0,
+		"duplicate_object_ball_tap_ids_ignored": 0,
 		"modifier_count_received": ordered_modifiers.size(),
 		"modifier_count_applied": 0,
 		"source_counts": {},
@@ -116,6 +124,24 @@ static func resolve(analyzed_ledger: Dictionary, ordered_modifiers: Array = []) 
 	pocket_facts.sort_custom(_pocket_fact_precedes)
 	diagnostics["input_valid"] = true
 	diagnostics["accepted_pocket_fact_count"] = pocket_facts.size()
+	var cue_recontact_milestones_by_ball: Dictionary = _group_semantic_milestones_by_ball(
+		_array_value(derived, "cue_recontact_milestones")
+	)
+	var object_ball_tap_milestones_by_ball: Dictionary = _group_semantic_milestones_by_ball(
+		_array_value(derived, "object_ball_tap_milestones")
+	)
+	var has_canonical_cue_recontact_milestones: bool = (
+		derived.get("cue_recontact_milestones", null) is Array
+	)
+	var has_canonical_object_ball_tap_milestones: bool = (
+		derived.get("object_ball_tap_milestones", null) is Array
+	)
+	diagnostics["canonical_cue_recontact_milestone_count"] = _count_grouped_milestones(
+		cue_recontact_milestones_by_ball
+	)
+	diagnostics["canonical_object_ball_tap_milestone_count"] = _count_grouped_milestones(
+		object_ball_tap_milestones_by_ball
+	)
 
 	var resolution_steps: Array[Dictionary] = []
 	var haul_additions: Array[Dictionary] = []
@@ -178,13 +204,24 @@ static func resolve(analyzed_ledger: Dictionary, ordered_modifiers: Array = []) 
 			continue
 		var mult_before: float = current_additive_mult
 		current_additive_mult += float(capped_count)
+		var qualifying_indices: Array = _array_value(fact, "qualifying_rail_event_indices")
+		var scored_rail_event_indices: Array[int] = []
+		for event_index_value in qualifying_indices:
+			if scored_rail_event_indices.size() >= capped_count:
+				break
+			scored_rail_event_indices.append(int(event_index_value))
+		var primary_rail_event_index: int = (
+			scored_rail_event_indices[scored_rail_event_indices.size() - 1]
+			if not scored_rail_event_indices.is_empty()
+			else int(fact.get("pocket_event_index", -1))
+		)
 		var contribution: Dictionary = {
 			"phase": "base_mult",
 			"source_type": "rail_contact",
 			"source_id": "base_bank_rail",
 			"display_name": _rail_display_name(capped_count),
 			"ball_id": int(fact.get("ball_id", -1)),
-			"event_index": int(fact.get("pocket_event_index", -1)),
+			"event_index": primary_rail_event_index,
 			"amount": capped_count,
 			"uncapped_count": uncapped_count,
 			"capped_count": capped_count,
@@ -197,6 +234,8 @@ static func resolve(analyzed_ledger: Dictionary, ordered_modifiers: Array = []) 
 				"uncapped_count": uncapped_count,
 				"capped_count": capped_count,
 				"cap_per_ball": MAX_RAIL_MULT_PER_BALL,
+				"scored_rail_event_indices": scored_rail_event_indices.duplicate(),
+				"pocket_event_index": int(fact.get("pocket_event_index", -1)),
 			}
 		))
 		_increment_source_count(diagnostics, "base_bank_rail")
@@ -213,18 +252,195 @@ static func resolve(analyzed_ledger: Dictionary, ordered_modifiers: Array = []) 
 			"source_id": "base_combination",
 			"display_name": "Combination",
 			"ball_id": int(fact.get("ball_id", -1)),
-			"event_index": int(fact.get("pocket_event_index", -1)),
+			"event_index": int(fact.get("causal_activation_event_index", -1)),
 			"amount": 1.0,
 		}
 		mult_additions.append(contribution.duplicate(true))
 		resolution_steps.append(_make_resolution_step(
 			resolution_steps.size(), contribution, current_haul, 0, current_haul,
 			mult_before, 1.0, 1.0, current_additive_mult,
-			{"causal_depth": int(fact.get("causal_depth", -1))}
+			{
+				"causal_depth": int(fact.get("causal_depth", -1)),
+				"causal_activation_event_index": int(fact.get("causal_activation_event_index", -1)),
+				"pocket_event_index": int(fact.get("pocket_event_index", -1)),
+			}
 		))
 		_increment_source_count(diagnostics, "base_combination")
 
-	# Phases 4-6: ordered debug/future modifier plumbing, with no reward logic.
+	# Phase 2D: each accepted cue recontact milestone contributes one additive Mult.
+	for fact in pocket_facts:
+		var ball_id: int = int(fact.get("ball_id", -1))
+		var analyzer_milestones: Array[Dictionary] = _get_grouped_milestones_for_ball(
+			cue_recontact_milestones_by_ball,
+			ball_id
+		)
+		if not has_canonical_cue_recontact_milestones:
+			analyzer_milestones = _make_legacy_cue_recontact_milestones(fact)
+		var declared_count: int = maxi(int(fact.get("cue_recontact_bonus_count", 0)), 0)
+		if declared_count != analyzer_milestones.size():
+			diagnostics["cue_recontact_fact_mismatch_count"] = int(
+				diagnostics["cue_recontact_fact_mismatch_count"]
+			) + 1
+			warnings.append(
+				"Cue-recontact pocket count does not match derived milestones for ball %d."
+				% ball_id
+			)
+		var qualifying_strike_count: int = maxi(int(fact.get(
+			"qualifying_cue_strike_count",
+			analyzer_milestones.size() + 1
+		)), 0)
+		for milestone_index in range(analyzer_milestones.size()):
+			var analyzer_milestone: Dictionary = analyzer_milestones[milestone_index]
+			var event_index: int = int(analyzer_milestone.get("event_index", -1))
+			if event_index < 0:
+				diagnostics["cue_recontact_fact_mismatch_count"] = int(
+					diagnostics["cue_recontact_fact_mismatch_count"]
+				) + 1
+				warnings.append("Cue-recontact milestone has an invalid event anchor.")
+				continue
+			var bonus_ordinal: int = maxi(int(analyzer_milestone.get(
+				"bonus_ordinal",
+				milestone_index + 1
+			)), 1)
+			var cue_strike_ordinal: int = maxi(int(analyzer_milestone.get(
+				"cue_strike_ordinal",
+				bonus_ordinal + 1
+			)), 2)
+			var position_result: Dictionary = _get_milestone_position(analyzer_milestone)
+			var mult_before: float = current_additive_mult
+			current_additive_mult += 1.0
+			var contribution: Dictionary = {
+				"phase": "base_mult",
+				"source_type": "cue_recontact_milestone",
+				"source_id": SOURCE_BASE_CUE_RECONTACT,
+				"display_name": _cue_recontact_display_name(cue_strike_ordinal),
+				"ball_id": ball_id,
+				"event_index": event_index,
+				"amount": 1.0,
+			}
+			var step_metadata: Dictionary = _dictionary_value(
+				analyzer_milestone,
+				"metadata"
+			).duplicate(true)
+			step_metadata.merge({
+				"trigger_id": "cue_recontact_milestone",
+				"trigger_occurrence_id": str(analyzer_milestone.get(
+					"trigger_occurrence_id",
+					"cue_recontact_milestone:%d:%d:%d" % [
+						ball_id,
+						event_index,
+						cue_strike_ordinal,
+					]
+				)),
+				"contacted_ball_id": int(analyzed_ledger.get("cue_ball_id", -1)),
+				"qualifying_cue_strike_count": qualifying_strike_count,
+				"cue_strike_ordinal": cue_strike_ordinal,
+				"bonus_ordinal": bonus_ordinal,
+				"display_tier": _cue_recontact_display_tier(cue_strike_ordinal),
+				"world_position": position_result.get("position", Vector2.ZERO),
+				"world_position_available": bool(position_result.get("available", false)),
+				"pocket_event_index": int(fact.get("pocket_event_index", -1)),
+			}, true)
+			mult_additions.append(contribution.duplicate(true))
+			resolution_steps.append(_make_resolution_step(
+				resolution_steps.size(), contribution, current_haul, 0, current_haul,
+				mult_before, 1.0, 1.0, current_additive_mult,
+				step_metadata
+			))
+			diagnostics["cue_recontact_mult_count"] = int(
+				diagnostics["cue_recontact_mult_count"]
+			) + 1
+			_increment_source_count(diagnostics, SOURCE_BASE_CUE_RECONTACT)
+
+	# Phase 2E: each unique accepted object-ball tap contributes one additive Mult.
+	for fact in pocket_facts:
+		var ball_id: int = int(fact.get("ball_id", -1))
+		var analyzer_milestones: Array[Dictionary] = _get_grouped_milestones_for_ball(
+			object_ball_tap_milestones_by_ball,
+			ball_id
+		)
+		if not has_canonical_object_ball_tap_milestones:
+			analyzer_milestones = _make_legacy_object_ball_tap_milestones(fact)
+		var declared_count: int = maxi(int(fact.get("unique_object_tap_count", 0)), 0)
+		if declared_count != analyzer_milestones.size():
+			diagnostics["object_ball_tap_fact_mismatch_count"] = int(
+				diagnostics["object_ball_tap_fact_mismatch_count"]
+			) + 1
+			warnings.append(
+				"Object-ball tap pocket count does not match derived milestones for ball %d."
+				% ball_id
+			)
+		var seen_target_ids: Dictionary = {}
+		for milestone_index in range(analyzer_milestones.size()):
+			var analyzer_milestone: Dictionary = analyzer_milestones[milestone_index]
+			var contacted_ball_id: int = int(analyzer_milestone.get(
+				"contacted_ball_id",
+				-1
+			))
+			var event_index: int = int(analyzer_milestone.get("event_index", -1))
+			var target_key: String = str(contacted_ball_id)
+			if contacted_ball_id <= 0 or event_index < 0:
+				diagnostics["object_ball_tap_fact_mismatch_count"] = int(
+					diagnostics["object_ball_tap_fact_mismatch_count"]
+				) + 1
+				warnings.append("Object-ball tap milestone has an invalid target or event anchor.")
+				continue
+			if seen_target_ids.has(target_key):
+				diagnostics["duplicate_object_ball_tap_ids_ignored"] = int(
+					diagnostics["duplicate_object_ball_tap_ids_ignored"]
+				) + 1
+				continue
+			seen_target_ids[target_key] = true
+			var unique_contact_ordinal: int = maxi(int(analyzer_milestone.get(
+				"unique_contact_ordinal",
+				milestone_index + 1
+			)), 1)
+			var position_result: Dictionary = _get_milestone_position(analyzer_milestone)
+			var mult_before: float = current_additive_mult
+			current_additive_mult += 1.0
+			var contribution: Dictionary = {
+				"phase": "base_mult",
+				"source_type": "object_ball_tap_milestone",
+				"source_id": SOURCE_BASE_OBJECT_BALL_TAP,
+				"display_name": _object_ball_tap_display_name(unique_contact_ordinal),
+				"ball_id": ball_id,
+				"event_index": event_index,
+				"amount": 1.0,
+			}
+			var step_metadata: Dictionary = _dictionary_value(
+				analyzer_milestone,
+				"metadata"
+			).duplicate(true)
+			step_metadata.merge({
+				"trigger_id": "object_ball_tap_milestone",
+				"trigger_occurrence_id": str(analyzer_milestone.get(
+					"trigger_occurrence_id",
+					"object_ball_tap_milestone:%d:%d:%d" % [
+						ball_id,
+						contacted_ball_id,
+						event_index,
+					]
+				)),
+				"contacted_ball_id": contacted_ball_id,
+				"unique_contact_ordinal": unique_contact_ordinal,
+				"unique_target_count": declared_count,
+				"repeated_target_contact": false,
+				"world_position": position_result.get("position", Vector2.ZERO),
+				"world_position_available": bool(position_result.get("available", false)),
+				"pocket_event_index": int(fact.get("pocket_event_index", -1)),
+			}, true)
+			mult_additions.append(contribution.duplicate(true))
+			resolution_steps.append(_make_resolution_step(
+				resolution_steps.size(), contribution, current_haul, 0, current_haul,
+				mult_before, 1.0, 1.0, current_additive_mult,
+				step_metadata
+			))
+			diagnostics["object_ball_tap_mult_count"] = int(
+				diagnostics["object_ball_tap_mult_count"]
+			) + 1
+			_increment_source_count(diagnostics, SOURCE_BASE_OBJECT_BALL_TAP)
+
+	# Build phases: ordered modifier plumbing, with no reward logic.
 	var sorted_modifiers: Array[Dictionary] = _get_sorted_modifiers(ordered_modifiers, warnings)
 	for modifier in sorted_modifiers:
 		if not bool(modifier.get("enabled", true)):
@@ -245,8 +461,14 @@ static func resolve(analyzed_ledger: Dictionary, ordered_modifiers: Array = []) 
 			"source_type": "modifier",
 			"source_id": modifier_id,
 			"display_name": display_name,
-			"event_index": -1,
-			"ball_id": -1,
+			"event_index": int(modifier.get(
+				"trigger_event_index",
+				modifier.get("event_index", -1)
+			)),
+			"ball_id": int(modifier.get(
+				"trigger_ball_id",
+				modifier.get("ball_id", -1)
+			)),
 			"slot_index": int(modifier.get("slot_index", 0)),
 			"amount": value,
 		}
@@ -263,7 +485,7 @@ static func resolve(analyzed_ledger: Dictionary, ordered_modifiers: Array = []) 
 					resolution_steps.size(), contribution, haul_before, haul_delta,
 					current_haul, current_additive_mult * current_xmult_product,
 					0.0, 1.0, current_additive_mult * current_xmult_product,
-					{"modifier_phase": PHASE_ADD_HAUL}
+					_make_modifier_step_metadata(modifier, PHASE_ADD_HAUL)
 				))
 			PHASE_ADD_MULT:
 				var mult_before: float = current_additive_mult * current_xmult_product
@@ -274,7 +496,7 @@ static func resolve(analyzed_ledger: Dictionary, ordered_modifiers: Array = []) 
 					resolution_steps.size(), contribution, current_haul, 0, current_haul,
 					mult_before, mult_delta, 1.0,
 					current_additive_mult * current_xmult_product,
-					{"modifier_phase": PHASE_ADD_MULT}
+					_make_modifier_step_metadata(modifier, PHASE_ADD_MULT)
 				))
 			PHASE_XMULT:
 				var factor: float = float(value)
@@ -286,7 +508,7 @@ static func resolve(analyzed_ledger: Dictionary, ordered_modifiers: Array = []) 
 					resolution_steps.size(), contribution, current_haul, 0, current_haul,
 					mult_before, 0.0, factor,
 					current_additive_mult * current_xmult_product,
-					{"modifier_phase": PHASE_XMULT}
+					_make_modifier_step_metadata(modifier, PHASE_XMULT)
 				))
 			_:
 				warnings.append("Modifier `%s` uses unsupported phase `%s`." % [modifier_id, phase])
@@ -359,6 +581,64 @@ static func run_self_tests() -> Dictionary:
 	_run_score_case(cases, "Direct Plus Double-Bank Multi-Pot", _test_ledger([
 		_test_fact(2, 1, 0, false), _test_fact(3, 2, 2, false),
 	]), [], {"shot_score": 80})
+	_run_score_case(cases, "Double Tap", _test_ledger([
+		_test_tap_fact(2, 1, 0, false, [3], [], [], 0),
+	]), [], {
+		"shot_score": 20,
+		"source_counts.base_cue_recontact": 1,
+	})
+	_run_score_case(cases, "Triple Tap", _test_ledger([
+		_test_tap_fact(2, 1, 0, false, [3, 5], [], [], 0),
+	]), [], {
+		"shot_score": 30,
+		"source_counts.base_cue_recontact": 2,
+	})
+	_run_score_case(cases, "Tap x4", _test_ledger([
+		_test_tap_fact(2, 1, 0, false, [3, 5, 7], [], [], 0),
+	]), [], {
+		"shot_score": 40,
+		"source_counts.base_cue_recontact": 3,
+	})
+	_run_score_case(cases, "Ball Tap x1", _test_ledger([
+		_test_tap_fact(2, 1, 0, false, [], [4], [4], 0),
+	]), [], {
+		"shot_score": 20,
+		"source_counts.base_object_ball_tap": 1,
+	})
+	_run_score_case(cases, "Ball Tap x2", _test_ledger([
+		_test_tap_fact(2, 1, 0, false, [], [4, 5], [4, 6], 0),
+	]), [], {
+		"shot_score": 30,
+		"source_counts.base_object_ball_tap": 2,
+	})
+	_run_score_case(cases, "Repeated Same Target", _test_ledger([
+		_test_tap_fact(2, 1, 0, false, [], [4], [4], 1),
+	]), [], {
+		"shot_score": 20,
+		"source_counts.base_object_ball_tap": 1,
+	})
+	_run_score_case(cases, "Bank Plus Double Tap", _test_ledger([
+		_test_tap_fact(2, 1, 1, false, [3], [], [], 0),
+	]), [], {
+		"shot_score": 30,
+		"source_counts.base_bank_rail": 1,
+		"source_counts.base_cue_recontact": 1,
+	})
+	_run_score_case(cases, "Combination Plus Ball Tap", _test_ledger([
+		_test_tap_fact(2, 1, 0, true, [], [4], [5], 0),
+	]), [], {
+		"shot_score": 30,
+		"source_counts.base_combination": 1,
+		"source_counts.base_object_ball_tap": 1,
+	})
+	_run_score_case(cases, "Bank Combination Plus Ball Tap x2", _test_ledger([
+		_test_tap_fact(2, 1, 1, true, [], [4, 5], [5, 7], 0),
+	]), [], {
+		"shot_score": 50,
+		"source_counts.base_bank_rail": 1,
+		"source_counts.base_combination": 1,
+		"source_counts.base_object_ball_tap": 2,
+	})
 	_run_score_case(cases, "Cue Scratch", _test_ledger([], true), [], {"shot_score": 0, "source_counts.scratch": 1})
 	_run_score_case(cases, "Direct Pot Plus Scratch", _test_ledger([_test_fact(2, 1, 0, false)], true), [], {"shot_score": 10, "source_counts.scratch": 1})
 	_run_score_case(cases, "Add Haul Ordering", _test_ledger([_test_fact(2, 1, 0, false)]), [
@@ -520,11 +800,60 @@ static func _modifier_precedes(a: Dictionary, b: Dictionary) -> bool:
 	var slot_b: int = int(b.get("slot_index", 0))
 	if slot_a != slot_b:
 		return slot_a < slot_b
+	var event_a: int = int(a.get("trigger_event_index", a.get("event_index", -1)))
+	var event_b: int = int(b.get("trigger_event_index", b.get("event_index", -1)))
+	if event_a != event_b:
+		return event_a < event_b
+	var occurrence_a: String = str(a.get("trigger_occurrence_id", ""))
+	var occurrence_b: String = str(b.get("trigger_occurrence_id", ""))
+	if occurrence_a != occurrence_b:
+		return occurrence_a < occurrence_b
+	var retrigger_a: int = int(a.get("retrigger_index", 0))
+	var retrigger_b: int = int(b.get("retrigger_index", 0))
+	if retrigger_a != retrigger_b:
+		return retrigger_a < retrigger_b
 	var id_a: String = str(a.get("modifier_id", ""))
 	var id_b: String = str(b.get("modifier_id", ""))
 	if id_a != id_b:
 		return id_a < id_b
 	return int(a.get("_input_order", 0)) < int(b.get("_input_order", 0))
+
+
+static func _make_modifier_step_metadata(modifier: Dictionary, phase: String) -> Dictionary:
+	var metadata: Dictionary = {}
+	var metadata_value: Variant = modifier.get("metadata", {})
+	if metadata_value is Dictionary:
+		metadata = (metadata_value as Dictionary).duplicate(true)
+	metadata.merge({
+		"modifier_phase": phase,
+		"slot_index": int(modifier.get("slot_index", 0)),
+		"eight_ball_item_id": str(modifier.get("eight_ball_item_id", "")),
+		"trigger_id": str(modifier.get("trigger_id", "")),
+		"trigger_occurrence_id": str(modifier.get("trigger_occurrence_id", "")),
+		"trigger_ball_id": int(modifier.get("trigger_ball_id", -1)),
+		"trigger_event_index": int(modifier.get("trigger_event_index", -1)),
+		"rarity": str(modifier.get("rarity", "")),
+		"short_effect": str(modifier.get("short_effect", "")),
+		"activation_id": str(modifier.get("activation_id", "")),
+		"activation_ordinal": int(modifier.get("activation_ordinal", 0)),
+		"is_retrigger": bool(modifier.get("is_retrigger", false)),
+		"retrigger_index": int(modifier.get("retrigger_index", 0)),
+		"retrigger_source_item_id": str(modifier.get("retrigger_source_item_id", "")),
+		"retrigger_source_display_name": str(modifier.get(
+			"retrigger_source_display_name",
+			""
+		)),
+		"retrigger_source_slot_index": int(modifier.get(
+			"retrigger_source_slot_index",
+			-1
+		)),
+		"original_activation_id": str(modifier.get("original_activation_id", "")),
+		"retrigger_marker_required": bool(modifier.get(
+			"retrigger_marker_required",
+			false
+		)),
+	}, true)
+	return metadata
 
 
 static func _pocket_fact_precedes(a: Dictionary, b: Dictionary) -> bool:
@@ -545,6 +874,177 @@ static func _rail_display_name(capped_count: int) -> String:
 	if capped_count == 2:
 		return "Double Bank"
 	return "Triple Bank"
+
+
+static func _cue_recontact_display_name(cue_strike_ordinal: int) -> String:
+	if cue_strike_ordinal == 2:
+		return "Double Tap"
+	if cue_strike_ordinal == 3:
+		return "Triple Tap"
+	return "Tap x%d" % maxi(cue_strike_ordinal, 4)
+
+
+static func _cue_recontact_display_tier(cue_strike_ordinal: int) -> String:
+	if cue_strike_ordinal == 2:
+		return "double_tap"
+	if cue_strike_ordinal == 3:
+		return "triple_tap"
+	return "tap_x%d" % maxi(cue_strike_ordinal, 4)
+
+
+static func _object_ball_tap_display_name(unique_contact_ordinal: int) -> String:
+	if unique_contact_ordinal <= 1:
+		return "Ball Tap"
+	return "Ball Tap x%d" % unique_contact_ordinal
+
+
+static func _group_semantic_milestones_by_ball(values: Array) -> Dictionary:
+	var grouped: Dictionary = {}
+	for milestone_value in values:
+		if not milestone_value is Dictionary:
+			continue
+		var milestone: Dictionary = (milestone_value as Dictionary).duplicate(true)
+		var ball_id: int = int(milestone.get("ball_id", -1))
+		if ball_id <= 0:
+			continue
+		var ball_key: String = str(ball_id)
+		var ball_milestones: Array = grouped.get(ball_key, [])
+		ball_milestones.append(milestone)
+		grouped[ball_key] = ball_milestones
+	for ball_key_value in grouped.keys():
+		var ball_key: String = str(ball_key_value)
+		var ball_milestones: Array = grouped.get(ball_key, [])
+		ball_milestones.sort_custom(_semantic_milestone_precedes)
+		grouped[ball_key] = ball_milestones
+	return grouped
+
+
+static func _get_grouped_milestones_for_ball(
+	grouped: Dictionary,
+	ball_id: int
+) -> Array[Dictionary]:
+	var milestones: Array[Dictionary] = []
+	var values: Variant = grouped.get(str(ball_id), [])
+	if not values is Array:
+		return milestones
+	for milestone_value in values as Array:
+		if milestone_value is Dictionary:
+			milestones.append((milestone_value as Dictionary).duplicate(true))
+	return milestones
+
+
+static func _count_grouped_milestones(grouped: Dictionary) -> int:
+	var count: int = 0
+	for values in grouped.values():
+		if values is Array:
+			count += (values as Array).size()
+	return count
+
+
+static func _semantic_milestone_precedes(a: Dictionary, b: Dictionary) -> bool:
+	var event_a: int = int(a.get("event_index", 2147483647))
+	var event_b: int = int(b.get("event_index", 2147483647))
+	if event_a != event_b:
+		return event_a < event_b
+	var ordinal_a: int = int(a.get(
+		"bonus_ordinal",
+		a.get("unique_contact_ordinal", 2147483647)
+	))
+	var ordinal_b: int = int(b.get(
+		"bonus_ordinal",
+		b.get("unique_contact_ordinal", 2147483647)
+	))
+	if ordinal_a != ordinal_b:
+		return ordinal_a < ordinal_b
+	return str(a.get("trigger_occurrence_id", "")) < str(
+		b.get("trigger_occurrence_id", "")
+	)
+
+
+static func _get_milestone_position(milestone: Dictionary) -> Dictionary:
+	var position_value: Variant = milestone.get("world_position", null)
+	if not position_value is Vector2:
+		return {"available": false, "position": Vector2.ZERO}
+	var position: Vector2 = position_value as Vector2
+	if not is_finite(position.x) or not is_finite(position.y):
+		return {"available": false, "position": Vector2.ZERO}
+	return {"available": true, "position": position}
+
+
+static func _make_legacy_cue_recontact_milestones(fact: Dictionary) -> Array[Dictionary]:
+	var milestones: Array[Dictionary] = []
+	var event_indices: Array = _array_value(fact, "cue_recontact_event_indices")
+	var positions: Array = _array_value(fact, "cue_recontact_positions")
+	var ball_id: int = int(fact.get("ball_id", -1))
+	for milestone_index in range(event_indices.size()):
+		var event_index: int = int(event_indices[milestone_index])
+		var bonus_ordinal: int = milestone_index + 1
+		var cue_strike_ordinal: int = bonus_ordinal + 1
+		var position_result: Dictionary = _get_aligned_position(positions, milestone_index)
+		milestones.append({
+			"trigger_occurrence_id": "cue_recontact_milestone:%d:%d:%d" % [
+				ball_id,
+				event_index,
+				cue_strike_ordinal,
+			],
+			"trigger_id": "cue_recontact_milestone",
+			"ball_id": ball_id,
+			"event_index": event_index,
+			"world_position": position_result.get("position", Vector2.ZERO),
+			"cue_strike_ordinal": cue_strike_ordinal,
+			"bonus_ordinal": bonus_ordinal,
+			"metadata": {
+				"qualifying_cue_strike_count": int(fact.get(
+					"qualifying_cue_strike_count",
+					event_indices.size() + 1
+				)),
+			},
+		})
+	return milestones
+
+
+static func _make_legacy_object_ball_tap_milestones(fact: Dictionary) -> Array[Dictionary]:
+	var milestones: Array[Dictionary] = []
+	var target_ball_ids: Array = _array_value(fact, "unique_object_tap_ball_ids")
+	var event_indices: Array = _array_value(fact, "object_tap_event_indices")
+	var positions: Array = _array_value(fact, "object_tap_positions")
+	var ball_id: int = int(fact.get("ball_id", -1))
+	var aligned_count: int = mini(target_ball_ids.size(), event_indices.size())
+	for milestone_index in range(aligned_count):
+		var contacted_ball_id: int = int(target_ball_ids[milestone_index])
+		var event_index: int = int(event_indices[milestone_index])
+		var unique_contact_ordinal: int = milestone_index + 1
+		var position_result: Dictionary = _get_aligned_position(positions, milestone_index)
+		milestones.append({
+			"trigger_occurrence_id": "object_ball_tap_milestone:%d:%d:%d" % [
+				ball_id,
+				contacted_ball_id,
+				event_index,
+			],
+			"trigger_id": "object_ball_tap_milestone",
+			"ball_id": ball_id,
+			"contacted_ball_id": contacted_ball_id,
+			"event_index": event_index,
+			"world_position": position_result.get("position", Vector2.ZERO),
+			"unique_contact_ordinal": unique_contact_ordinal,
+			"metadata": {
+				"unique_target_count": target_ball_ids.size(),
+				"repeated_target_contact": false,
+			},
+		})
+	return milestones
+
+
+static func _get_aligned_position(positions: Array, position_index: int) -> Dictionary:
+	if position_index < 0 or position_index >= positions.size():
+		return {"available": false, "position": Vector2.ZERO}
+	var position_value: Variant = positions[position_index]
+	if not position_value is Vector2:
+		return {"available": false, "position": Vector2.ZERO}
+	var position: Vector2 = position_value as Vector2
+	if not is_finite(position.x) or not is_finite(position.y):
+		return {"available": false, "position": Vector2.ZERO}
+	return {"available": true, "position": position}
 
 
 static func _increment_source_count(diagnostics: Dictionary, source_id: String) -> void:
@@ -593,9 +1093,22 @@ static func _contains_live_node_reference(value: Variant, depth: int = 0) -> boo
 
 static func _test_ledger(facts: Array, scratch: bool = false) -> Dictionary:
 	var object_ids: Array[int] = []
+	var cue_recontact_milestones: Array[Dictionary] = []
+	var object_ball_tap_milestones: Array[Dictionary] = []
 	for fact_value in facts:
 		if fact_value is Dictionary:
-			object_ids.append(int((fact_value as Dictionary).get("ball_id", -1)))
+			var fact: Dictionary = fact_value as Dictionary
+			object_ids.append(int(fact.get("ball_id", -1)))
+			for milestone in _array_value(fact, "cue_recontact_milestones"):
+				if milestone is Dictionary:
+					cue_recontact_milestones.append(
+						(milestone as Dictionary).duplicate(true)
+					)
+			for milestone in _array_value(fact, "object_ball_tap_milestones"):
+				if milestone is Dictionary:
+					object_ball_tap_milestones.append(
+						(milestone as Dictionary).duplicate(true)
+					)
 	return {
 		"schema_version": SUPPORTED_LEDGER_SCHEMA_VERSIONS[0],
 		"source": "synthetic_self_test",
@@ -608,6 +1121,10 @@ static func _test_ledger(facts: Array, scratch: bool = false) -> Dictionary:
 			"object_ball_pocket_count": facts.size(),
 			"object_balls_pocketed": object_ids,
 			"pocket_facts": facts.duplicate(true),
+			"cue_recontact_milestones": cue_recontact_milestones,
+			"cue_recontact_milestone_count": cue_recontact_milestones.size(),
+			"object_ball_tap_milestones": object_ball_tap_milestones,
+			"object_ball_tap_milestone_count": object_ball_tap_milestones.size(),
 			"scratch_occurred": scratch,
 			"cue_ball_pocket_event_index": 99 if scratch else -1,
 		},
@@ -624,7 +1141,93 @@ static func _test_fact(ball_id: int, pocket_order: int, bank_count: int, combina
 		"causal_depth": 2 if combination else 1,
 		"bank_count": bank_count,
 		"is_combination_pot": combination,
+		"qualifying_cue_strike_count": 1,
+		"cue_recontact_bonus_count": 0,
+		"cue_recontact_event_indices": [],
+		"cue_recontact_positions": [],
+		"cue_recontact_milestones": [],
+		"unique_object_tap_count": 0,
+		"unique_object_tap_ball_ids": [],
+		"object_tap_event_indices": [],
+		"object_tap_positions": [],
+		"object_ball_tap_milestones": [],
+		"repeated_object_tap_contact_count": 0,
 	}
+
+
+static func _test_tap_fact(
+	ball_id: int,
+	pocket_order: int,
+	bank_count: int,
+	combination: bool,
+	cue_recontact_event_indices: Array,
+	object_tap_ball_ids: Array,
+	object_tap_event_indices: Array,
+	repeated_object_tap_contact_count: int
+) -> Dictionary:
+	var fact: Dictionary = _test_fact(ball_id, pocket_order, bank_count, combination)
+	fact["qualifying_cue_strike_count"] = cue_recontact_event_indices.size() + 1
+	fact["cue_recontact_bonus_count"] = cue_recontact_event_indices.size()
+	fact["cue_recontact_event_indices"] = cue_recontact_event_indices.duplicate()
+	var cue_positions: Array[Vector2] = []
+	var cue_milestones: Array[Dictionary] = []
+	for cue_index in range(cue_recontact_event_indices.size()):
+		var event_index: int = int(cue_recontact_event_indices[cue_index])
+		var world_position := Vector2(float(event_index), float(ball_id))
+		cue_positions.append(world_position)
+		cue_milestones.append({
+			"trigger_occurrence_id": "cue_recontact_milestone:%d:%d:%d" % [
+				ball_id,
+				event_index,
+				cue_index + 2,
+			],
+			"trigger_id": "cue_recontact_milestone",
+			"ball_id": ball_id,
+			"ball_number": ball_id,
+			"event_index": event_index,
+			"world_position": world_position,
+			"cue_strike_ordinal": cue_index + 2,
+			"bonus_ordinal": cue_index + 1,
+			"metadata": {
+				"qualifying_cue_strike_count": cue_recontact_event_indices.size() + 1,
+				"self_test_marker": "derived_cue_milestone",
+			},
+		})
+	fact["cue_recontact_positions"] = cue_positions
+	fact["cue_recontact_milestones"] = cue_milestones
+	fact["unique_object_tap_count"] = object_tap_ball_ids.size()
+	fact["unique_object_tap_ball_ids"] = object_tap_ball_ids.duplicate()
+	fact["object_tap_event_indices"] = object_tap_event_indices.duplicate()
+	var tap_positions: Array[Vector2] = []
+	var object_tap_milestones: Array[Dictionary] = []
+	for tap_index in range(object_tap_event_indices.size()):
+		var event_index: int = int(object_tap_event_indices[tap_index])
+		var world_position := Vector2(float(event_index), float(ball_id))
+		tap_positions.append(world_position)
+		var contacted_ball_id: int = int(object_tap_ball_ids[tap_index])
+		object_tap_milestones.append({
+			"trigger_occurrence_id": "object_ball_tap_milestone:%d:%d:%d" % [
+				ball_id,
+				contacted_ball_id,
+				event_index,
+			],
+			"trigger_id": "object_ball_tap_milestone",
+			"ball_id": ball_id,
+			"ball_number": ball_id,
+			"contacted_ball_id": contacted_ball_id,
+			"event_index": event_index,
+			"world_position": world_position,
+			"unique_contact_ordinal": tap_index + 1,
+			"metadata": {
+				"unique_target_count": object_tap_ball_ids.size(),
+				"repeated_target_contact": false,
+				"self_test_marker": "derived_object_tap_milestone",
+			},
+		})
+	fact["object_tap_positions"] = tap_positions
+	fact["object_ball_tap_milestones"] = object_tap_milestones
+	fact["repeated_object_tap_contact_count"] = repeated_object_tap_contact_count
+	return fact
 
 
 static func _test_modifier(modifier_id: String, phase: String, slot_index: int, value: Variant) -> Dictionary:
@@ -704,6 +1307,13 @@ static func _make_test_case(name: String, passed: bool, expected: Dictionary, ac
 
 static func _dictionary_value(container: Dictionary, key: String) -> Dictionary:
 	var value: Variant = container.get(key, {})
+	return value as Dictionary if value is Dictionary else {}
+
+
+static func _dictionary_at(values: Array, index: int) -> Dictionary:
+	if index < 0 or index >= values.size():
+		return {}
+	var value: Variant = values[index]
 	return value as Dictionary if value is Dictionary else {}
 
 

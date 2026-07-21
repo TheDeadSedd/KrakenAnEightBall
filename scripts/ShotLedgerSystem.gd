@@ -2,6 +2,7 @@ extends Node
 class_name ShotLedgerSystem
 
 signal shot_ledger_completed(ledger: Dictionary)
+signal semantic_shot_event_recorded(event: Dictionary)
 
 # Completed schema v1 is value-only and intentionally shared with future
 # predicted ledgers:
@@ -145,8 +146,9 @@ func record_ball_contact(event: Dictionary) -> bool:
 	accepted_event["source_ball_id"] = int(source_target.get("source_ball_id", -1))
 	accepted_event["target_ball_id"] = int(source_target.get("target_ball_id", -1))
 	accepted_event["causal_direction_ambiguous"] = bool(source_target.get("ambiguous", true))
-	_append_event("ball_contact", accepted_event)
+	var stored_event: Dictionary = _append_event("ball_contact", accepted_event)
 	active_semantic_pair_set[_pair_key(ball_a_id, ball_b_id)] = true
+	_emit_semantic_event(stored_event)
 	return true
 
 
@@ -175,7 +177,9 @@ func record_rail_contact(event: Dictionary) -> bool:
 		active_diagnostics["invalid_events"] = int(active_diagnostics["invalid_events"]) + 1
 		global_invalid_event_count += 1
 		return false
-	_append_event("rail_contact", event)
+	var accepted_event: Dictionary = _normalize_rail_contact_geometry(event)
+	var stored_event: Dictionary = _append_event("rail_contact", accepted_event)
+	_emit_semantic_event(stored_event)
 	return true
 
 
@@ -201,7 +205,7 @@ func record_pocket(event: Dictionary) -> bool:
 		global_invalid_event_count += 1
 		return false
 	record_ball_position(ball_id, capture_position_value)
-	_append_event("pocket", event)
+	var stored_event: Dictionary = _append_event("pocket", event)
 	active_pocketed_ball_set[ball_key] = true
 	active_pocketed_ball_ids.append(ball_id)
 	active_pocket_capture_by_ball[ball_key] = {
@@ -209,6 +213,7 @@ func record_pocket(event: Dictionary) -> bool:
 		"event_index": _get_last_event_index(),
 	}
 	active_last_positions.erase(ball_key)
+	_emit_semantic_event(stored_event)
 	return true
 
 
@@ -289,6 +294,10 @@ func is_shot_active() -> bool:
 
 func get_last_completed_ledger() -> Dictionary:
 	return last_completed_ledger.duplicate(true)
+
+
+func get_active_shot_snapshot() -> Dictionary:
+	return current_shot.duplicate(true)
 
 
 func capture_rewind_state() -> Dictionary:
@@ -484,6 +493,17 @@ func get_last_completed_summary() -> String:
 		int(derived.get("maximum_causal_depth", 0)),
 		int(derived.get("maximum_bank_count", 0)),
 	])
+	lines.append("Cue Tap milestones: %d | Max cue strikes: %d | Ball Tap milestones: %d | Max unique targets: %d" % [
+		int(derived.get("total_cue_recontact_milestones", 0)),
+		int(derived.get("maximum_cue_strikes_against_one_scoring_ball", 0)),
+		int(derived.get("total_unique_ball_tap_milestones", 0)),
+		int(derived.get("maximum_ball_taps_by_one_scoring_ball", 0)),
+	])
+	lines.append("Tap rejects: ambiguous %d | repeated targets %d | Direct disqualifications %d" % [
+		int(derived.get("ambiguous_qualifying_contact_rejection_count", 0)),
+		int(derived.get("repeated_ball_tap_contacts_ignored", 0)),
+		int(derived.get("tap_direct_pot_disqualifications", 0)),
+	])
 	lines.append("Tags: %s" % _format_tag_ids(_array_value(derived, "tags")))
 	lines.append("Cue travel: %.1f px | Object travel: %.1f px" % [
 		float(derived.get("cue_ball_travel_distance", 0.0)),
@@ -571,12 +591,25 @@ func get_last_raw_events_json(event_type_filter: String = "", ball_id_filter: in
 	return JSON.stringify(_to_json_safe(get_last_raw_events(event_type_filter, ball_id_filter)), "  ")
 
 
-func _append_event(event_type: String, event: Dictionary) -> void:
+func _append_event(event_type: String, event: Dictionary) -> Dictionary:
 	var accepted_event: Dictionary = event.duplicate(true)
 	accepted_event["event_index"] = _get_raw_events().size()
 	accepted_event["event_type"] = event_type
 	accepted_event["shot_elapsed_sec"] = _get_shot_elapsed_sec()
 	_get_raw_events().append(accepted_event)
+	return accepted_event
+
+
+func _emit_semantic_event(event: Dictionary) -> void:
+	if event.is_empty() or not is_shot_active():
+		return
+	var observed_event: Dictionary = event.duplicate(true)
+	observed_event["schema_version"] = int(current_shot.get("schema_version", SCHEMA_VERSION))
+	observed_event["run_generation"] = int(current_shot.get("run_generation", -1))
+	observed_event["mode_id"] = str(current_shot.get("mode_id", ""))
+	observed_event["shot_id"] = int(current_shot.get("shot_id", -1))
+	observed_event["attempt_id"] = int(current_shot.get("attempt_id", -1))
+	semantic_shot_event_recorded.emit(observed_event)
 
 
 func _record_lifecycle_misuse(reason: String, context_label: String) -> void:
@@ -695,6 +728,44 @@ func _validate_rail_vectors(event: Dictionary) -> bool:
 		if not value is Vector2 or not _is_finite_vector(value):
 			return false
 	return true
+
+
+func _normalize_rail_contact_geometry(event: Dictionary) -> Dictionary:
+	var normalized: Dictionary = event.duplicate(true)
+	var ball_id: int = int(normalized.get("ball_id", -1))
+	var starting_balls: Dictionary = _dictionary_value(current_shot, "starting_balls")
+	var ball_snapshot: Dictionary = _dictionary_value(starting_balls, str(ball_id))
+	var ball_radius: float = maxf(
+		float(normalized.get("ball_radius", ball_snapshot.get("radius", 0.0))),
+		0.0
+	)
+	var contact_normal: Vector2 = normalized.get("contact_normal", Vector2.ZERO)
+	var unit_normal: Vector2 = (
+		contact_normal.normalized() if contact_normal != Vector2.ZERO else Vector2.ZERO
+	)
+	var surface_point: Vector2 = normalized.get(
+		"surface_contact_point",
+		normalized.get("contact_point", Vector2.ZERO)
+	)
+	var center_point: Vector2 = normalized.get(
+		"ball_center_at_contact",
+		surface_point + unit_normal * ball_radius
+	)
+	normalized["ball_radius"] = ball_radius
+	normalized["ball_center_at_contact"] = center_point
+	normalized["surface_contact_point"] = surface_point
+	# Keep the legacy field presentation-compatible with existing score mappers.
+	normalized["contact_point"] = surface_point
+	normalized["rail_side"] = _derive_rail_side(unit_normal)
+	return normalized
+
+
+func _derive_rail_side(normal: Vector2) -> String:
+	if normal == Vector2.ZERO:
+		return "unknown"
+	if absf(normal.x) > absf(normal.y):
+		return "left" if normal.x > 0.0 else "right"
+	return "top" if normal.y > 0.0 else "bottom"
 
 
 func _make_empty_diagnostics() -> Dictionary:
