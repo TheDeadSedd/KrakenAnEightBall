@@ -7,6 +7,7 @@ signal state_changed(snapshot: Dictionary)
 
 const RESOLVER := preload("res://scripts/RogueliteScoreResolver.gd")
 const TRIGGER_EVALUATOR := preload("res://scripts/RogueliteScoringTriggerEvaluator.gd")
+const BUILD_EFFECT_TESTS := preload("res://scripts/RogueliteBuildEffectEvaluatorTests.gd")
 const DOUBLOON_PAYOUT_RESOLVER := preload(
 	"res://scripts/RogueliteDoubloonPayoutResolver.gd"
 )
@@ -230,12 +231,23 @@ func run_self_tests() -> Dictionary:
 		TRIGGER_EVALUATOR.run_self_tests(),
 		int(TRIGGER_EVALUATOR.SELF_TEST_CASE_COUNT)
 	)
+	var build_effect_result: Dictionary = BUILD_EFFECT_TESTS.run_self_tests()
 	var cases: Array = _array_value(resolver_result, "cases").duplicate(true)
 	cases.append_array(_array_value(trigger_result, "cases").duplicate(true))
+	cases.append_array(_array_value(build_effect_result, "cases").duplicate(true))
 	var failures: Array = _array_value(resolver_result, "failures").duplicate(true)
 	failures.append_array(_array_value(trigger_result, "failures").duplicate(true))
-	var total: int = int(resolver_result.get("total", 0)) + int(trigger_result.get("total", 0))
-	var passed: int = int(resolver_result.get("passed", 0)) + int(trigger_result.get("passed", 0))
+	failures.append_array(_array_value(build_effect_result, "failures").duplicate(true))
+	var total: int = (
+		int(resolver_result.get("total", 0))
+		+ int(trigger_result.get("total", 0))
+		+ int(build_effect_result.get("total", 0))
+	)
+	var passed: int = (
+		int(resolver_result.get("passed", 0))
+		+ int(trigger_result.get("passed", 0))
+		+ int(build_effect_result.get("passed", 0))
+	)
 	last_self_test_result = {
 		"status": "PASS" if failures.is_empty() and passed == total else "FAIL",
 		"timestamp": Time.get_datetime_string_from_system(),
@@ -247,6 +259,7 @@ func run_self_tests() -> Dictionary:
 		"components": {
 			"resolver": resolver_result.duplicate(true),
 			"trigger_evaluator": trigger_result.duplicate(true),
+			"build_effect_evaluator": build_effect_result.duplicate(true),
 		},
 	}
 	last_self_test_result["duration_usec"] = maxi(Time.get_ticks_usec() - started_at_usec, 0)
@@ -490,6 +503,7 @@ func _on_shot_ledger_completed(ledger: Dictionary) -> void:
 	_attach_balance_shot_analysis(resolved, ledger, assembled)
 	_attach_doubloon_payout(resolved)
 	_handle_shot_lab_doubloon_payout(resolved, ledger)
+	_commit_shot_lab_build_state_mutations(resolved, resolution_key)
 	scoring_analysis_duration_usec = maxi(Time.get_ticks_usec() - started_at_usec, 0)
 	last_resolution_key = resolution_key
 	_remember_resolution_key(resolution_key)
@@ -556,6 +570,20 @@ func _attach_build_evaluation(resolved: Dictionary, evaluation: Dictionary) -> v
 		evaluation,
 		"modifier_context"
 	).size()
+	diagnostics["eight_ball_engine_event_count"] = _array_value(
+		evaluation,
+		"engine_events"
+	).size()
+	diagnostics["eight_ball_state_mutation_count"] = _array_value(
+		evaluation,
+		"authoritative_state_mutations"
+	).size()
+	diagnostics["eight_ball_echo_threshold_count"] = int(
+		evaluation.get("echo_threshold_count", 0)
+	)
+	diagnostics["eight_ball_maximum_retrigger_depth"] = int(
+		evaluation.get("maximum_retrigger_depth", 0)
+	)
 	resolved["diagnostics"] = diagnostics
 
 
@@ -831,6 +859,39 @@ func _handle_shot_lab_doubloon_payout(resolved: Dictionary, ledger: Dictionary) 
 	resolved["diagnostics"] = diagnostics
 
 
+func _commit_shot_lab_build_state_mutations(
+	resolved: Dictionary,
+	resolution_key: String
+) -> void:
+	if str(resolved.get("mode_id", "")) != GAME_MODE_SCRIPT.MODE_SHOT_LAB:
+		return
+	if build_system == null:
+		return
+	var evaluation: Dictionary = _dictionary_value(
+		resolved,
+		"eight_ball_build_evaluation"
+	)
+	var mutations: Array = _array_value(evaluation, "authoritative_state_mutations")
+	if mutations.is_empty():
+		return
+	var application_key: String = "shot_lab|%s|build_state" % resolution_key
+	var application: Dictionary = build_system.apply_authoritative_state_mutations(
+		mutations,
+		application_key
+	)
+	resolved["build_state_mutation_application"] = application.duplicate(true)
+	resolved["build_state_mutation_key"] = application_key
+	var diagnostics: Dictionary = _dictionary_value(resolved, "diagnostics")
+	diagnostics["build_state_mutation_applied"] = bool(application.get(
+		"applied",
+		false
+	))
+	diagnostics["build_state_mutation_duplicate_suppressed"] = bool(
+		application.get("duplicate_suppressed", false)
+	)
+	resolved["diagnostics"] = diagnostics
+
+
 func _prepare_authoritative_round_score(resolved: Dictionary, ledger: Dictionary) -> void:
 	var is_roguelite_result: bool = str(ledger.get("mode_id", "")) == GAME_MODE_SCRIPT.MODE_ROGUELITE
 	var round_before: int = 0
@@ -890,6 +951,34 @@ func _commit_authoritative_round_score(resolved: Dictionary, ledger: Dictionary)
 		false
 	))
 	resolved["terminal_shot_payout"] = bool(transaction.get("terminal_shot_payout", false))
+	resolved["build_state_mutation_key"] = str(transaction.get(
+		"build_state_mutation_key",
+		""
+	))
+	resolved["item_states_before"] = _dictionary_value(
+		transaction,
+		"item_states_before"
+	).duplicate(true)
+	resolved["pending_item_state_mutations"] = _array_value(
+		transaction,
+		"pending_item_state_mutations"
+	).duplicate(true)
+	resolved["item_states_after"] = _dictionary_value(
+		transaction,
+		"item_states_after"
+	).duplicate(true)
+	resolved["build_state_mutation_application"] = _dictionary_value(
+		transaction,
+		"build_state_mutation_result"
+	).duplicate(true)
+	resolved["build_state_mutation_applied"] = bool(transaction.get(
+		"build_state_mutation_applied",
+		false
+	))
+	resolved["build_state_mutation_duplicate_suppressed"] = bool(transaction.get(
+		"build_state_mutation_duplicate_suppressed",
+		false
+	))
 	resolved["round_score_delta_pending"] = 0
 	resolved["authoritative_score_pending"] = false
 	resolved["authoritative_score_applied_to_round"] = accepted
@@ -945,6 +1034,13 @@ func _commit_authoritative_round_score(resolved: Dictionary, ledger: Dictionary)
 		"terminal_shot_payout",
 		false
 	))
+	diagnostics["build_state_mutation_applied"] = bool(transaction.get(
+		"build_state_mutation_applied",
+		false
+	))
+	diagnostics["build_state_mutation_duplicate_suppressed"] = bool(
+		transaction.get("build_state_mutation_duplicate_suppressed", false)
+	)
 	diagnostics["hull_before"] = int(resolved["hull_before"])
 	diagnostics["hull_after"] = int(resolved["hull_after"])
 	diagnostics["shots_before"] = int(resolved["shots_before"])

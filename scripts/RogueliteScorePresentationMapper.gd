@@ -2,12 +2,16 @@ extends RefCounted
 class_name RogueliteScorePresentationMapper
 
 const SCHEMA_VERSION := 2
-const SELF_TEST_CASE_COUNT := 8
+const SELF_TEST_CASE_COUNT := 12
 
 const SOURCE_CUE_RECONTACT := "base_cue_recontact"
 const SOURCE_CUE_RECONTACT_MILESTONE := "cue_recontact_milestone"
 const SOURCE_OBJECT_BALL_TAP := "base_object_ball_tap"
 const SOURCE_OBJECT_BALL_TAP_MILESTONE := "object_ball_tap_milestone"
+const EFFECT_KIND_PERSISTENT_SCALER := "persistent_scaler"
+const EFFECT_KIND_CROSS_FAMILY_CONDITIONAL := "cross_family_conditional"
+const EFFECT_KIND_SHOT_ORDINAL_MULTIPLIER := "shot_ordinal_multiplier"
+const EFFECT_KIND_THRESHOLD_FAMILY_RETRIGGER := "threshold_family_retrigger"
 
 
 static func map_score_result(score_result: Dictionary, frozen_ledger: Dictionary) -> Dictionary:
@@ -17,19 +21,23 @@ static func map_score_result(score_result: Dictionary, frozen_ledger: Dictionary
 		"fallback_count": 0,
 		"missing_event_indices": [],
 		"invalid_position_count": 0,
+		"mapped_engine_event_count": 0,
 		"warnings": [],
 	}
 	var mapped_steps: Array[Dictionary] = []
+	var mapped_engine_events: Array[Dictionary] = []
 	if score_result.is_empty() or frozen_ledger.is_empty() or not bool(diagnostics["identity_match"]):
 		diagnostics["warnings"].append("Score result and frozen Shot Ledger identities do not match.")
 		return {
 			"schema_version": SCHEMA_VERSION,
 			"resolution_key": _resolution_key(score_result),
 			"steps": mapped_steps,
+			"engine_events": mapped_engine_events,
 			"diagnostics": diagnostics,
 		}
 
 	var event_lookup: Dictionary = _build_event_lookup(frozen_ledger)
+	var starting_balls: Dictionary = _dictionary_value(frozen_ledger, "starting_balls")
 	var tap_milestone_lookup: Dictionary = _build_tap_milestone_lookup(
 		_dictionary_value(frozen_ledger, "derived"),
 		diagnostics
@@ -41,7 +49,8 @@ static func map_score_result(score_result: Dictionary, frozen_ledger: Dictionary
 			step_value as Dictionary,
 			event_lookup,
 			tap_milestone_lookup,
-			diagnostics
+			diagnostics,
+			starting_balls
 		)
 		mapped_steps.append(mapped)
 		if str(mapped.get("anchor_type", "hud")) == "world":
@@ -51,11 +60,14 @@ static func map_score_result(score_result: Dictionary, frozen_ledger: Dictionary
 			var fallback_reason: String = str(mapped.get("fallback_reason", ""))
 			if not fallback_reason.is_empty():
 				diagnostics["warnings"].append(fallback_reason)
+	mapped_engine_events = _map_engine_events(score_result)
+	diagnostics["mapped_engine_event_count"] = mapped_engine_events.size()
 
 	return {
 		"schema_version": SCHEMA_VERSION,
 		"resolution_key": _resolution_key(score_result),
 		"steps": mapped_steps,
+		"engine_events": mapped_engine_events,
 		"diagnostics": diagnostics,
 	}
 
@@ -85,6 +97,55 @@ static func run_self_tests() -> Dictionary:
 		"position": _step_position(steps, 5),
 		"title": _step_value(steps, 5, "title", ""),
 	})
+	var engine_events: Array = _array_value(mapped, "engine_events")
+	_append_case(cases, "Rattle growth maps as value-only HUD evidence", (
+		engine_events.size() == 2
+		and str(_step_value(engine_events, 0, "title", "")) == "RATTLE OF THE DEEP"
+		and str(_step_value(engine_events, 0, "effect_text", "")) == "x1.4 -> x1.6"
+		and int(_step_value(engine_events, 0, "tray_slot_index", -1)) == 2
+		and str(_step_value(engine_events, 0, "anchor_type", "")) == "hud"
+	), {
+		"title": "RATTLE OF THE DEEP",
+		"effect_text": "x1.4 -> x1.6",
+		"slot": 2,
+		"anchor": "hud",
+	}, _dictionary_at(engine_events, 0))
+	_append_case(cases, "Echo threshold maps to its exact tray slot", (
+		str(_step_value(engine_events, 1, "title", "")) == "ECHO CHAMBER"
+		and str(_step_value(engine_events, 1, "effect_text", "")) == "THIRD TAP - RETRIGGER"
+		and int(_step_value(engine_events, 1, "tray_slot_index", -1)) == 4
+	), {
+		"title": "ECHO CHAMBER",
+		"effect_text": "THIRD TAP - RETRIGGER",
+		"slot": 4,
+	}, _dictionary_at(engine_events, 1))
+	var build_modifier: Dictionary = _map_step({
+		"step_index": 6,
+		"source_id": "double_tap_haul_second_bite",
+		"source_type": "modifier",
+		"display_name": "Second Bite",
+		"phase": "add_haul",
+		"event_index": 6,
+		"ball_id": -1,
+		"haul_delta": 10,
+		"mult_delta": 0.0,
+		"xmult_factor": 1.0,
+		"affects_score": true,
+		"metadata": {
+			"trigger_id": SOURCE_CUE_RECONTACT_MILESTONE,
+			"slot_index": 1,
+			"is_retrigger": true,
+		},
+	}, _build_event_lookup(ledger), _build_tap_milestone_lookup(
+		_dictionary_value(ledger, "derived"), {}
+	), {}, _dictionary_value(ledger, "starting_balls"))
+	_append_case(cases, "Tap build activation remains HUD-owned", (
+		str(build_modifier.get("anchor_type", "")) == "hud"
+		and str(build_modifier.get("title", "")) == "SECOND BITE"
+	), {"anchor": "hud", "title": "SECOND BITE"}, build_modifier)
+	_append_case(cases, "Retrigger wording is explicit", (
+		str(build_modifier.get("effect_text", "")) == "RETRIGGER +10 HAUL"
+	), "RETRIGGER +10 HAUL", build_modifier.get("effect_text", ""))
 	var missing_result: Dictionary = result.duplicate(true)
 	var missing_steps: Array = _array_value(missing_result, "resolution_steps")
 	var missing_bank: Dictionary = (missing_steps[1] as Dictionary).duplicate(true)
@@ -140,25 +201,30 @@ static func run_self_tests() -> Dictionary:
 			passed += 1
 		else:
 			failures.append(case.duplicate(true))
-	return {
-		"status": "PASS" if failures.is_empty() else "FAIL",
+	var report: Dictionary = {
+		"status": "PASS" if failures.is_empty() and cases.size() == SELF_TEST_CASE_COUNT else "FAIL",
 		"total": cases.size(),
 		"passed": passed,
 		"failed": failures.size(),
 		"failures": failures,
 	}
+	return report
 
 
 static func _map_step(
 	step: Dictionary,
 	event_lookup: Dictionary,
 	tap_milestone_lookup: Dictionary,
-	diagnostics: Dictionary
+	diagnostics: Dictionary,
+	starting_balls: Dictionary
 ) -> Dictionary:
 	var source_id: String = str(step.get("source_id", ""))
 	var source_type: String = str(step.get("source_type", ""))
 	var event_index: int = int(step.get("event_index", -1))
 	var metadata: Dictionary = _dictionary_value(step, "metadata")
+	_enrich_modifier_ball_number(metadata, step, starting_balls)
+	var presentation_step: Dictionary = step.duplicate(true)
+	presentation_step["metadata"] = metadata.duplicate(true)
 	var canonical_tap: Dictionary = _get_canonical_tap_milestone(
 		step,
 		tap_milestone_lookup
@@ -169,7 +235,7 @@ static func _map_step(
 		"source_type": source_type,
 		"phase": str(step.get("phase", "")),
 		"title": _step_title(step, canonical_tap),
-		"effect_text": _step_effect_text(step),
+		"effect_text": _step_effect_text(presentation_step),
 		"affects_score": bool(step.get("affects_score", true)),
 		"ball_id": int(step.get("ball_id", -1)),
 		"event_index": event_index,
@@ -192,6 +258,30 @@ static func _map_step(
 		"canonical_milestone_valid": not canonical_tap.is_empty(),
 		"display_tier": str(canonical_tap.get("display_tier", "")),
 		"tap_ordinal": _tap_ordinal(canonical_tap),
+		"eight_ball_item_id": str(metadata.get(
+			"eight_ball_item_id",
+			step.get("eight_ball_item_id", source_id if source_type == "modifier" else "")
+		)),
+		"owned_item_instance_id": int(metadata.get(
+			"owned_item_instance_id",
+			step.get("owned_item_instance_id", 0)
+		)),
+		"tray_slot_index": int(metadata.get(
+			"slot_index",
+			metadata.get("tray_slot_index", step.get("tray_slot_index", -1))
+		)),
+		"effect_kind": str(metadata.get(
+			"effect_kind",
+			step.get("effect_kind", "")
+		)),
+		"is_retrigger": bool(metadata.get(
+			"is_retrigger",
+			step.get("is_retrigger", false)
+		)),
+		"retrigger_threshold_ordinal": int(metadata.get(
+			"retrigger_threshold_ordinal",
+			step.get("retrigger_threshold_ordinal", 0)
+		)),
 	}
 
 	match source_id:
@@ -202,15 +292,15 @@ static func _map_step(
 		"base_combination":
 			_apply_contact_anchor(mapped, event_lookup, event_index, diagnostics)
 		_:
-			if _is_tap_step(step):
+			if source_type == "modifier" or not str(mapped.get("eight_ball_item_id", "")).is_empty():
+				mapped["anchor_reason"] = "modifier_hud_anchor"
+			elif _is_tap_step(step):
 				_apply_canonical_tap_anchor(
 					mapped,
 					event_lookup,
 					canonical_tap,
 					diagnostics
 				)
-			elif source_type == "modifier":
-				mapped["anchor_reason"] = "modifier_hud_anchor"
 			else:
 				_apply_event_anchor_if_valid(mapped, event_lookup, event_index, diagnostics)
 	return mapped
@@ -380,6 +470,8 @@ static func _set_fallback(mapped: Dictionary, reason: String, force_hud: bool = 
 
 static func _step_title(step: Dictionary, canonical_tap: Dictionary = {}) -> String:
 	var source_id: String = str(step.get("source_id", ""))
+	if str(step.get("source_type", "")) == "modifier":
+		return str(step.get("display_name", "MODIFIER")).to_upper()
 	var metadata: Dictionary = _dictionary_value(step, "metadata")
 	if _is_cue_recontact_step(step):
 		var bonus_ordinal: int = maxi(int(canonical_tap.get(
@@ -447,16 +539,272 @@ static func _tap_ordinal(milestone: Dictionary) -> int:
 static func _step_effect_text(step: Dictionary) -> String:
 	if not bool(step.get("affects_score", true)) or str(step.get("source_id", "")) == "scratch":
 		return "Score retained"
+	var metadata: Dictionary = _dictionary_value(step, "metadata")
+	var prefix: String = "RETRIGGER " if bool(metadata.get(
+		"is_retrigger",
+		step.get("is_retrigger", false)
+	)) else ""
+	var effect_kind: String = str(metadata.get("effect_kind", step.get("effect_kind", "")))
+	var ball_number: int = int(metadata.get(
+		"ball_number",
+		metadata.get("scoring_ball_number", step.get("ball_number", 0))
+	))
+	var tap_ordinal: int = int(metadata.get(
+		"tap_ordinal",
+		metadata.get("shot_tap_ordinal", 0)
+	))
 	var haul_delta: int = int(step.get("haul_delta", 0))
 	if haul_delta != 0:
-		return "%s HAUL" % _signed_number(float(haul_delta))
+		return "%s%s HAUL" % [prefix, _signed_number(float(haul_delta))]
 	var xmult: float = float(step.get("xmult_factor", 1.0))
 	if not is_equal_approx(xmult, 1.0):
-		return "x%s MULT" % _format_number(xmult)
+		var value_text: String = "x%s MULT" % _format_number(xmult)
+		if effect_kind == EFFECT_KIND_CROSS_FAMILY_CONDITIONAL and ball_number > 0:
+			return "BALL %d - %s" % [ball_number, value_text]
+		if effect_kind == EFFECT_KIND_SHOT_ORDINAL_MULTIPLIER and tap_ordinal > 0:
+			return "TAP %d - %s" % [tap_ordinal, value_text]
+		return "%s%s" % [prefix, value_text]
 	var mult_delta: float = float(step.get("mult_delta", 0.0))
 	if not is_zero_approx(mult_delta):
-		return "%s MULT" % _signed_number(mult_delta)
+		return "%s%s MULT" % [prefix, _signed_number(mult_delta)]
 	return "Score unchanged"
+
+
+static func _enrich_modifier_ball_number(
+	metadata: Dictionary,
+	step: Dictionary,
+	starting_balls: Dictionary
+) -> void:
+	if int(metadata.get("ball_number", metadata.get("scoring_ball_number", 0))) > 0:
+		return
+	var semantic_ball_id: int = int(metadata.get(
+		"qualifying_ball_id",
+		metadata.get(
+			"trigger_ball_id",
+			step.get("trigger_ball_id", step.get("ball_id", -1))
+		)
+	))
+	if semantic_ball_id <= 0:
+		return
+	var snapshot_value: Variant = starting_balls.get(
+		str(semantic_ball_id),
+		starting_balls.get(semantic_ball_id, {})
+	)
+	if not snapshot_value is Dictionary:
+		return
+	var ball_number: int = int((snapshot_value as Dictionary).get("ball_number", 0))
+	if ball_number > 0:
+		metadata["ball_number"] = ball_number
+
+
+static func _get_engine_event_kind(
+	engine_event: Dictionary,
+	metadata: Dictionary
+) -> String:
+	return str(engine_event.get(
+		"engine_event_kind",
+		engine_event.get(
+			"engine_event_type",
+			engine_event.get("event_type", metadata.get("engine_event_kind", "engine_event"))
+		)
+	))
+
+
+static func _map_engine_events(score_result: Dictionary) -> Array[Dictionary]:
+	var mapped: Array[Dictionary] = []
+	var input_events: Array[Dictionary] = _extract_engine_events(score_result)
+	for event_index in range(input_events.size()):
+		mapped.append(_map_engine_event(input_events[event_index], event_index))
+	return mapped
+
+
+static func _extract_engine_events(score_result: Dictionary) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	var seen: Dictionary = {}
+	_append_unique_engine_events(result, seen, score_result.get("engine_events", []))
+	for key in [
+		"eight_ball_build_evaluation",
+		"build_evaluation",
+		"build_effect_evaluation",
+		"modifier_evaluation",
+		"stateful_build_evaluation",
+	]:
+		var nested_value: Variant = score_result.get(key, null)
+		if nested_value is Dictionary:
+			_append_unique_engine_events(
+				result,
+				seen,
+				(nested_value as Dictionary).get("engine_events", [])
+			)
+	return result
+
+
+static func _append_unique_engine_events(
+	target: Array[Dictionary],
+	seen: Dictionary,
+	values: Variant
+) -> void:
+	if not values is Array:
+		return
+	for value in values as Array:
+		if not value is Dictionary:
+			continue
+		var event: Dictionary = (value as Dictionary).duplicate(true)
+		var metadata: Dictionary = _dictionary_value(event, "metadata")
+		var event_kind: String = _get_engine_event_kind(event, metadata)
+		if event_kind in [
+			"stateful_modifier",
+			"cross_family_activation",
+			"ordinal_activation",
+		]:
+			# These are diagnostic mirrors of canonical modifier resolution steps.
+			continue
+		var key: String = str(event.get(
+			"engine_event_id",
+			event.get("event_id", event.get("state_event_id", ""))
+		))
+		if key.is_empty():
+			key = "%s|%s|%s|%d|%s|%s" % [
+				event_kind,
+				str(event.get("eight_ball_item_id", event.get("item_id", event.get("source_id", "")))),
+				str(event.get("trigger_occurrence_id", metadata.get("trigger_occurrence_id", ""))),
+				int(event.get("trigger_event_index", event.get("event_index", -1))),
+				str(event.get("value_before", metadata.get("value_before", ""))),
+				str(event.get("value_after", metadata.get("value_after", ""))),
+			]
+		if seen.has(key):
+			continue
+		seen[key] = true
+		target.append(event)
+
+
+static func _map_engine_event(engine_event: Dictionary, input_index: int) -> Dictionary:
+	var metadata: Dictionary = _dictionary_value(engine_event, "metadata").duplicate(true)
+	var raw_event_kind: String = _get_engine_event_kind(engine_event, metadata)
+	var event_type: String = (
+		"state_growth"
+		if raw_event_kind in ["state_growth", "state_mutation", "persistent_growth"]
+		else "threshold_marker"
+		if raw_event_kind in ["threshold_retrigger", "threshold_marker", "retrigger_marker"]
+		else raw_event_kind
+	)
+	var item_id: String = str(engine_event.get(
+		"eight_ball_item_id",
+		engine_event.get("item_id", engine_event.get("source_id", ""))
+	))
+	var slot_index: int = int(engine_event.get(
+		"slot_index",
+		engine_event.get(
+			"tray_slot_index",
+			metadata.get("slot_index", metadata.get("tray_slot_index", -1))
+		)
+	))
+	var owned_instance_id: int = int(engine_event.get(
+		"owned_item_instance_id",
+		metadata.get("owned_item_instance_id", 0)
+	))
+	var title: String = str(engine_event.get(
+		"display_name",
+		engine_event.get("title", item_id.replace("_", " ").capitalize())
+	)).to_upper()
+	var effect_text: String = _engine_event_effect_text(engine_event, metadata, event_type)
+	metadata["engine_event_type"] = event_type
+	metadata["engine_event_kind"] = raw_event_kind
+	metadata["eight_ball_item_id"] = item_id
+	metadata["slot_index"] = slot_index
+	metadata["owned_item_instance_id"] = owned_instance_id
+	metadata["is_retrigger_marker"] = event_type in [
+		"threshold_marker",
+		"retrigger_marker",
+	]
+	if event_type == "threshold_marker":
+		metadata["retrigger_source_item_id"] = item_id
+		metadata["retrigger_threshold_ordinal"] = int(engine_event.get(
+			"tap_ordinal",
+			engine_event.get(
+				"threshold_ordinal",
+				metadata.get("retrigger_threshold_ordinal", 3)
+			)
+		))
+	return {
+		"engine_event_index": input_index,
+		"engine_event_type": event_type,
+		"source_id": item_id,
+		"source_type": "engine_state",
+		"phase": str(engine_event.get("phase", "engine_marker")),
+		"title": title,
+		"effect_text": effect_text,
+		"affects_score": false,
+		"event_index": int(engine_event.get(
+			"trigger_event_index",
+			engine_event.get("event_index", -1)
+		)),
+		"trigger_occurrence_id": str(engine_event.get(
+			"trigger_occurrence_id",
+			metadata.get("trigger_occurrence_id", "")
+		)),
+		"eight_ball_item_id": item_id,
+		"owned_item_instance_id": owned_instance_id,
+		"tray_slot_index": slot_index,
+		"effect_kind": str(engine_event.get(
+			"effect_kind",
+			metadata.get("effect_kind", "")
+		)),
+		"is_retrigger_marker": bool(metadata.get("is_retrigger_marker", false)),
+		"retrigger_threshold_ordinal": int(metadata.get(
+			"retrigger_threshold_ordinal",
+			0
+		)),
+		"value_before": float(engine_event.get(
+			"value_before",
+			metadata.get("value_before", metadata.get("state_value_before", 0.0))
+		)),
+		"value_after": float(engine_event.get(
+			"value_after",
+			metadata.get("value_after", metadata.get("state_value_after", 0.0))
+		)),
+		"anchor_type": "hud",
+		"coordinate_space": "hud",
+		"hud_anchor_id": "long_sink_equation",
+		"anchor_reason": "value_only_engine_event",
+		"metadata": metadata,
+	}
+
+
+static func _engine_event_effect_text(
+	engine_event: Dictionary,
+	metadata: Dictionary,
+	event_type: String
+) -> String:
+	var explicit: String = str(engine_event.get(
+		"effect_text",
+		engine_event.get("display_text", engine_event.get("label", ""))
+	)).strip_edges()
+	if not explicit.is_empty():
+		return explicit
+	if event_type in ["state_growth", "state_mutation", "persistent_growth"]:
+		var before: float = float(engine_event.get(
+			"value_before",
+			metadata.get("value_before", metadata.get("state_value_before", 0.0))
+		))
+		var after: float = float(engine_event.get(
+			"value_after",
+			metadata.get("value_after", metadata.get("state_value_after", before))
+		))
+		return "x%s -> x%s" % [_format_number(before), _format_number(after)]
+	if event_type in ["threshold_marker", "retrigger_marker"]:
+		var ordinal: int = maxi(int(engine_event.get(
+			"tap_ordinal",
+			engine_event.get(
+				"threshold_ordinal",
+				metadata.get(
+					"retrigger_threshold_ordinal",
+					metadata.get("tap_ordinal", 3)
+				)
+			)
+		)), 1)
+		return "%s TAP - RETRIGGER" % _ordinal_word(ordinal).to_upper()
+	return str(engine_event.get("label", "ENGINE EVENT")).to_upper()
 
 
 static func _build_event_lookup(ledger: Dictionary) -> Dictionary:
@@ -584,11 +932,23 @@ static func _resolution_key(result: Dictionary) -> String:
 static func _format_number(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
 		return str(int(roundf(value)))
-	return "%.2f" % value
+	return ("%.2f" % value).trim_suffix("0").trim_suffix(".")
 
 
 static func _signed_number(value: float) -> String:
 	return "+%s" % _format_number(value) if value >= 0.0 else _format_number(value)
+
+
+static func _ordinal_word(value: int) -> String:
+	match value:
+		1:
+			return "first"
+		2:
+			return "second"
+		3:
+			return "third"
+		_:
+			return "%dth" % value
 
 
 static func _dictionary_value(container: Dictionary, key: String) -> Dictionary:
@@ -599,6 +959,12 @@ static func _dictionary_value(container: Dictionary, key: String) -> Dictionary:
 static func _array_value(container: Dictionary, key: String) -> Array:
 	var value: Variant = container.get(key, [])
 	return value as Array if value is Array else []
+
+
+static func _dictionary_at(values: Array, index: int) -> Dictionary:
+	if index < 0 or index >= values.size() or not values[index] is Dictionary:
+		return {}
+	return values[index] as Dictionary
 
 
 static func _append_case(cases: Array[Dictionary], name: String, passed: bool, expected: Variant, actual: Variant) -> void:
@@ -623,6 +989,10 @@ static func _test_ledger() -> Dictionary:
 		"mode_id": "shot_lab",
 		"shot_id": 1,
 		"attempt_id": 1,
+		"starting_balls": {
+			"2": {"ball_id": 2, "ball_number": 2},
+			"4": {"ball_id": 4, "ball_number": 4},
+		},
 		"derived": {
 			"cue_recontact_milestones": [{
 				"trigger_occurrence_id": "cue_recontact_milestone:2:6:2",
@@ -661,6 +1031,38 @@ static func _test_result() -> Dictionary:
 		"mode_id": "shot_lab",
 		"shot_id": 1,
 		"attempt_id": 1,
+		"eight_ball_build_evaluation": {
+			"engine_events": [
+			{
+				"engine_event_kind": "state_growth",
+				"display_name": "Rattle of the Deep",
+				"eight_ball_item_id": "tap_stateful_xmult_rattle_of_the_deep",
+				"slot_index": 2,
+				"owned_item_instance_id": 14,
+				"trigger_event_index": 6,
+				"trigger_occurrence_id": "cue_recontact_milestone:2:6:2",
+				"value_before": 1.4,
+				"value_after": 1.6,
+			},
+			{
+				"engine_event_kind": "stateful_modifier",
+				"display_name": "Rattle of the Deep",
+				"eight_ball_item_id": "tap_stateful_xmult_rattle_of_the_deep",
+				"tray_slot_index": 2,
+				"trigger_event_index": 6,
+				"trigger_occurrence_id": "cue_recontact_milestone:2:6:2",
+			},
+			{
+				"engine_event_kind": "threshold_retrigger",
+				"display_name": "Echo Chamber",
+				"eight_ball_item_id": "tap_legendary_retrigger_echo_chamber",
+				"tray_slot_index": 4,
+				"tap_ordinal": 3,
+				"trigger_event_index": 7,
+				"label": "THIRD TAP - RETRIGGER",
+			},
+			],
+		},
 		"resolution_steps": [
 			{"step_index": 0, "source_id": "base_object_ball_value", "source_type": "pocketed_object_ball", "display_name": "Ball Sunk", "event_index": 2, "ball_id": 2, "haul_delta": 10, "mult_delta": 0.0, "xmult_factor": 1.0, "affects_score": true, "metadata": {}},
 			{"step_index": 1, "source_id": "base_bank_rail", "source_type": "rail_contact", "display_name": "Rail", "event_index": 3, "ball_id": 2, "haul_delta": 0, "mult_delta": 1.0, "xmult_factor": 1.0, "affects_score": true, "metadata": {"capped_count": 1, "scored_rail_event_indices": [3], "pocket_event_index": 2}},

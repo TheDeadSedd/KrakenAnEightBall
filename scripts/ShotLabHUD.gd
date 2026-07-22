@@ -68,6 +68,7 @@ var instant_tally_check: CheckBox
 var eight_ball_loadout_selectors: Array[OptionButton] = []
 var eight_ball_loadout_buttons: Array[Button] = []
 var eight_ball_build_status_label: Label
+var rattle_xmult_spin: SpinBox
 var build_diagnostics_button: Button
 var build_diagnostics_dialog: AcceptDialog
 var build_diagnostics_text: TextEdit
@@ -388,6 +389,14 @@ func _build_ui() -> void:
 		{"label": "Same-Pocket Trio", "id": "same_pocket_trio"},
 		{"label": "Direct/Multi Hybrid", "id": "direct_multi_hybrid"},
 		{"label": "Multi/Same-Pocket Hybrid", "id": "multi_same_pocket_hybrid"},
+		{"label": "Double Tap Trio", "id": "double_tap_trio"},
+		{"label": "Ball Tap Trio", "id": "ball_tap_trio"},
+		{"label": "Rattle of the Deep", "id": "rattle_of_the_deep"},
+		{"label": "One-Two Punch", "id": "one_two_punch"},
+		{"label": "Aftershock", "id": "aftershock"},
+		{"label": "Echo Chamber - Double Tap", "id": "echo_chamber_double_tap"},
+		{"label": "Echo Chamber - Ball Tap", "id": "echo_chamber_ball_tap"},
+		{"label": "Full Tap Engine", "id": "full_tap_engine"},
 	]:
 		var preset_spec: Dictionary = preset_spec_value as Dictionary
 		var preset_button: Button = _add_action_button(
@@ -414,12 +423,53 @@ func _build_ui() -> void:
 	)
 	build_diagnostics_button = _add_action_button(
 		loadout_action_grid,
-		"Open Build Diagnostics",
+		"Open Stateful Build Diagnostics",
 		_on_open_build_diagnostics_pressed
 	)
 	eight_ball_loadout_buttons.append(clear_loadout_button)
 	eight_ball_loadout_buttons.append(copy_loadout_button)
 	eight_ball_loadout_buttons.append(build_diagnostics_button)
+	var stateful_heading: Label = _make_section_heading("Stateful Eight Balls")
+	stack.add_child(stateful_heading)
+	var rattle_row: HBoxContainer = HBoxContainer.new()
+	rattle_row.add_theme_constant_override("separation", 6)
+	stack.add_child(rattle_row)
+	rattle_row.add_child(_make_label("Rattle xMult", 13, TEXT_COLOR))
+	rattle_xmult_spin = SpinBox.new()
+	rattle_xmult_spin.min_value = 1.0
+	rattle_xmult_spin.max_value = 20.0
+	rattle_xmult_spin.step = 0.2
+	rattle_xmult_spin.value = 1.0
+	rattle_xmult_spin.custom_minimum_size = Vector2(96.0, 31.0)
+	rattle_xmult_spin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	rattle_xmult_spin.add_theme_font_override("font", UI_FONT)
+	rattle_xmult_spin.add_theme_font_size_override("font_size", 13)
+	_register_interactive(rattle_xmult_spin)
+	rattle_row.add_child(rattle_xmult_spin)
+	var set_rattle_button: Button = _add_action_button(
+		rattle_row,
+		"Set",
+		_on_set_rattle_xmult_pressed
+	)
+	eight_ball_loadout_buttons.append(set_rattle_button)
+	var stateful_action_grid: GridContainer = GridContainer.new()
+	stateful_action_grid.columns = 2
+	stateful_action_grid.add_theme_constant_override("h_separation", 6)
+	stateful_action_grid.add_theme_constant_override("v_separation", 6)
+	responsive_two_column_grids.append(stateful_action_grid)
+	stack.add_child(stateful_action_grid)
+	var reset_state_button: Button = _add_action_button(
+		stateful_action_grid,
+		"Reset Stateful State",
+		_on_reset_stateful_build_pressed
+	)
+	var copy_state_button: Button = _add_action_button(
+		stateful_action_grid,
+		"Copy Build State",
+		_on_copy_build_state_pressed
+	)
+	eight_ball_loadout_buttons.append(reset_state_button)
+	eight_ball_loadout_buttons.append(copy_state_button)
 
 	var inspect_grid := GridContainer.new()
 	inspect_grid.columns = 2
@@ -737,6 +787,18 @@ func _refresh_eight_ball_build(build_section: Dictionary) -> void:
 		occupied,
 		parity_text,
 	]
+	if rattle_xmult_spin != null:
+		for slot_value in _array_value(build_snapshot, "slots"):
+			if not slot_value is Dictionary:
+				continue
+			var slot: Dictionary = slot_value as Dictionary
+			if str(slot.get("eight_ball_item_id", "")) != (
+				"tap_stateful_xmult_rattle_of_the_deep"
+			):
+				continue
+			var state: Dictionary = _dictionary_value(slot, "state")
+			rattle_xmult_spin.set_value_no_signal(float(state.get("current_xmult", 1.0)))
+			break
 
 
 func _refresh_suite(suite: Dictionary) -> void:
@@ -817,6 +879,8 @@ func _refresh_control_availability(snapshot: Dictionary) -> void:
 		selector.disabled = manual_locked
 	for button in eight_ball_loadout_buttons:
 		button.disabled = manual_locked
+	if rattle_xmult_spin != null:
+		rattle_xmult_spin.editable = not manual_locked
 	inspect_score_button.disabled = not has_score
 	copy_score_summary_button.disabled = not has_score
 	copy_score_json_button.disabled = not has_score
@@ -1016,6 +1080,21 @@ func _on_clear_eight_ball_loadout_pressed() -> void:
 func _on_copy_eight_ball_loadout_pressed() -> void:
 	if shot_lab_system != null:
 		shot_lab_system.copy_eight_ball_loadout()
+
+
+func _on_set_rattle_xmult_pressed() -> void:
+	if shot_lab_system != null and rattle_xmult_spin != null:
+		shot_lab_system.set_rattle_current_xmult(float(rattle_xmult_spin.value))
+
+
+func _on_reset_stateful_build_pressed() -> void:
+	if shot_lab_system != null:
+		shot_lab_system.reset_stateful_eight_ball_state()
+
+
+func _on_copy_build_state_pressed() -> void:
+	if shot_lab_system != null:
+		shot_lab_system.copy_eight_ball_build_state()
 
 
 func _on_open_build_diagnostics_pressed() -> void:

@@ -121,6 +121,8 @@ var shot_transaction_state_emit_count: int = 0
 var shot_transaction_terminal_signal_count: int = 0
 var unkeyed_shot_transaction_serial: int = 0
 var doubloon_payout_applier: Callable
+var build_state_mutation_preparer: Callable
+var build_state_mutation_applier: Callable
 var last_doubloon_payout_result: Dictionary = {}
 var doubloon_payout_application_count: int = 0
 var doubloon_payout_duplicate_suppressions: int = 0
@@ -135,6 +137,14 @@ func set_reward_system(system: RogueliteRewardSystem) -> void:
 
 func set_doubloon_payout_applier(applier: Callable) -> void:
 	doubloon_payout_applier = applier
+
+
+func set_build_state_mutation_handlers(
+	preparer: Callable,
+	applier: Callable
+) -> void:
+	build_state_mutation_preparer = preparer
+	build_state_mutation_applier = applier
 
 
 func set_balance_tuning_snapshot(snapshot: Dictionary) -> void:
@@ -252,7 +262,8 @@ func resolve_completed_shot(
 	score_amount: int,
 	scoreable_ball_count: int,
 	transaction_key: String = "",
-	doubloon_payout: Dictionary = {}
+	doubloon_payout: Dictionary = {},
+	build_state_mutations: Array = []
 ) -> Dictionary:
 	var normalized_key: String = transaction_key.strip_edges()
 	if normalized_key.is_empty() and not pending_shot_transaction_key.is_empty():
@@ -291,6 +302,20 @@ func resolve_completed_shot(
 		)
 	if normalized_key.is_empty():
 		normalized_key = _make_unkeyed_shot_transaction_key()
+	var build_mutation_preparation: Dictionary = _prepare_build_state_mutations(
+		normalized_key,
+		build_state_mutations
+	)
+	if not bool(build_mutation_preparation.get("success", false)):
+		return _reject_completed_shot_transaction(
+			normalized_key,
+			false,
+			"build_state_mutation_invalid:%s" % str(
+				build_mutation_preparation.get("reason", "unknown")
+			),
+			scoreable_ball_count,
+			doubloon_payout
+		)
 
 	var score_before: int = round_score
 	var score_delta: int = maxi(score_amount, 0)
@@ -307,6 +332,13 @@ func resolve_completed_shot(
 	hull = maxi(hull - queued_hull_damage, 0)
 	shots_left = maxi(shots_left - 1, 0)
 	_clear_queued_shot_consequences()
+	# Apply the already-validated value-only build mutation before terminal
+	# outcome signals so a terminal shot's earned growth reaches final reports.
+	var build_mutation_application: Dictionary = _apply_build_state_mutations(
+		normalized_key,
+		build_state_mutations,
+		build_mutation_preparation
+	)
 
 	var outcome: String = _select_completed_shot_outcome(safe_scoreable_ball_count)
 	var terminal_shot_payout: bool = (
@@ -340,6 +372,26 @@ func resolve_completed_shot(
 		"doubloon_wallet_after": int(payout_application.get("wallet_after", 0)),
 		"doubloon_payout_application_key": str(payout_application.get("application_key", "")),
 		"terminal_shot_payout": terminal_shot_payout,
+		"build_state_mutation_key": normalized_key,
+		"item_states_before": _dictionary_from_result(
+			build_mutation_preparation,
+			"state_before"
+		),
+		"pending_item_state_mutations": _dictionary_array_from_value(
+			build_mutation_preparation.get("pending_state_mutations", build_state_mutations)
+		),
+		"item_states_after": _dictionary_from_result(
+			build_mutation_application,
+			"state_after"
+		),
+		"build_state_mutation_applied": bool(build_mutation_application.get(
+			"applied",
+			false
+		)),
+		"build_state_mutation_duplicate_suppressed": bool(
+			build_mutation_application.get("duplicate_suppressed", false)
+		),
+		"build_state_mutation_result": build_mutation_application.duplicate(true),
 		"pending_hull_damage": queued_hull_damage,
 		"hull_before": hull_before,
 		"hull_after": hull,
@@ -358,6 +410,72 @@ func resolve_completed_shot(
 	transaction["snapshot"] = resolved_snapshot
 	_emit_completed_shot_outcome_signal(outcome, resolved_snapshot)
 	return transaction.duplicate(true)
+
+
+func _prepare_build_state_mutations(
+	transaction_key: String,
+	mutations: Array
+) -> Dictionary:
+	if mutations.is_empty():
+		return {
+			"success": true,
+			"applied": false,
+			"mutation_count": 0,
+			"transaction_key": transaction_key,
+			"state_before": {},
+			"simulated_state_after": {},
+			"pending_state_mutations": [],
+		}
+	if not build_state_mutation_preparer.is_valid():
+		return {"success": false, "reason": "build_state_mutation_preparer_missing"}
+	var result_value: Variant = build_state_mutation_preparer.call(
+		transaction_key,
+		mutations.duplicate(true)
+	)
+	if result_value is Dictionary:
+		return (result_value as Dictionary).duplicate(true)
+	return {"success": false, "reason": "invalid_build_state_preparation_result"}
+
+
+func _apply_build_state_mutations(
+	transaction_key: String,
+	mutations: Array,
+	preparation: Dictionary
+) -> Dictionary:
+	if mutations.is_empty():
+		return {
+			"success": true,
+			"applied": false,
+			"duplicate_suppressed": false,
+			"mutation_count": 0,
+			"transaction_key": transaction_key,
+			"state_before": _dictionary_from_result(preparation, "state_before"),
+			"state_after": _dictionary_from_result(preparation, "simulated_state_after"),
+		}
+	if not build_state_mutation_applier.is_valid():
+		return {"success": false, "reason": "build_state_mutation_applier_missing"}
+	var result_value: Variant = build_state_mutation_applier.call(
+		transaction_key,
+		mutations.duplicate(true)
+	)
+	if result_value is Dictionary:
+		return (result_value as Dictionary).duplicate(true)
+	return {"success": false, "reason": "invalid_build_state_application_result"}
+
+
+func _dictionary_from_result(source: Dictionary, key: String) -> Dictionary:
+	var value: Variant = source.get(key, {})
+	return (value as Dictionary).duplicate(true) if value is Dictionary else {}
+
+
+func _dictionary_array_from_value(value: Variant) -> Array[Dictionary]:
+	var result: Array[Dictionary] = []
+	if not value is Array:
+		return result
+	for entry_value in value as Array:
+		if entry_value is Dictionary:
+			result.append((entry_value as Dictionary).duplicate(true))
+	return result
 
 
 func has_pending_shot_hull_damage() -> bool:

@@ -22,6 +22,13 @@ const TOOLTIP_SIZE := Vector2(360.0, 250.0)
 const PULSE_DURATION := 0.78
 const LEGENDARY_PULSE_DURATION := 1.02
 
+const EFFECT_KIND_PERSISTENT_SCALER := "persistent_scaler"
+const EFFECT_KIND_CROSS_FAMILY_CONDITIONAL := "cross_family_conditional"
+const EFFECT_KIND_SHOT_ORDINAL_MULTIPLIER := "shot_ordinal_multiplier"
+const EFFECT_KIND_THRESHOLD_FAMILY_RETRIGGER := "threshold_family_retrigger"
+const ENGINE_EVENT_STATE_GROWTH := "state_growth"
+const ENGINE_EVENT_THRESHOLD_MARKER := "threshold_marker"
+
 const PANEL_FILL := Color(0.025, 0.021, 0.026, 0.76)
 const PANEL_BORDER := Color(0.86, 0.68, 0.32, 0.48)
 const SLOT_FILL := Color(0.040, 0.034, 0.038, 0.84)
@@ -122,31 +129,100 @@ func set_cue_drag_active(active: bool) -> void:
 
 
 func pulse_activation(activation: Dictionary) -> bool:
-	var slot_index: int = int(activation.get("slot_index", activation.get("tray_slot_index", -1)))
+	var metadata: Dictionary = _dictionary_value(activation, "metadata")
+	var slot_index: int = int(activation.get(
+		"slot_index",
+		activation.get(
+			"tray_slot_index",
+			metadata.get(
+				"slot_index",
+				metadata.get(
+					"tray_slot_index",
+					metadata.get("retrigger_source_slot_index", -1)
+				)
+			)
+		)
+	))
 	var item_id: String = _get_item_id(activation)
-	if not _slot_matches_item(slot_index, item_id):
-		slot_index = _find_slot_index_by_item(item_id)
+	var owned_instance_id: int = int(activation.get(
+		"owned_item_instance_id",
+		metadata.get("owned_item_instance_id", 0)
+	))
+	if not _slot_matches_activation(slot_index, item_id, owned_instance_id):
+		slot_index = _find_slot_index_for_activation(item_id, owned_instance_id)
 		if slot_index < 0:
 			return false
 
 	var phase: String = str(activation.get("phase", activation.get("modifier_phase", "")))
-	var is_retrigger: bool = bool(activation.get("is_retrigger", false))
-	var is_retrigger_marker: bool = bool(activation.get("is_retrigger_marker", false))
+	var engine_event_type: String = str(activation.get(
+		"engine_event_kind",
+		activation.get(
+			"engine_event_type",
+			activation.get(
+				"event_type",
+				metadata.get("engine_event_kind", metadata.get("engine_event_type", ""))
+			)
+		)
+	))
+	var is_state_growth: bool = (
+		engine_event_type in [ENGINE_EVENT_STATE_GROWTH, "state_mutation", "persistent_growth"]
+		or bool(activation.get("is_state_growth", metadata.get("is_state_growth", false)))
+	)
+	var is_retrigger: bool = bool(activation.get(
+		"is_retrigger",
+		metadata.get("is_retrigger", false)
+	))
+	var is_retrigger_marker: bool = bool(activation.get(
+		"is_retrigger_marker",
+		metadata.get("is_retrigger_marker", false)
+	)) or engine_event_type in [
+		"threshold_retrigger",
+		ENGINE_EVENT_THRESHOLD_MARKER,
+		"retrigger_marker",
+	]
 	var effect_text: String = str(activation.get("effect_text", activation.get("display_delta", "")))
 	if is_retrigger_marker:
-		effect_text = "LEGENDARY"
+		effect_text = str(activation.get(
+			"threshold_label",
+			activation.get("label", metadata.get("threshold_label", ""))
+		)).strip_edges()
+		if effect_text.is_empty():
+			var threshold_ordinal: int = maxi(int(activation.get(
+				"tap_ordinal",
+				activation.get(
+					"retrigger_threshold_ordinal",
+					metadata.get("retrigger_threshold_ordinal", 3)
+				)
+			)), 1)
+			effect_text = "%s TAP - RETRIGGER" % _format_ordinal_word(
+				threshold_ordinal
+			).to_upper()
 	elif is_retrigger:
-		effect_text = "RETRIGGER"
+		effect_text = "RETRIGGER" if effect_text.is_empty() else effect_text
+	elif is_state_growth:
+		effect_text = _format_state_growth(activation, metadata)
 	elif effect_text.is_empty():
 		effect_text = _format_activation_delta(phase, activation.get("value", 0))
-	var pulse_duration: float = LEGENDARY_PULSE_DURATION if is_retrigger_marker else PULSE_DURATION
+	var pulse_duration: float = (
+		LEGENDARY_PULSE_DURATION
+		if is_retrigger_marker or phase == "xmult"
+		else PULSE_DURATION
+	)
+	var strength: float = _get_phase_pulse_strength(phase)
+	if is_state_growth:
+		strength = maxf(strength, 0.88)
+	if is_retrigger or is_retrigger_marker:
+		strength = 1.0
 	pulse_states[slot_index] = {
 		"item_id": item_id,
+		"owned_item_instance_id": owned_instance_id,
 		"remaining": pulse_duration,
 		"duration": pulse_duration,
-		"strength": 1.0 if is_retrigger_marker or is_retrigger else _get_phase_pulse_strength(phase),
+		"strength": strength,
 		"phase": phase,
+		"engine_event_type": engine_event_type,
 		"effect_text": effect_text,
+		"is_state_growth": is_state_growth,
 		"is_retrigger": is_retrigger,
 		"is_retrigger_marker": is_retrigger_marker,
 	}
@@ -156,42 +232,79 @@ func pulse_activation(activation: Dictionary) -> bool:
 
 
 func pulse_slot_for_step(resolution_step: Dictionary) -> bool:
-	var metadata: Dictionary = {}
-	var metadata_value: Variant = resolution_step.get("metadata", {})
-	if metadata_value is Dictionary:
-		metadata = (metadata_value as Dictionary).duplicate(true)
+	var narrative_event: Dictionary = _dictionary_value(resolution_step, "narrative_event")
+	var source: Dictionary = narrative_event if not narrative_event.is_empty() else resolution_step
+	var metadata: Dictionary = _dictionary_value(source, "metadata")
+	if metadata.is_empty():
+		metadata = _dictionary_value(resolution_step, "metadata")
 	var phase: String = str(metadata.get(
 		"modifier_phase",
-		resolution_step.get("modifier_phase", resolution_step.get("phase", ""))
+		source.get(
+			"modifier_phase",
+			source.get(
+				"phase",
+				resolution_step.get("modifier_phase", resolution_step.get("phase", ""))
+			)
+		)
 	))
-	var value: Variant = resolution_step.get("value", 0)
+	var value: Variant = source.get("value", resolution_step.get("value", 0))
 	match phase:
 		"add_haul":
-			value = int(resolution_step.get("haul_delta", value))
+			value = int(source.get("haul_delta", resolution_step.get("haul_delta", value)))
 		"add_mult":
-			value = float(resolution_step.get("mult_delta", value))
+			value = float(source.get("mult_delta", resolution_step.get("mult_delta", value)))
 		"xmult":
-			value = float(resolution_step.get("xmult_factor", value))
+			value = float(source.get("xmult_factor", resolution_step.get("xmult_factor", value)))
 	var activation: Dictionary = {
 		"slot_index": int(metadata.get(
 			"slot_index",
-			resolution_step.get("slot_index", resolution_step.get("tray_slot_index", -1))
+			metadata.get(
+				"tray_slot_index",
+				metadata.get(
+					"retrigger_source_slot_index",
+					source.get("slot_index", source.get("tray_slot_index", -1))
+				)
+			)
 		)),
 		"eight_ball_item_id": str(metadata.get(
 			"eight_ball_item_id",
-			resolution_step.get("eight_ball_item_id", resolution_step.get("source_id", ""))
+			metadata.get(
+				"source_item_id",
+				source.get("eight_ball_item_id", source.get("source_id", ""))
+			)
+		)),
+		"owned_item_instance_id": int(metadata.get(
+			"owned_item_instance_id",
+			source.get("owned_item_instance_id", 0)
 		)),
 		"phase": phase,
 		"value": value,
-		"effect_text": str(resolution_step.get("effect_text", "")),
+		"engine_event_type": str(source.get(
+			"engine_event_kind",
+			source.get(
+				"engine_event_type",
+				source.get(
+					"event_type",
+					metadata.get("engine_event_kind", metadata.get("engine_event_type", ""))
+				)
+			)
+		)),
+		"effect_text": str(source.get("effect_text", resolution_step.get("effect_text", ""))),
+		"value_before": source.get("value_before", metadata.get("value_before", 0.0)),
+		"value_after": source.get("value_after", metadata.get("value_after", 0.0)),
 		"is_retrigger": bool(metadata.get(
 			"is_retrigger",
-			resolution_step.get("is_retrigger", false)
+			source.get("is_retrigger", false)
 		)),
 		"is_retrigger_marker": bool(metadata.get(
 			"is_retrigger_marker",
-			resolution_step.get("is_retrigger_marker", false)
+			source.get("is_retrigger_marker", false)
 		)),
+		"threshold_label": str(source.get(
+			"threshold_label",
+			metadata.get("threshold_label", "")
+		)),
+		"metadata": metadata.duplicate(true),
 	}
 	return pulse_activation(activation)
 
@@ -316,6 +429,10 @@ func _draw_slot(slot_index: int) -> void:
 	var family_width: float = minf(94.0, text_width * 0.43)
 	var right_detail: String = family_name.to_upper()
 	var right_detail_color: Color = rarity_color
+	var support_warning: String = str(slot.get("support_warning", "")).strip_edges()
+	if not support_warning.is_empty():
+		right_detail = "NO SUPPORT"
+		right_detail_color = Color(1.0, 0.61, 0.31, 1.0)
 	var pulse_text: String = str(pulse.get("effect_text", "")) if not pulse.is_empty() else ""
 	if not pulse_text.is_empty():
 		right_detail = pulse_text.to_upper()
@@ -323,7 +440,7 @@ func _draw_slot(slot_index: int) -> void:
 		right_detail_color.a = clampf(float(pulse.get("remaining", 0.0)) / duration, 0.0, 1.0)
 	_draw_text(str(slot.get("display_name", "Eight Ball")), Vector2(text_left, name_y), NAME_COLOR, name_size, HORIZONTAL_ALIGNMENT_LEFT, text_width - rarity_width - 4.0)
 	_draw_text(str(slot.get("rarity", "Common")).to_upper(), Vector2(text_left + text_width - rarity_width, name_y), rarity_color, rarity_size, HORIZONTAL_ALIGNMENT_RIGHT, rarity_width)
-	_draw_text(str(slot.get("short_effect", "")), Vector2(text_left, effect_y), EFFECT_COLOR, detail_size, HORIZONTAL_ALIGNMENT_LEFT, text_width - family_width - 5.0)
+	_draw_text(str(slot.get("dynamic_short_effect", slot.get("short_effect", ""))), Vector2(text_left, effect_y), EFFECT_COLOR, detail_size, HORIZONTAL_ALIGNMENT_LEFT, text_width - family_width - 5.0)
 	_draw_text(right_detail, Vector2(text_left + text_width - family_width, effect_y), right_detail_color, rarity_size, HORIZONTAL_ALIGNMENT_RIGHT, family_width)
 
 
@@ -414,20 +531,48 @@ func _extract_slot_snapshots(snapshot: Dictionary) -> Array[Dictionary]:
 			raw_slot = (raw_slots[slot_index] as Dictionary).duplicate(true)
 		var item_value: Variant = raw_slot.get("item", raw_slot.get("definition", {}))
 		var item: Dictionary = item_value as Dictionary if item_value is Dictionary else raw_slot
+		var state: Dictionary = _dictionary_value(raw_slot, "state")
+		if state.is_empty():
+			state = _dictionary_value(item, "state")
 		var item_id: String = _get_item_id(item)
 		if item_id.is_empty():
 			item_id = _get_item_id(raw_slot)
 		var count: int = int(activation_counts.get(slot_index, activation_counts.get(str(slot_index), raw_slot.get("last_shot_trigger_count", item.get("last_shot_trigger_count", 0)))))
+		var effect_kind: String = str(item.get("effect_kind", raw_slot.get("effect_kind", "")))
+		var short_effect: String = str(item.get("short_effect", item.get("effect", raw_slot.get("short_effect", ""))))
+		var support_warning: String = _get_support_warning(
+			snapshot,
+			raw_slot,
+			slot_index,
+			item_id
+		)
 		result.append({
 			"slot_index": slot_index,
 			"occupied": not item_id.is_empty(),
 			"eight_ball_item_id": item_id,
+			"owned_item_instance_id": int(raw_slot.get(
+				"owned_item_instance_id",
+				item.get("owned_item_instance_id", 0)
+			)),
+			"acquired_round": int(raw_slot.get("acquired_round", item.get("acquired_round", 0))),
 			"display_name": str(item.get("display_name", raw_slot.get("display_name", "Eight Ball"))),
-			"short_effect": str(item.get("short_effect", item.get("effect", raw_slot.get("short_effect", "")))),
+			"short_effect": short_effect,
+			"dynamic_short_effect": _get_dynamic_short_effect(
+				item,
+				state,
+				short_effect
+			),
 			"rarity": _format_rarity(str(item.get("rarity", raw_slot.get("rarity", "common")))),
 			"family_id": str(item.get("family_id", raw_slot.get("family_id", ""))),
+			"offer_family": str(item.get("offer_family", raw_slot.get("offer_family", ""))),
+			"effect_kind": effect_kind,
+			"modifier_phase": str(item.get("modifier_phase", item.get("phase", raw_slot.get("modifier_phase", "")))),
+			"value": item.get("value", raw_slot.get("value", 0.0)),
+			"threshold": int(item.get("threshold", raw_slot.get("threshold", 0))),
 			"trigger_id": str(item.get("trigger_id", raw_slot.get("trigger_id", ""))),
 			"tooltip": str(item.get("tooltip", item.get("description", raw_slot.get("tooltip", raw_slot.get("description", ""))))),
+			"state": state.duplicate(true),
+			"support_warning": support_warning,
 			"last_shot_trigger_count": maxi(count, 0),
 		})
 	return result
@@ -470,6 +615,18 @@ func _slot_matches_item(slot_index: int, item_id: String) -> bool:
 	return bool(slot.get("occupied", false)) and str(slot.get("eight_ball_item_id", "")) == item_id
 
 
+func _slot_matches_activation(
+	slot_index: int,
+	item_id: String,
+	owned_instance_id: int
+) -> bool:
+	if not _slot_matches_item(slot_index, item_id):
+		return false
+	if owned_instance_id <= 0:
+		return true
+	return int(slot_snapshots[slot_index].get("owned_item_instance_id", 0)) == owned_instance_id
+
+
 func _find_slot_index_by_item(item_id: String) -> int:
 	if item_id.is_empty():
 		return -1
@@ -479,12 +636,30 @@ func _find_slot_index_by_item(item_id: String) -> int:
 	return -1
 
 
+func _find_slot_index_for_activation(item_id: String, owned_instance_id: int) -> int:
+	if owned_instance_id > 0:
+		for slot_index in range(slot_snapshots.size()):
+			var slot: Dictionary = slot_snapshots[slot_index]
+			if (
+				bool(slot.get("occupied", false))
+				and int(slot.get("owned_item_instance_id", 0)) == owned_instance_id
+			):
+				return slot_index
+	return _find_slot_index_by_item(item_id)
+
+
 func _get_valid_pulse(slot_index: int, slot: Dictionary) -> Dictionary:
 	var pulse_value: Variant = pulse_states.get(slot_index, {})
 	if not pulse_value is Dictionary:
 		return {}
 	var pulse: Dictionary = pulse_value
 	if str(pulse.get("item_id", "")) != str(slot.get("eight_ball_item_id", "")):
+		return {}
+	var pulse_instance_id: int = int(pulse.get("owned_item_instance_id", 0))
+	if (
+		pulse_instance_id > 0
+		and pulse_instance_id != int(slot.get("owned_item_instance_id", 0))
+	):
 		return {}
 	return pulse
 
@@ -563,10 +738,33 @@ func _refresh_tooltip() -> void:
 		_hide_tooltip()
 		return
 	tooltip_title_label.text = str(slot.get("display_name", "Eight Ball")).to_upper()
-	tooltip_meta_label.text = "%s  |  %s" % [str(slot.get("rarity", "Common")), _format_trigger_name(str(slot.get("trigger_id", slot.get("family_id", ""))))]
+	tooltip_meta_label.text = "%s  |  %s" % [
+		str(slot.get("rarity", "Common")),
+		_format_trigger_name(str(slot.get(
+			"offer_family",
+			slot.get("trigger_id", slot.get("family_id", ""))
+		))),
+	]
 	tooltip_body_label.text = str(slot.get("tooltip", slot.get("short_effect", "")))
 	var count: int = maxi(int(slot.get("last_shot_trigger_count", 0)), 0)
-	tooltip_status_label.text = "Slot %d\n%s" % [hovered_slot_index + 1, _format_trigger_count(count)]
+	var status_lines: Array[String] = [
+		"Tray slot %d" % (hovered_slot_index + 1),
+		_format_trigger_count(count),
+	]
+	var effect_kind: String = str(slot.get("effect_kind", ""))
+	var state: Dictionary = _dictionary_value(slot, "state")
+	if effect_kind == EFFECT_KIND_PERSISTENT_SCALER:
+		var current_xmult: float = _get_current_scaler_value(slot, state)
+		status_lines.append("Current value: x%s Mult" % _format_numeric_value(current_xmult))
+		var lifetime_growth: int = maxi(int(state.get(
+			"lifetime_growth_triggers",
+			state.get("lifetime_trigger_count", 0)
+		)), 0)
+		status_lines.append("Lifetime Tap growth: %d" % lifetime_growth)
+	var support_warning: String = str(slot.get("support_warning", "")).strip_edges()
+	if not support_warning.is_empty():
+		status_lines.append("WARNING: %s" % support_warning)
+	tooltip_status_label.text = "\n".join(status_lines)
 	_position_tooltip()
 
 
@@ -615,6 +813,20 @@ func _format_trigger_name(trigger_id: String) -> String:
 			return "Multi-Pot"
 		"same_pocket", "same_pocket_streak":
 			return "Same Pocket"
+		"double_tap", "cue_recontact_milestone":
+			return "Double Tap"
+		"ball_tap", "object_ball_tap_milestone":
+			return "Ball Tap"
+		"tap_growth":
+			return "Tap Growth"
+		"tap_hybrid":
+			return "Tap Hybrid"
+		"tap_escalation":
+			return "Tap Escalation"
+		"tap_retrigger":
+			return "Tap Retrigger"
+		"tap_oddity":
+			return "Tap Oddity"
 		_:
 			return trigger_id.replace("_", " ").capitalize() if not trigger_id.is_empty() else "Scoring Engine"
 
@@ -648,10 +860,208 @@ func _get_phase_pulse_strength(phase: String) -> float:
 	match phase:
 		"xmult":
 			return 1.0
+		"state_growth", "engine_marker":
+			return 0.9
 		"add_mult":
 			return 0.82
 		_:
 			return 0.66
+
+
+func _get_dynamic_short_effect(
+	item: Dictionary,
+	state: Dictionary,
+	fallback: String
+) -> String:
+	var authored_dynamic: String = str(item.get("dynamic_short_effect", "")).strip_edges()
+	if not authored_dynamic.is_empty():
+		return authored_dynamic
+	var effect_kind: String = str(item.get("effect_kind", ""))
+	var value: float = float(item.get("value", item.get("multiplier", 1.0)))
+	match effect_kind:
+		EFFECT_KIND_PERSISTENT_SCALER:
+			return "Tap Shot: x%s Mult" % _format_numeric_value(
+				_get_current_scaler_value(item, state)
+			)
+		EFFECT_KIND_CROSS_FAMILY_CONDITIONAL:
+			return "Double Tap + Ball Tap: x%s" % _format_numeric_value(value)
+		EFFECT_KIND_SHOT_ORDINAL_MULTIPLIER:
+			return "Each Tap after first: x%s" % _format_numeric_value(value)
+		EFFECT_KIND_THRESHOLD_FAMILY_RETRIGGER:
+			var threshold: int = maxi(int(item.get("threshold", 3)), 1)
+			return "Every %s Tap retriggers" % _format_ordinal_word(threshold)
+		_:
+			return fallback
+
+
+func _get_current_scaler_value(item: Dictionary, state: Dictionary) -> float:
+	return maxf(float(state.get(
+		"current_xmult",
+		state.get(
+			"current_value",
+			item.get("current_xmult", item.get("starting_value", 1.0))
+		)
+	)), 0.0)
+
+
+func _get_support_warning(
+	snapshot: Dictionary,
+	raw_slot: Dictionary,
+	slot_index: int,
+	item_id: String
+) -> String:
+	for key in ["support_warning", "support_warning_text", "warning_text"]:
+		var direct: String = str(raw_slot.get(key, "")).strip_edges()
+		if not direct.is_empty():
+			return direct
+	var containers: Array[Dictionary] = [snapshot]
+	var nested_value: Variant = snapshot.get("build_snapshot", null)
+	if nested_value is Dictionary:
+		containers.append(nested_value as Dictionary)
+	for container in containers:
+		for key in ["support_warnings_by_slot", "support_warnings", "warnings_by_slot"]:
+			var warning: String = _warning_from_collection(
+				container.get(key, null),
+				slot_index,
+				item_id
+			)
+			if not warning.is_empty():
+				return warning
+	return _get_definition_support_warning(snapshot, raw_slot, item_id)
+
+
+func _get_definition_support_warning(
+	snapshot: Dictionary,
+	raw_slot: Dictionary,
+	item_id: String
+) -> String:
+	var definition_value: Variant = raw_slot.get(
+		"definition",
+		raw_slot.get("item", raw_slot)
+	)
+	if not definition_value is Dictionary:
+		return ""
+	var definition: Dictionary = definition_value as Dictionary
+	if str(definition.get("effect_kind", "")) != EFFECT_KIND_THRESHOLD_FAMILY_RETRIGGER:
+		return ""
+	var eligibility: Dictionary = _dictionary_value(definition, "eligibility")
+	var required_item_ids_value: Variant = eligibility.get(
+		"requires_owned_any_item_ids",
+		[]
+	)
+	var required_family_ids_value: Variant = eligibility.get(
+		"requires_owned_any_family_ids",
+		[]
+	)
+	var required_item_ids: Array = (
+		required_item_ids_value as Array
+		if required_item_ids_value is Array
+		else []
+	)
+	var required_family_ids: Array = (
+		required_family_ids_value as Array
+		if required_family_ids_value is Array
+		else []
+	)
+	if required_item_ids.is_empty() and required_family_ids.is_empty():
+		return ""
+	for slot_value in _get_raw_build_slots(snapshot):
+		if not slot_value is Dictionary:
+			continue
+		var candidate_slot: Dictionary = slot_value as Dictionary
+		var candidate_value: Variant = candidate_slot.get(
+			"definition",
+			candidate_slot.get("item", candidate_slot)
+		)
+		if not candidate_value is Dictionary:
+			continue
+		var candidate: Dictionary = candidate_value as Dictionary
+		var candidate_id: String = _get_item_id(candidate)
+		if candidate_id.is_empty() or candidate_id == item_id:
+			continue
+		if candidate_id in required_item_ids:
+			return ""
+		var candidate_family: String = str(candidate.get(
+			"family_id",
+			candidate_slot.get("family_id", "")
+		))
+		if candidate_family in required_family_ids:
+			return ""
+	return str(eligibility.get(
+		"retained_without_support_warning",
+		eligibility.get("unmet_reason", "")
+	)).strip_edges()
+
+
+func _get_raw_build_slots(snapshot: Dictionary) -> Array:
+	var slots_value: Variant = snapshot.get(
+		"slots",
+		snapshot.get("tray_slots", snapshot.get("build_slots", []))
+	)
+	if slots_value is Array and not (slots_value as Array).is_empty():
+		return slots_value as Array
+	var nested_value: Variant = snapshot.get("build_snapshot", null)
+	if nested_value is Dictionary:
+		var nested: Dictionary = nested_value as Dictionary
+		var nested_slots: Variant = nested.get(
+			"slots",
+			nested.get("tray_slots", nested.get("build_slots", []))
+		)
+		if nested_slots is Array:
+			return nested_slots as Array
+	return []
+
+
+func _warning_from_collection(
+	collection: Variant,
+	slot_index: int,
+	item_id: String
+) -> String:
+	var value: Variant = null
+	if collection is Dictionary:
+		var warning_map: Dictionary = collection
+		value = warning_map.get(
+			slot_index,
+			warning_map.get(str(slot_index), warning_map.get(item_id, null))
+		)
+	elif collection is Array and slot_index >= 0 and slot_index < (collection as Array).size():
+		value = (collection as Array)[slot_index]
+	if value is Dictionary:
+		var warning: Dictionary = value
+		return str(warning.get("message", warning.get("warning", warning.get("text", "")))).strip_edges()
+	return str(value).strip_edges() if value != null else ""
+
+
+func _format_state_growth(activation: Dictionary, metadata: Dictionary) -> String:
+	var before: float = float(activation.get(
+		"value_before",
+		metadata.get("value_before", metadata.get("state_value_before", 0.0))
+	))
+	var after: float = float(activation.get(
+		"value_after",
+		metadata.get("value_after", metadata.get("state_value_after", before))
+	))
+	return "x%s -> x%s" % [
+		_format_numeric_value(before),
+		_format_numeric_value(after),
+	]
+
+
+func _format_ordinal_word(value: int) -> String:
+	match value:
+		1:
+			return "first"
+		2:
+			return "second"
+		3:
+			return "third"
+		_:
+			return "%dth" % value
+
+
+func _dictionary_value(container: Dictionary, key: String) -> Dictionary:
+	var value: Variant = container.get(key, {})
+	return value as Dictionary if value is Dictionary else {}
 
 
 func _get_rarity_color(rarity: String) -> Color:

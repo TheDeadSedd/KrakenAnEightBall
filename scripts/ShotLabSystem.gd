@@ -119,6 +119,44 @@ const EIGHT_BALL_LOADOUT_PRESETS := {
 		"same_pocket_mult_feeding_frenzy",
 		"same_pocket_xmult_the_maw_below",
 	],
+	"double_tap_trio": [
+		"double_tap_haul_second_bite",
+		"double_tap_mult_echoing_toll",
+		"double_tap_xmult_revenant_rhythm",
+	],
+	"ball_tap_trio": [
+		"ball_tap_haul_knock_on_plunder",
+		"ball_tap_mult_crowded_wake",
+		"ball_tap_xmult_carom_current",
+	],
+	"rattle_of_the_deep": [
+		"tap_stateful_xmult_rattle_of_the_deep",
+	],
+	"one_two_punch": [
+		"tap_hybrid_xmult_one_two_punch",
+	],
+	"aftershock": [
+		"tap_ordinal_xmult_aftershock",
+	],
+	"echo_chamber_double_tap": [
+		"double_tap_haul_second_bite",
+		"double_tap_mult_echoing_toll",
+		"double_tap_xmult_revenant_rhythm",
+		"tap_legendary_retrigger_echo_chamber",
+	],
+	"echo_chamber_ball_tap": [
+		"ball_tap_haul_knock_on_plunder",
+		"ball_tap_mult_crowded_wake",
+		"ball_tap_xmult_carom_current",
+		"tap_legendary_retrigger_echo_chamber",
+	],
+	"full_tap_engine": [
+		"double_tap_haul_second_bite",
+		"tap_stateful_xmult_rattle_of_the_deep",
+		"tap_hybrid_xmult_one_two_punch",
+		"tap_ordinal_xmult_aftershock",
+		"tap_legendary_retrigger_echo_chamber",
+	],
 }
 
 var table: BilliardsTable
@@ -382,6 +420,95 @@ func copy_eight_ball_loadout() -> bool:
 	}), "  "))
 	status_changed.emit("Shot Lab Eight Ball loadout copied.")
 	return true
+
+
+func set_rattle_current_xmult(value: float) -> Dictionary:
+	if _is_authoritative_shot_active() or suite_running:
+		return {"success": false, "reason": "shot_lab_busy"}
+	var build_system: RogueliteBuildSystem = _get_eight_ball_build_system()
+	if build_system == null:
+		return {"success": false, "reason": "build_system_unavailable"}
+	var rattle_instance: Dictionary = _find_owned_eight_ball_instance(
+		build_system,
+		"tap_stateful_xmult_rattle_of_the_deep"
+	)
+	if rattle_instance.is_empty():
+		status_changed.emit("Shot Lab: load Rattle of the Deep first.")
+		return {"success": false, "reason": "rattle_not_owned"}
+	var state_before: Dictionary = _dictionary_value(rattle_instance, "state").duplicate(true)
+	var state_after: Dictionary = state_before.duplicate(true)
+	state_after["state_version"] = maxi(int(state_after.get("state_version", 1)), 1)
+	state_after["current_xmult"] = maxf(value, 1.0)
+	var result: Dictionary = build_system.apply_authoritative_state_mutations([{
+		"mutation_id": "shot_lab_set_rattle_value",
+		"owned_item_instance_id": int(rattle_instance.get("owned_item_instance_id", 0)),
+		"eight_ball_item_id": str(rattle_instance.get("eight_ball_item_id", "")),
+		"tray_slot_index": int(rattle_instance.get("tray_slot_index", -1)),
+		"state_before": state_before,
+		"state_after": state_after,
+		"source": "shot_lab_debug",
+	}], "shot_lab_set_rattle:%d" % Time.get_ticks_usec())
+	if bool(result.get("success", false)):
+		_refresh_reference_for_build_change("rattle_state_changed")
+		status_changed.emit("Rattle of the Deep set to x%.2f." % float(
+			state_after["current_xmult"]
+		))
+		_emit_state()
+	return result
+
+
+func reset_stateful_eight_ball_state() -> Dictionary:
+	if _is_authoritative_shot_active() or suite_running:
+		return {"success": false, "reason": "shot_lab_busy"}
+	var build_system: RogueliteBuildSystem = _get_eight_ball_build_system()
+	if build_system == null:
+		return {"success": false, "reason": "build_system_unavailable"}
+	var mutations: Array[Dictionary] = []
+	for instance in build_system.get_owned_item_instances():
+		var item_id: String = str(instance.get("eight_ball_item_id", ""))
+		var definition: Dictionary = EIGHT_BALL_CATALOG.get_definition(item_id)
+		var initial_value: Variant = definition.get("initial_state", {})
+		if not initial_value is Dictionary or (initial_value as Dictionary).is_empty():
+			continue
+		mutations.append({
+			"mutation_id": "shot_lab_reset_stateful:%s" % item_id,
+			"owned_item_instance_id": int(instance.get("owned_item_instance_id", 0)),
+			"eight_ball_item_id": item_id,
+			"tray_slot_index": int(instance.get("tray_slot_index", -1)),
+			"state_before": _dictionary_value(instance, "state").duplicate(true),
+			"state_after": (initial_value as Dictionary).duplicate(true),
+			"source": "shot_lab_debug",
+		})
+	var result: Dictionary = build_system.apply_authoritative_state_mutations(
+		mutations,
+		"shot_lab_reset_stateful:%d" % Time.get_ticks_usec()
+	)
+	if bool(result.get("success", false)):
+		_refresh_reference_for_build_change("stateful_build_reset")
+		status_changed.emit("Shot Lab stateful Eight Balls reset.")
+		_emit_state()
+	return result
+
+
+func copy_eight_ball_build_state() -> bool:
+	var build_system: RogueliteBuildSystem = _get_eight_ball_build_system()
+	if build_system == null:
+		return false
+	DisplayServer.clipboard_set(JSON.stringify(_to_json_safe(
+		build_system.get_owned_item_state_snapshot()
+	), "  "))
+	status_changed.emit("Shot Lab stateful build snapshot copied.")
+	return true
+
+
+func _find_owned_eight_ball_instance(
+	build_system: RogueliteBuildSystem,
+	item_id: String
+) -> Dictionary:
+	for instance in build_system.get_owned_item_instances():
+		if str(instance.get("eight_ball_item_id", "")) == item_id:
+			return instance.duplicate(true)
+	return {}
 
 
 func get_eight_ball_build_diagnostics() -> Dictionary:

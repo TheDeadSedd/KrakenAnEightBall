@@ -7,7 +7,7 @@ class_name RogueliteScoringNarrativeBuilder
 const SCHEMA_VERSION := 2
 const SOURCE_PREDICTED := "predicted"
 const SOURCE_AUTHORITATIVE := "authoritative"
-const SELF_TEST_CASE_COUNT := 9
+const SELF_TEST_CASE_COUNT := 13
 
 const SOURCE_BASE_HAUL := "base_object_ball_value"
 const SOURCE_ADDITIONAL_BALL := "base_additional_ball"
@@ -19,7 +19,12 @@ const SOURCE_OBJECT_BALL_TAP := "base_object_ball_tap"
 const SOURCE_OBJECT_BALL_TAP_MILESTONE := "object_ball_tap_milestone"
 const SOURCE_SCRATCH := "scratch"
 const DEAD_RECKONING_ITEM_ID := "direct_pot_legendary_dead_reckoning"
+const ECHO_CHAMBER_ITEM_ID := "tap_legendary_retrigger_echo_chamber"
 const RETRIGGER_MARKER_EFFECT := "DIRECT POT EFFECTS TRIGGER AGAIN"
+const ECHO_CHAMBER_MARKER_EFFECT := "THIRD TAP - RETRIGGER"
+const EFFECT_KIND_PERSISTENT_SCALER := "persistent_scaler"
+const EFFECT_KIND_CROSS_FAMILY_CONDITIONAL := "cross_family_conditional"
+const EFFECT_KIND_SHOT_ORDINAL_MULTIPLIER := "shot_ordinal_multiplier"
 
 const EVENT_PRIORITY := {
 	"combination": 10,
@@ -144,7 +149,7 @@ static func build_narrative(source: String, ledger_with_derived: Dictionary, sco
 			canonical_engine_step_indices.append(step_index)
 			if phase == RogueliteScoreResolver.PHASE_XMULT or not is_equal_approx(float(step.get("xmult_factor", 1.0)), 1.0):
 				canonical_xmult_step_indices.append(step_index)
-			engine_events.append(_make_engine_event(step))
+			engine_events.append(_make_engine_event(step, starting_balls))
 			continue
 
 		var ball_key: String = str(ball_id)
@@ -173,6 +178,9 @@ static func build_narrative(source: String, ledger_with_derived: Dictionary, sco
 		narrative["events"] = narrative_events
 		narratives_by_ball[ball_key] = narrative
 
+	for state_event in _extract_external_engine_events(score_result):
+		engine_events.append(_make_external_engine_event(state_event))
+
 	var ball_narratives: Array[Dictionary] = []
 	for narrative_value in narratives_by_ball.values():
 		if not narrative_value is Dictionary:
@@ -193,7 +201,7 @@ static func build_narrative(source: String, ledger_with_derived: Dictionary, sco
 		narrative["plan"] = plan
 		ball_narratives.append(narrative)
 	ball_narratives.sort_custom(_ball_narrative_precedes)
-	engine_events.sort_custom(_canonical_step_precedes)
+	engine_events.sort_custom(_engine_event_precedes)
 	engine_events = _insert_authoritative_retrigger_markers(engine_events)
 	consequence_events.sort_custom(_canonical_step_precedes)
 
@@ -269,8 +277,17 @@ static func build_narrative(source: String, ledger_with_derived: Dictionary, sco
 		"object_ball_tap_milestone"
 	)
 	diagnostics["engine_event_count"] = engine_events.size()
+	diagnostics["state_growth_event_count"] = _count_event_type(
+		engine_events,
+		"state_growth"
+	)
 	diagnostics["retrigger_event_count"] = _count_retrigger_events(engine_events)
 	diagnostics["retrigger_marker_count"] = _count_event_type(engine_events, "retrigger_marker")
+	diagnostics["echo_threshold_marker_count"] = _count_source_events(
+		engine_events,
+		"retrigger_marker",
+		ECHO_CHAMBER_ITEM_ID
+	)
 	diagnostics["consequence_event_count"] = consequence_events.size()
 	diagnostics["final_classes_by_ball"] = _final_classes_by_ball(ball_narratives)
 	diagnostics["canonical_scoring_step_indices"] = canonical_scoring_step_indices.duplicate()
@@ -432,6 +449,79 @@ static func run_self_tests() -> Dictionary:
 		],
 	})
 
+	var phase5c_fixture: Dictionary = _make_phase5c_presentation_fixture()
+	var phase5c_result: Dictionary = build_authoritative_narrative(
+		_dictionary_value(phase5c_fixture, "ledger"),
+		_dictionary_value(phase5c_fixture, "score_result")
+	)
+	var phase5c_sequence: Array = _array_value(phase5c_result, "presentation_sequence")
+	var phase5c_engine_events: Array = _array_value(phase5c_result, "engine_events")
+	_append_case(cases, "Phase 5C Keeps Physical Tap Narrative First", (
+		phase5c_sequence.size() >= 9
+		and str(_dictionary_at(phase5c_sequence, 0).get("event_type", ""))
+			== "cue_recontact_milestone"
+		and str(_dictionary_at(phase5c_sequence, 1).get("event_type", ""))
+			== "object_ball_tap_milestone"
+		and str(_dictionary_at(phase5c_sequence, 2).get("event_type", "")) == "pocket"
+		and str(_dictionary_at(phase5c_sequence, 3).get("event_type", "")) == "state_growth"
+	), [
+		"cue_recontact_milestone",
+		"object_ball_tap_milestone",
+		"pocket",
+		"state_growth",
+	], _event_types(phase5c_sequence, 4))
+	_append_case(cases, "Phase 5C Engine Wording Is Exact", (
+		phase5c_engine_events.size() == 6
+		and str(_dictionary_at(phase5c_engine_events, 0).get("effect_text", ""))
+			== "x1.4 -> x1.6"
+		and str(_dictionary_at(phase5c_engine_events, 1).get("effect_text", ""))
+			== "THIRD TAP - RETRIGGER"
+		and str(_dictionary_at(phase5c_engine_events, 2).get("effect_text", ""))
+			== "RETRIGGER +10 HAUL"
+		and str(_dictionary_at(phase5c_engine_events, 3).get("effect_text", ""))
+			== "x1.6 MULT"
+		and str(_dictionary_at(phase5c_engine_events, 4).get("effect_text", ""))
+			== "BALL 7 - x2 MULT"
+		and str(_dictionary_at(phase5c_engine_events, 5).get("effect_text", ""))
+			== "TAP 3 - x1.25 MULT"
+	), [
+		"x1.4 -> x1.6",
+		"THIRD TAP - RETRIGGER",
+		"RETRIGGER +10 HAUL",
+		"x1.6 MULT",
+		"BALL 7 - x2 MULT",
+		"TAP 3 - x1.25 MULT",
+	], _event_effect_texts(phase5c_engine_events))
+	_append_case(cases, "Echo Marker Is Deduplicated And Slot-Exact", (
+		_count_source_events(
+			phase5c_engine_events,
+			"retrigger_marker",
+			ECHO_CHAMBER_ITEM_ID
+		) == 1
+		and int(_dictionary_at(phase5c_engine_events, 1).get("tray_slot_index", -1)) == 4
+		and int(_dictionary_at(phase5c_engine_events, 2).get("tray_slot_index", -1)) == 0
+	), {"marker_count": 1, "marker_slot": 4, "activation_slot": 0}, {
+		"marker_count": _count_source_events(
+			phase5c_engine_events,
+			"retrigger_marker",
+			ECHO_CHAMBER_ITEM_ID
+		),
+		"marker_slot": _dictionary_at(phase5c_engine_events, 1).get("tray_slot_index", -1),
+		"activation_slot": _dictionary_at(phase5c_engine_events, 2).get("tray_slot_index", -1),
+	})
+	_append_case(cases, "Phase 5C Narrative Remains Value-Only And Valid", (
+		bool(_dictionary_value(phase5c_result, "validation").get("valid", false))
+		and not _contains_live_node_reference(phase5c_result)
+		and int(phase5c_result.get("display_final_haul", -1)) == 20
+		and is_equal_approx(float(phase5c_result.get("display_final_mult", -1.0)), 12.0)
+		and int(phase5c_result.get("display_final_score", -1)) == 240
+	), {"valid": true, "haul": 20, "mult": 12.0, "score": 240}, {
+		"valid": _dictionary_value(phase5c_result, "validation").get("valid", false),
+		"haul": phase5c_result.get("display_final_haul", -1),
+		"mult": phase5c_result.get("display_final_mult", -1.0),
+		"score": phase5c_result.get("display_final_score", -1),
+	})
+
 	var passed: int = 0
 	var failures: Array[Dictionary] = []
 	for case_value in cases:
@@ -440,7 +530,7 @@ static func run_self_tests() -> Dictionary:
 			passed += 1
 		else:
 			failures.append(case.duplicate(true))
-	return {
+	var report: Dictionary = {
 		"status": "PASS" if failures.is_empty() and cases.size() == SELF_TEST_CASE_COUNT else "FAIL",
 		"total": cases.size(),
 		"passed": passed,
@@ -448,6 +538,7 @@ static func run_self_tests() -> Dictionary:
 		"cases": cases,
 		"failures": failures,
 	}
+	return report
 
 
 static func _make_empty_result(source: String, ledger: Dictionary, score_result: Dictionary) -> Dictionary:
@@ -1078,14 +1169,16 @@ static func _make_event_from_step(
 	}
 
 
-static func _make_engine_event(step: Dictionary) -> Dictionary:
+static func _make_engine_event(
+	step: Dictionary,
+	starting_balls: Dictionary = {}
+) -> Dictionary:
 	var phase: String = str(step.get("phase", ""))
 	var event_type: String = "xmult" if phase == RogueliteScoreResolver.PHASE_XMULT else "modifier"
 	var metadata: Dictionary = _dictionary_value(step, "metadata").duplicate(true)
+	_enrich_modifier_ball_number(metadata, step, starting_balls)
 	var is_retrigger: bool = bool(metadata.get("is_retrigger", step.get("is_retrigger", false)))
 	var replay_title: String = str(step.get("display_name", "MODIFIER")).to_upper()
-	if is_retrigger:
-		replay_title += " - RETRIGGER"
 	var event: Dictionary = _make_event_from_step(
 		step,
 		event_type,
@@ -1120,15 +1213,278 @@ static func _make_engine_event(step: Dictionary) -> Dictionary:
 		"trigger_occurrence_id",
 		step.get("trigger_occurrence_id", "")
 	))
+	event["eight_ball_item_id"] = str(metadata.get(
+		"eight_ball_item_id",
+		step.get("eight_ball_item_id", step.get("source_id", ""))
+	))
+	event["owned_item_instance_id"] = int(metadata.get(
+		"owned_item_instance_id",
+		step.get("owned_item_instance_id", 0)
+	))
+	event["tray_slot_index"] = int(metadata.get(
+		"slot_index",
+		metadata.get("tray_slot_index", step.get("tray_slot_index", -1))
+	))
+	event["effect_kind"] = str(metadata.get(
+		"effect_kind",
+		step.get("effect_kind", "")
+	))
+	event["effect_text"] = _engine_modifier_effect_text(step, metadata)
+	metadata["eight_ball_item_id"] = event["eight_ball_item_id"]
+	metadata["owned_item_instance_id"] = event["owned_item_instance_id"]
+	metadata["slot_index"] = event["tray_slot_index"]
+	event["metadata"] = metadata
 	return event
+
+
+static func _extract_external_engine_events(score_result: Dictionary) -> Array[Dictionary]:
+	var events: Array[Dictionary] = []
+	var seen: Dictionary = {}
+	_append_unique_external_engine_events(events, seen, score_result.get("engine_events", []))
+	for key in [
+		"eight_ball_build_evaluation",
+		"build_evaluation",
+		"build_effect_evaluation",
+		"modifier_evaluation",
+		"stateful_build_evaluation",
+	]:
+		var nested_value: Variant = score_result.get(key, null)
+		if nested_value is Dictionary:
+			_append_unique_external_engine_events(
+				events,
+				seen,
+				(nested_value as Dictionary).get("engine_events", [])
+			)
+	return events
+
+
+static func _get_external_engine_event_kind(
+	event: Dictionary,
+	metadata: Dictionary
+) -> String:
+	return str(event.get(
+		"engine_event_kind",
+		event.get(
+			"engine_event_type",
+			event.get("event_type", metadata.get("engine_event_kind", "engine_event"))
+		)
+	))
+
+
+static func _append_unique_external_engine_events(
+	target: Array[Dictionary],
+	seen: Dictionary,
+	values: Variant
+) -> void:
+	if not values is Array:
+		return
+	for value in values as Array:
+		if not value is Dictionary:
+			continue
+		var event: Dictionary = (value as Dictionary).duplicate(true)
+		var metadata: Dictionary = _dictionary_value(event, "metadata")
+		var event_kind: String = _get_external_engine_event_kind(event, metadata)
+		if event_kind in [
+			"stateful_modifier",
+			"cross_family_activation",
+			"ordinal_activation",
+		]:
+			# Canonical resolution steps already narrate these score modifiers.
+			continue
+		var key: String = str(event.get(
+			"engine_event_id",
+			event.get("event_id", event.get("state_event_id", ""))
+		))
+		if key.is_empty():
+			key = "%s|%s|%s|%d|%s|%s" % [
+				event_kind,
+				str(event.get("eight_ball_item_id", event.get("item_id", event.get("source_id", "")))),
+				str(event.get("trigger_occurrence_id", metadata.get("trigger_occurrence_id", ""))),
+				int(event.get("trigger_event_index", event.get("event_index", -1))),
+				str(event.get("value_before", metadata.get("value_before", ""))),
+				str(event.get("value_after", metadata.get("value_after", ""))),
+			]
+		if seen.has(key):
+			continue
+		seen[key] = true
+		event["engine_input_index"] = target.size()
+		target.append(event)
+
+
+static func _make_external_engine_event(source: Dictionary) -> Dictionary:
+	var metadata: Dictionary = _dictionary_value(source, "metadata").duplicate(true)
+	var raw_type: String = _get_external_engine_event_kind(source, metadata)
+	var event_type: String = (
+		"state_growth"
+		if raw_type in ["state_growth", "state_mutation", "persistent_growth"]
+		else "retrigger_marker"
+		if raw_type in ["threshold_retrigger", "threshold_marker", "retrigger_marker"]
+		else raw_type
+	)
+	var item_id: String = str(source.get(
+		"eight_ball_item_id",
+		source.get("item_id", source.get("source_id", ""))
+	))
+	var slot_index: int = int(source.get(
+		"slot_index",
+		source.get(
+			"tray_slot_index",
+			metadata.get("slot_index", metadata.get("tray_slot_index", -1))
+		)
+	))
+	var owned_instance_id: int = int(source.get(
+		"owned_item_instance_id",
+		metadata.get("owned_item_instance_id", 0)
+	))
+	var display_name: String = str(source.get(
+		"display_name",
+		source.get("title", item_id.replace("_", " ").capitalize())
+	))
+	var value_before: float = float(source.get(
+		"value_before",
+		metadata.get("value_before", metadata.get("state_value_before", 0.0))
+	))
+	var value_after: float = float(source.get(
+		"value_after",
+		metadata.get("value_after", metadata.get("state_value_after", value_before))
+	))
+	metadata["engine_event_type"] = event_type
+	metadata["engine_event_kind"] = raw_type
+	metadata["eight_ball_item_id"] = item_id
+	metadata["slot_index"] = slot_index
+	metadata["owned_item_instance_id"] = owned_instance_id
+	metadata["value_before"] = value_before
+	metadata["value_after"] = value_after
+	metadata["is_retrigger_marker"] = event_type == "retrigger_marker"
+	if event_type == "retrigger_marker":
+		metadata["retrigger_source_item_id"] = item_id
+		metadata["retrigger_threshold_ordinal"] = int(source.get(
+			"tap_ordinal",
+			source.get(
+				"threshold_ordinal",
+				metadata.get("retrigger_threshold_ordinal", 3)
+			)
+		))
+	return {
+		"narrative_event_index": -1,
+		"sequence_index": -1,
+		"event_type": event_type,
+		"engine_event_type": event_type,
+		"source_id": item_id,
+		"source_type": "engine_state",
+		"phase": str(source.get("phase", "engine_marker")),
+		"event_index": int(source.get(
+			"trigger_event_index",
+			source.get("event_index", -1)
+		)),
+		"source_event_indices": [],
+		"ball_id": int(source.get("ball_id", metadata.get("ball_id", -1))),
+		"live_title": display_name.to_upper(),
+		"replay_title": display_name.to_upper(),
+		"effect_text": _external_engine_effect_text(source, metadata, event_type),
+		"haul_delta": 0,
+		"mult_delta": 0.0,
+		"xmult_factor": 1.0,
+		"display_haul_before": 0,
+		"display_haul_after": 0,
+		"display_mult_before": 1.0,
+		"display_mult_after": 1.0,
+		"display_score_before": 0,
+		"display_score_after": 0,
+		"tier_index": 0,
+		"tier_count": 1,
+		"source_step_indices": [],
+		"affects_score": false,
+		"world_position": Vector2.ZERO,
+		"world_position_valid": false,
+		"anchor_type": "hud",
+		"coordinate_space": "hud",
+		"pocket_index": -1,
+		"rail_id": "",
+		"fallback_used": false,
+		"fallback_reason": "",
+		"presentation_only_marker": true,
+		"is_retrigger_marker": event_type == "retrigger_marker",
+		"eight_ball_item_id": item_id,
+		"owned_item_instance_id": owned_instance_id,
+		"tray_slot_index": slot_index,
+		"value_before": value_before,
+		"value_after": value_after,
+		"trigger_occurrence_id": str(source.get(
+			"trigger_occurrence_id",
+			metadata.get("trigger_occurrence_id", "")
+		)),
+		"retrigger_threshold_ordinal": int(source.get(
+			"tap_ordinal",
+			source.get(
+				"threshold_ordinal",
+				metadata.get("retrigger_threshold_ordinal", 0)
+			)
+		)),
+		"engine_input_index": int(source.get("engine_input_index", 0)),
+		"metadata": metadata,
+	}
+
+
+static func _external_engine_effect_text(
+	source: Dictionary,
+	metadata: Dictionary,
+	event_type: String
+) -> String:
+	var explicit: String = str(source.get(
+		"effect_text",
+		source.get("display_text", source.get("label", ""))
+	)).strip_edges()
+	if not explicit.is_empty():
+		return explicit
+	if event_type == "state_growth":
+		var before: float = float(source.get(
+			"value_before",
+			metadata.get("value_before", 0.0)
+		))
+		var after: float = float(source.get(
+			"value_after",
+			metadata.get("value_after", before)
+		))
+		return "x%s -> x%s" % [_format_number(before), _format_number(after)]
+	if event_type == "retrigger_marker":
+		var ordinal: int = maxi(int(source.get(
+			"tap_ordinal",
+			source.get(
+				"threshold_ordinal",
+				metadata.get("retrigger_threshold_ordinal", 3)
+			)
+		)), 1)
+		return "%s TAP - RETRIGGER" % _ordinal_word(ordinal).to_upper()
+	return str(source.get("label", "ENGINE EVENT")).to_upper()
 
 
 static func _insert_authoritative_retrigger_markers(
 	canonical_engine_events: Array[Dictionary]
 ) -> Array[Dictionary]:
+	var explicit_markers: Dictionary = {}
+	var unpaired_markers: Array[Dictionary] = []
+	var non_marker_events: Array[Dictionary] = []
+	for engine_event in canonical_engine_events:
+		if bool(engine_event.get("is_retrigger_marker", false)):
+			var marker_metadata: Dictionary = _dictionary_value(engine_event, "metadata")
+			var marker_source_id: String = str(marker_metadata.get(
+				"retrigger_source_item_id",
+				engine_event.get("source_id", "")
+			))
+			var marker_key: String = _get_retrigger_occurrence_key(
+				engine_event,
+				marker_metadata,
+				marker_source_id
+			)
+			explicit_markers[marker_key] = engine_event.duplicate(true)
+			unpaired_markers.append(engine_event.duplicate(true))
+			continue
+		non_marker_events.append(engine_event.duplicate(true))
+
 	var expanded: Array[Dictionary] = []
 	var marked_occurrences: Dictionary = {}
-	for engine_event in canonical_engine_events:
+	for engine_event in non_marker_events:
 		var metadata: Dictionary = _dictionary_value(engine_event, "metadata")
 		if bool(metadata.get("is_retrigger", engine_event.get("is_retrigger", false))):
 			var source_item_id: String = str(metadata.get(
@@ -1140,10 +1496,32 @@ static func _insert_authoritative_retrigger_markers(
 				metadata,
 				source_item_id
 			)
-			if source_item_id == DEAD_RECKONING_ITEM_ID and not marked_occurrences.has(occurrence_key):
-				expanded.append(_make_retrigger_marker(engine_event, metadata, source_item_id))
+			if (
+				source_item_id in [DEAD_RECKONING_ITEM_ID, ECHO_CHAMBER_ITEM_ID]
+				and not marked_occurrences.has(occurrence_key)
+			):
+				var marker_value: Variant = explicit_markers.get(occurrence_key, null)
+				var marker: Dictionary = (
+					(marker_value as Dictionary).duplicate(true)
+					if marker_value is Dictionary
+					else _make_retrigger_marker(engine_event, metadata, source_item_id)
+				)
+				expanded.append(marker)
 				marked_occurrences[occurrence_key] = true
 		expanded.append(engine_event.duplicate(true))
+	for marker in unpaired_markers:
+		var metadata: Dictionary = _dictionary_value(marker, "metadata")
+		var source_item_id: String = str(metadata.get(
+			"retrigger_source_item_id",
+			marker.get("source_id", "")
+		))
+		var occurrence_key: String = _get_retrigger_occurrence_key(
+			marker,
+			metadata,
+			source_item_id
+		)
+		if not marked_occurrences.has(occurrence_key):
+			expanded.append(marker.duplicate(true))
 	return expanded
 
 
@@ -1163,6 +1541,13 @@ static func _make_retrigger_marker(
 			retrigger_event.get("retrigger_source_slot_index", -1)
 		)
 	))
+	var threshold_ordinal: int = maxi(int(retrigger_metadata.get(
+		"retrigger_threshold_ordinal",
+		retrigger_event.get("retrigger_threshold_ordinal", 3)
+	)), 1)
+	var marker_effect: String = RETRIGGER_MARKER_EFFECT
+	if source_item_id == ECHO_CHAMBER_ITEM_ID:
+		marker_effect = "%s TAP - RETRIGGER" % _ordinal_word(threshold_ordinal).to_upper()
 	return {
 		"narrative_event_index": -1,
 		"sequence_index": -1,
@@ -1175,7 +1560,7 @@ static func _make_retrigger_marker(
 		"ball_id": -1,
 		"live_title": source_display_name.to_upper(),
 		"replay_title": source_display_name.to_upper(),
-		"effect_text": RETRIGGER_MARKER_EFFECT,
+		"effect_text": marker_effect,
 		"haul_delta": 0,
 		"mult_delta": 0.0,
 		"xmult_factor": 1.0,
@@ -1199,11 +1584,13 @@ static func _make_retrigger_marker(
 		"fallback_reason": "",
 		"presentation_only_marker": true,
 		"is_retrigger_marker": true,
+		"retrigger_threshold_ordinal": threshold_ordinal,
 		"metadata": {
 			"is_retrigger_marker": true,
 			"eight_ball_item_id": source_item_id,
 			"slot_index": source_slot_index,
 			"retrigger_source_item_id": source_item_id,
+			"retrigger_threshold_ordinal": threshold_ordinal,
 			"trigger_occurrence_id": str(retrigger_metadata.get("trigger_occurrence_id", "")),
 		},
 	}
@@ -1227,6 +1614,21 @@ static func _count_retrigger_events(events: Array[Dictionary]) -> int:
 	var count: int = 0
 	for event in events:
 		if bool(event.get("is_retrigger", false)):
+			count += 1
+	return count
+
+
+static func _count_source_events(
+	events: Array[Dictionary],
+	event_type: String,
+	source_id: String
+) -> int:
+	var count: int = 0
+	for event in events:
+		if (
+			str(event.get("event_type", "")) == event_type
+			and str(event.get("source_id", "")) == source_id
+		):
 			count += 1
 	return count
 
@@ -1713,6 +2115,28 @@ static func _get_ball_snapshot(starting_balls: Dictionary, ball_id: int) -> Dict
 	return (value as Dictionary).duplicate(true) if value is Dictionary else {}
 
 
+static func _enrich_modifier_ball_number(
+	metadata: Dictionary,
+	step: Dictionary,
+	starting_balls: Dictionary
+) -> void:
+	if int(metadata.get("ball_number", metadata.get("scoring_ball_number", 0))) > 0:
+		return
+	var semantic_ball_id: int = int(metadata.get(
+		"qualifying_ball_id",
+		metadata.get(
+			"trigger_ball_id",
+			step.get("trigger_ball_id", step.get("ball_id", -1))
+		)
+	))
+	if semantic_ball_id <= 0:
+		return
+	var ball_snapshot: Dictionary = _get_ball_snapshot(starting_balls, semantic_ball_id)
+	var ball_number: int = int(ball_snapshot.get("ball_number", 0))
+	if ball_number > 0:
+		metadata["ball_number"] = ball_number
+
+
 static func _effect_text(step: Dictionary) -> String:
 	if not bool(step.get("affects_score", true)) or str(step.get("source_id", "")) == SOURCE_SCRATCH:
 		return "SCORE RETAINED"
@@ -1726,6 +2150,41 @@ static func _effect_text(step: Dictionary) -> String:
 	if not is_zero_approx(mult_delta):
 		return "%s MULT" % _signed_number(mult_delta)
 	return "SCORE UNCHANGED"
+
+
+static func _engine_modifier_effect_text(step: Dictionary, metadata: Dictionary) -> String:
+	var base_text: String = _effect_text(step)
+	if bool(metadata.get("is_retrigger", step.get("is_retrigger", false))):
+		return "RETRIGGER %s" % base_text
+	var effect_kind: String = str(metadata.get(
+		"effect_kind",
+		step.get("effect_kind", "")
+	))
+	var ball_number: int = int(metadata.get(
+		"ball_number",
+		metadata.get("scoring_ball_number", step.get("ball_number", 0))
+	))
+	if effect_kind == EFFECT_KIND_CROSS_FAMILY_CONDITIONAL and ball_number > 0:
+		return "BALL %d - %s" % [ball_number, base_text]
+	var tap_ordinal: int = int(metadata.get(
+		"tap_ordinal",
+		metadata.get("shot_tap_ordinal", 0)
+	))
+	if effect_kind == EFFECT_KIND_SHOT_ORDINAL_MULTIPLIER and tap_ordinal > 0:
+		return "TAP %d - %s" % [tap_ordinal, base_text]
+	return base_text
+
+
+static func _ordinal_word(value: int) -> String:
+	match value:
+		1:
+			return "first"
+		2:
+			return "second"
+		3:
+			return "third"
+		_:
+			return "%dth" % value
 
 
 static func _bank_live_title(tier_index: int, tier_count: int) -> String:
@@ -1839,6 +2298,22 @@ static func _pocket_fact_precedes(a: Dictionary, b: Dictionary) -> bool:
 
 static func _canonical_step_precedes(a: Dictionary, b: Dictionary) -> bool:
 	return _first_source_step_index(a) < _first_source_step_index(b)
+
+
+static func _engine_event_precedes(a: Dictionary, b: Dictionary) -> bool:
+	var a_is_state_growth: bool = str(a.get("event_type", "")) == "state_growth"
+	var b_is_state_growth: bool = str(b.get("event_type", "")) == "state_growth"
+	if a_is_state_growth != b_is_state_growth:
+		return a_is_state_growth
+	var a_step_index: int = _first_source_step_index(a)
+	var b_step_index: int = _first_source_step_index(b)
+	if a_step_index != b_step_index:
+		return a_step_index < b_step_index
+	var a_event_index: int = int(a.get("event_index", 2147483647))
+	var b_event_index: int = int(b.get("event_index", 2147483647))
+	if a_event_index != b_event_index:
+		return a_event_index < b_event_index
+	return int(a.get("engine_input_index", 0)) < int(b.get("engine_input_index", 0))
 
 
 static func _first_source_step_index(event: Dictionary) -> int:
@@ -1981,7 +2456,7 @@ static func _int_array(values: Array) -> Array[int]:
 static func _format_number(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
 		return str(int(roundf(value)))
-	return "%.2f" % value
+	return ("%.2f" % value).trim_suffix("0").trim_suffix(".")
 
 
 static func _signed_number(value: float) -> String:
@@ -2214,6 +2689,165 @@ static func _make_test_tap_fixture() -> Dictionary:
 	return {"ledger": ledger, "score_result": score_result}
 
 
+static func _make_phase5c_presentation_fixture() -> Dictionary:
+	var fixture: Dictionary = _make_test_tap_fixture()
+	var ledger: Dictionary = _dictionary_value(fixture, "ledger").duplicate(true)
+	var starting_balls: Dictionary = _dictionary_value(ledger, "starting_balls").duplicate(true)
+	starting_balls["7"] = {"ball_id": 7, "ball_number": 7}
+	ledger["starting_balls"] = starting_balls
+	fixture["ledger"] = ledger
+	var score_result: Dictionary = _dictionary_value(fixture, "score_result").duplicate(true)
+	var steps: Array = _array_value(score_result, "resolution_steps").duplicate(true)
+	var next_step_index: int = steps.size()
+	steps.append(_make_test_engine_step(
+		next_step_index,
+		"double_tap_haul_second_bite",
+		"Second Bite",
+		"add_haul",
+		10.0,
+		10,
+		3.0,
+		{
+			"effect_kind": "numeric_modifier",
+			"eight_ball_item_id": "double_tap_haul_second_bite",
+			"slot_index": 0,
+			"owned_item_instance_id": 10,
+			"trigger_id": SOURCE_CUE_RECONTACT_MILESTONE,
+			"trigger_occurrence_id": "tap-threshold-3",
+			"is_retrigger": true,
+			"retrigger_index": 1,
+			"retrigger_source_item_id": ECHO_CHAMBER_ITEM_ID,
+			"retrigger_source_display_name": "Echo Chamber",
+			"retrigger_source_slot_index": 4,
+			"retrigger_threshold_ordinal": 3,
+			"original_activation_id": "second-bite:original",
+		}
+	))
+	next_step_index += 1
+	steps.append(_make_test_engine_step(
+		next_step_index,
+		"tap_stateful_xmult_rattle_of_the_deep",
+		"Rattle of the Deep",
+		"xmult",
+		1.6,
+		20,
+		3.0,
+		{
+			"effect_kind": EFFECT_KIND_PERSISTENT_SCALER,
+			"eight_ball_item_id": "tap_stateful_xmult_rattle_of_the_deep",
+			"slot_index": 1,
+			"owned_item_instance_id": 11,
+		}
+	))
+	next_step_index += 1
+	steps.append(_make_test_engine_step(
+		next_step_index,
+		"tap_hybrid_xmult_one_two_punch",
+		"One-Two Punch",
+		"xmult",
+		2.0,
+		20,
+		4.8,
+		{
+			"effect_kind": EFFECT_KIND_CROSS_FAMILY_CONDITIONAL,
+			"eight_ball_item_id": "tap_hybrid_xmult_one_two_punch",
+			"slot_index": 2,
+			"owned_item_instance_id": 12,
+			"qualifying_ball_id": 7,
+		}
+	))
+	next_step_index += 1
+	steps.append(_make_test_engine_step(
+		next_step_index,
+		"tap_ordinal_xmult_aftershock",
+		"Aftershock",
+		"xmult",
+		1.25,
+		20,
+		9.6,
+		{
+			"effect_kind": EFFECT_KIND_SHOT_ORDINAL_MULTIPLIER,
+			"eight_ball_item_id": "tap_ordinal_xmult_aftershock",
+			"slot_index": 3,
+			"owned_item_instance_id": 13,
+			"tap_ordinal": 3,
+		}
+	))
+	score_result["resolution_steps"] = steps
+	score_result["final_haul"] = 20
+	score_result["final_mult"] = 12.0
+	score_result["shot_score"] = 240
+	score_result["eight_ball_build_evaluation"] = {"engine_events": [
+		{
+			"engine_event_kind": "state_growth",
+			"display_name": "Rattle of the Deep",
+			"eight_ball_item_id": "tap_stateful_xmult_rattle_of_the_deep",
+			"slot_index": 1,
+			"owned_item_instance_id": 11,
+			"trigger_event_index": 1,
+			"trigger_occurrence_id": "tap-threshold-3",
+			"value_before": 1.4,
+			"value_after": 1.6,
+		},
+		{
+			"engine_event_kind": "stateful_modifier",
+			"display_name": "Rattle of the Deep",
+			"eight_ball_item_id": "tap_stateful_xmult_rattle_of_the_deep",
+			"tray_slot_index": 1,
+			"trigger_event_index": 1,
+			"trigger_occurrence_id": "tap-threshold-3",
+		},
+		{
+			"engine_event_kind": "threshold_retrigger",
+			"display_name": "Echo Chamber",
+			"eight_ball_item_id": ECHO_CHAMBER_ITEM_ID,
+			"tray_slot_index": 4,
+			"trigger_event_index": 1,
+			"trigger_occurrence_id": "tap-threshold-3",
+			"tap_ordinal": 3,
+			"label": "THIRD TAP - RETRIGGER",
+		},
+	]}
+	fixture["score_result"] = score_result
+	return fixture
+
+
+static func _make_test_engine_step(
+	step_index: int,
+	item_id: String,
+	display_name: String,
+	phase: String,
+	value: float,
+	haul_before: int,
+	mult_before: float,
+	metadata: Dictionary
+) -> Dictionary:
+	var haul_delta: int = int(round(value)) if phase == "add_haul" else 0
+	var mult_delta: float = value if phase == "add_mult" else 0.0
+	var xmult_factor: float = value if phase == "xmult" else 1.0
+	var haul_after: int = haul_before + haul_delta
+	var mult_after: float = (mult_before + mult_delta) * xmult_factor
+	return {
+		"step_index": step_index,
+		"phase": phase,
+		"source_id": item_id,
+		"source_type": "modifier",
+		"display_name": display_name,
+		"event_index": int(metadata.get("trigger_event_index", 1)),
+		"ball_id": -1,
+		"haul_before": haul_before,
+		"haul_delta": haul_delta,
+		"haul_after": haul_after,
+		"mult_before": mult_before,
+		"mult_delta": mult_delta,
+		"xmult_factor": xmult_factor,
+		"mult_after": mult_after,
+		"score_preview_after": _score_preview(haul_after, mult_after),
+		"affects_score": true,
+		"metadata": metadata.duplicate(true),
+	}
+
+
 static func _make_test_tap_step(
 	step_index: int,
 	source_id: String,
@@ -2318,6 +2952,22 @@ static func _count_event_type(events: Array, event_type: String) -> int:
 		if event_value is Dictionary and str((event_value as Dictionary).get("event_type", "")) == event_type:
 			count += 1
 	return count
+
+
+static func _event_types(events: Array, limit: int = -1) -> Array[String]:
+	var result: Array[String] = []
+	var count: int = events.size() if limit < 0 else mini(events.size(), limit)
+	for index in range(count):
+		result.append(str(_dictionary_at(events, index).get("event_type", "")))
+	return result
+
+
+static func _event_effect_texts(events: Array) -> Array[String]:
+	var result: Array[String] = []
+	for event_value in events:
+		if event_value is Dictionary:
+			result.append(str((event_value as Dictionary).get("effect_text", "")))
+	return result
 
 
 static func _filled_float_array(count: int, value: float) -> Array[float]:

@@ -381,6 +381,7 @@ func _refresh_visible_report() -> void:
 		_add_item_section()
 		_add_trigger_section()
 		_add_tap_section()
+		_add_phase_5c_tap_item_section()
 		_add_dead_reckoning_section()
 		_add_offer_section()
 		_add_shot_distribution_section()
@@ -498,6 +499,17 @@ func _add_item_section() -> void:
 				_display_value(_value_by_keys(item, ["cumulative_xmult_factor", "cumulative_xmult_factors", "xmult_product"])),
 				_display_value(_value_by_keys(item, ["average_score_uplift_per_activation", "average_uplift_per_activation"])),
 			]
+			var phase_metrics: Dictionary = _dictionary_by_keys(item, ["phase_5c_metrics"])
+			if not phase_metrics.is_empty():
+				var state_suffix: String = ""
+				if phase_metrics.has("final_xmult"):
+					state_suffix = "  |  State x%s" % _display_value(
+						phase_metrics.get("final_xmult")
+					)
+				detail += "\nPhase 5C: %s marginal uplift%s" % [
+					_display_value(_value_by_keys(phase_metrics, ["marginal_score_uplift"])),
+					state_suffix,
+				]
 		_add_compact_row(section, name, compact, detail)
 
 
@@ -613,6 +625,111 @@ func _add_tap_section() -> void:
 			13,
 			MUTED_COLOR
 		))
+
+
+func _add_phase_5c_tap_item_section() -> void:
+	var metrics: Dictionary = _get_phase_5c_tap_item_metrics()
+	if metrics.is_empty():
+		return
+	var rattle: Dictionary = _dictionary_by_keys(metrics, ["rattle"])
+	var punch: Dictionary = _dictionary_by_keys(metrics, ["one_two_punch"])
+	var aftershock: Dictionary = _dictionary_by_keys(metrics, ["aftershock"])
+	var echo: Dictionary = _dictionary_by_keys(metrics, ["echo_chamber"])
+	if not (
+		bool(rattle.get("owned", false))
+		or bool(punch.get("owned", false))
+		or bool(aftershock.get("owned", false))
+		or bool(echo.get("owned", false))
+	):
+		return
+	var section: VBoxContainer = _add_section(
+		"TAP ENGINE",
+		"State, conditional activation, escalation, and retrigger attribution"
+	)
+	if bool(rattle.get("owned", false)):
+		var rattle_compact: String = "x%s acquired -> x%s current  |  %s Tap growth  |  %s uplift" % [
+			_display_value(_value_by_keys(rattle, ["acquired_value"])),
+			_display_value(_value_by_keys(rattle, ["final_xmult", "current_xmult"])),
+			_display_value(_value_by_keys(rattle, ["tap_milestones_grown_from"])),
+			_display_value(_value_by_keys(rattle, ["marginal_score_uplift"])),
+		]
+		var rattle_detail: String = "Activated %s / %s owned shots  |  Non-Tap owned shots %s  |  Lifetime growth %s  |  Instance IDs %s" % [
+			_display_value(_value_by_keys(rattle, ["shots_activated"])),
+			_display_value(_value_by_keys(rattle, ["shots_owned"])),
+			_display_value(_value_by_keys(rattle, ["non_tap_shots_owned"])),
+			_display_value(_value_by_keys(rattle, ["lifetime_growth"])),
+			_join_values(_array_by_keys(rattle, ["owned_item_instance_ids"])),
+		] if advanced_enabled else ""
+		_add_compact_row(section, "Rattle of the Deep", rattle_compact, rattle_detail)
+	if bool(punch.get("owned", false)):
+		_add_compact_row(
+			section,
+			"One-Two Punch",
+			"%s qualifying balls  |  %s activations  |  %s uplift" % [
+				_display_value(_value_by_keys(punch, ["qualifying_scoring_balls"])),
+				_display_value(_value_by_keys(punch, ["activations"])),
+				_display_value(_value_by_keys(punch, ["marginal_score_uplift"])),
+			],
+			"One-family-only shots while owned: %s" % _display_value(_value_by_keys(
+				punch,
+				["shots_with_only_one_family"]
+			)) if advanced_enabled else ""
+		)
+	if bool(aftershock.get("owned", false)):
+		_add_compact_row(
+			section,
+			"Aftershock",
+			"%s Tap milestones  |  %s xMult activations  |  highest ordinal %s  |  %s uplift" % [
+				_display_value(_value_by_keys(aftershock, ["tap_milestones_while_owned"])),
+				_display_value(_value_by_keys(aftershock, ["xmult_activations"])),
+				_display_value(_value_by_keys(aftershock, ["highest_tap_ordinal"])),
+				_display_value(_value_by_keys(aftershock, ["marginal_score_uplift"])),
+			],
+			"Ignored first milestones: %s" % _display_value(_value_by_keys(
+				aftershock,
+				["ignored_first_milestones"]
+			)) if advanced_enabled else ""
+		)
+	if bool(echo.get("owned", false)):
+		var family_counts: Dictionary = _dictionary_by_keys(echo, ["retriggers_by_family"])
+		var echo_detail: String = "Double Tap / Ball Tap retriggers %s / %s  |  +Haul %s  |  +Mult %s  |  xMult %s (%s product)\nSupported rounds: %s  |  Unsupported rounds: %s" % [
+			_display_value(_value_by_keys(family_counts, ["double_tap"])),
+			_display_value(_value_by_keys(family_counts, ["ball_tap"])),
+			_display_value(_value_by_keys(echo, ["retriggered_add_haul"])),
+			_display_value(_value_by_keys(echo, ["retriggered_add_mult"])),
+			_display_value(_value_by_keys(echo, ["retriggered_xmult_activations"])),
+			_display_value(_value_by_keys(echo, ["retriggered_xmult_product"])),
+			_join_values(_array_by_keys(echo, ["round_numbers_owned_with_support"])),
+			_join_values(_array_by_keys(echo, ["round_numbers_owned_without_support"])),
+		] if advanced_enabled else ""
+		_add_compact_row(
+			section,
+			"Echo Chamber",
+			"%s thresholds  |  %s supported / %s unsupported  |  %s retriggers  |  %s uplift" % [
+				_display_value(_value_by_keys(echo, ["threshold_milestones"])),
+				_display_value(_value_by_keys(echo, ["supported_thresholds"])),
+				_display_value(_value_by_keys(echo, ["unsupported_thresholds"])),
+				_display_value(_value_by_keys(echo, ["regular_activations_retriggered"])),
+				_display_value(_value_by_keys(echo, ["marginal_score_uplift"])),
+			],
+			echo_detail
+		)
+	if advanced_enabled:
+		var history: Array[Dictionary] = _dictionary_array_by_keys(metrics, ["state_history"])
+		if not history.is_empty():
+			var latest: Dictionary = history[history.size() - 1]
+			section.add_child(_make_body_label(
+				"Latest Rattle state: x%s -> x%s on %s (%s Tap milestones). Retained %s/%s bounded records." % [
+					_display_value(_value_by_keys(latest, ["current_xmult_before"])),
+					_display_value(_value_by_keys(latest, ["current_xmult_after"])),
+					str(_value_by_keys(latest, ["shot_key"], "shot")),
+					_display_value(_value_by_keys(latest, ["tap_milestones"])),
+					_display_value(history.size()),
+					_display_value(_value_by_keys(metrics, ["bounded_history_limit"])),
+				],
+				13,
+				MUTED_COLOR
+			))
 
 
 func _add_dead_reckoning_section() -> void:
@@ -972,6 +1089,13 @@ func _get_tap_metrics() -> Dictionary:
 		return metrics
 	var summary: Dictionary = _get_run_summary()
 	return _dictionary_by_keys(summary, ["tap_metrics", "tap_scoring_metrics"])
+
+
+func _get_phase_5c_tap_item_metrics() -> Dictionary:
+	return _dictionary_by_keys(
+		report_snapshot,
+		["phase_5c_tap_items", "tap_item_metrics", "unusual_tap_metrics"]
+	)
 
 
 func _get_dead_reckoning_metrics() -> Dictionary:

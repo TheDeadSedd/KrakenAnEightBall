@@ -81,6 +81,10 @@ func request_rewind(preserve_last_completed_ledger: bool = false) -> bool:
 	table.prepare_for_shot_rewind()
 	table.shot_ledger_system.restore_rewind_state(_get_state(system_states, "shot_ledger"))
 	table.roguelite_scoring_system.restore_rewind_state(_get_state(system_states, "roguelite_scoring"))
+	if table.roguelite_build_system != null:
+		table.roguelite_build_system.restore_rewind_state(
+			_get_state(system_states, "roguelite_build")
+		)
 	if table.is_shot_lab_mode():
 		table.shot_lab_system.restore_rewind_state(_get_state(system_states, "shot_lab"))
 	table.run_ball_identity_system.restore_rewind_state(_get_state(system_states, "run_ball_identity"))
@@ -219,6 +223,8 @@ func _capture_system_states() -> Dictionary:
 	}
 	if table.is_shot_lab_mode():
 		states["shot_lab"] = table.shot_lab_system.capture_rewind_state()
+	if table.roguelite_build_system != null:
+		states["roguelite_build"] = table.roguelite_build_system.get_rewind_state()
 	if table.is_passage_mode():
 		states["passage"] = table.passage_system.get_rewind_state()
 		states["sunken_spoils"] = table.sunken_spoils_system.get_rewind_state()

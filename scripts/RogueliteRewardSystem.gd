@@ -22,6 +22,14 @@ const DEFAULT_OFFER_WEIGHT_UNCOMMON := EIGHT_BALL_CATALOG.OFFER_WEIGHT_UNCOMMON
 const DEFAULT_OFFER_WEIGHT_RARE := EIGHT_BALL_CATALOG.OFFER_WEIGHT_RARE
 const DEFAULT_OFFER_WEIGHT_LEGENDARY := EIGHT_BALL_CATALOG.OFFER_WEIGHT_LEGENDARY
 const DEAD_RECKONING_ITEM_ID := EIGHT_BALL_CATALOG.DEAD_RECKONING_ITEM_ID
+const EFFECT_KIND_LEGACY_MODIFIER := "modifier"
+const EFFECT_KIND_NUMERIC_MODIFIER := "numeric_modifier"
+const EFFECT_KIND_RETRIGGER_FAMILY := "retrigger_family"
+const EFFECT_KIND_THRESHOLD_FAMILY_RETRIGGER := "threshold_family_retrigger"
+const TAP_REGULAR_FAMILY_IDS: Array[String] = ["double_tap", "ball_tap"]
+const ECHO_SUPPORT_REPLACEMENT_WARNING := (
+	"Echo Chamber currently has no regular Tap Eight Ball to retrigger."
+)
 
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var build_system: RogueliteBuildSystem
@@ -164,7 +172,16 @@ func get_eight_ball_replacement_warning(
 		offered_item_id = pending_replacement_eight_ball_item_id
 	if offered_item_id.is_empty() or _get_eight_ball_definition(offered_item_id).is_empty():
 		return ""
-	return build_system.get_replacement_warning(tray_slot_index, offered_item_id)
+	var build_warning: String = build_system.get_replacement_warning(
+		tray_slot_index,
+		offered_item_id
+	)
+	if not build_warning.is_empty():
+		return build_warning
+	return _get_retrigger_support_replacement_warning(
+		tray_slot_index,
+		offered_item_id
+	)
 
 
 func keep_current_course(reason: String = "player_skip") -> Dictionary:
@@ -458,6 +475,11 @@ func _generate_eight_ball_offers() -> void:
 	last_offer_rarities.clear()
 	for offer_id in active_offer_ids:
 		last_offer_rarities.append(str(_get_eight_ball_definition(offer_id).get("rarity", "common")))
+	var eligible_legendary_count: int = _count_legendary_definitions(eligible_definitions)
+	var threshold_retrigger_eligible_ids: Array[String] = []
+	for eligible_definition in eligible_definitions:
+		if _is_threshold_family_retrigger_definition(eligible_definition):
+			threshold_retrigger_eligible_ids.append(_eight_ball_item_id(eligible_definition))
 	last_offer_diagnostics = {
 		"selection_policy": "weighted_without_replacement_family_diverse",
 		"common_weight": DEFAULT_OFFER_WEIGHT_COMMON,
@@ -467,12 +489,23 @@ func _generate_eight_ball_offers() -> void:
 		"owned_ids_excluded": owned_ids.duplicate(),
 		"contextual_exclusions": contextual_exclusions.duplicate(),
 		"dead_reckoning_eligible": _has_regular_direct_pot_support(owned_ids),
+		"echo_chamber_eligible": not threshold_retrigger_eligible_ids.is_empty(),
+		"threshold_retrigger_eligible_ids": threshold_retrigger_eligible_ids.duplicate(),
+		"regular_tap_support_count": _count_regular_support_items(
+			owned_ids,
+			TAP_REGULAR_FAMILY_IDS
+		),
 		"all_rare_repaired": all_rare_repaired,
 		"phase_diversity_requested": false,
 		"family_diversity_requested": true,
 		"available_family_count": _count_definition_families(eligible_definitions),
 		"selected_family_count": _count_offer_families(active_offer_ids),
+		"available_offer_family_count": _count_definition_families(eligible_definitions),
+		"selected_offer_family_count": _count_offer_families(active_offer_ids),
+		"selected_offer_families": _get_offer_family_ids(active_offer_ids),
 		"selected_legendary_count": _count_legendary_offers(active_offer_ids),
+		"eligible_legendary_count": eligible_legendary_count,
+		"legendary_pairing_blocked": eligible_legendary_count > 1,
 		"family_offer_multipliers": _dictionary_value(
 			active_balance_tuning_snapshot,
 			"family_offer_multipliers"
@@ -520,13 +553,13 @@ func _get_offer_constraint_candidates(candidates: Array[Dictionary]) -> Array[Di
 
 	var selected_families: Dictionary = {}
 	for offer_id in active_offer_ids:
-		var family_id: String = str(_get_eight_ball_definition(offer_id).get("family_id", ""))
+		var family_id: String = _get_offer_family_id(_get_eight_ball_definition(offer_id))
 		if not family_id.is_empty():
 			selected_families[family_id] = true
 
 	var unseen_family_candidates: Array[Dictionary] = []
 	for definition in allowed_candidates:
-		var family_id: String = str(definition.get("family_id", ""))
+		var family_id: String = _get_offer_family_id(definition)
 		if not family_id.is_empty() and not selected_families.has(family_id):
 			unseen_family_candidates.append(definition.duplicate(true))
 	return unseen_family_candidates if not unseen_family_candidates.is_empty() else allowed_candidates
@@ -570,8 +603,11 @@ func _repair_all_rare_offer_if_possible(eligible_definitions: Array[Dictionary])
 
 
 func _is_contextually_eligible(definition: Dictionary, owned_ids: Array[String]) -> bool:
-	var item_id: String = _eight_ball_item_id(definition)
-	if item_id == DEAD_RECKONING_ITEM_ID:
+	if _definition_requires_regular_support(definition):
+		return _has_regular_support_for_definition(definition, owned_ids)
+	# Preserve compatibility with older catalog versions that identified Dead
+	# Reckoning by ID before retrigger effect metadata was introduced.
+	if _eight_ball_item_id(definition) == DEAD_RECKONING_ITEM_ID:
 		return _has_regular_direct_pot_support(owned_ids)
 	return true
 
@@ -588,10 +624,18 @@ func _count_legendary_offers(offer_ids: Array[String]) -> int:
 	return count
 
 
+func _count_legendary_definitions(definitions: Array[Dictionary]) -> int:
+	var count: int = 0
+	for definition in definitions:
+		if _is_legendary_definition(definition):
+			count += 1
+	return count
+
+
 func _count_offer_families(offer_ids: Array[String]) -> int:
 	var families: Dictionary = {}
 	for offer_id in offer_ids:
-		var family_id: String = str(_get_eight_ball_definition(offer_id).get("family_id", ""))
+		var family_id: String = _get_offer_family_id(_get_eight_ball_definition(offer_id))
 		if not family_id.is_empty():
 			families[family_id] = true
 	return families.size()
@@ -600,10 +644,29 @@ func _count_offer_families(offer_ids: Array[String]) -> int:
 func _count_definition_families(definitions: Array[Dictionary]) -> int:
 	var families: Dictionary = {}
 	for definition in definitions:
-		var family_id: String = str(definition.get("family_id", ""))
+		var family_id: String = _get_offer_family_id(definition)
 		if not family_id.is_empty():
 			families[family_id] = true
 	return families.size()
+
+
+func _get_offer_family_ids(offer_ids: Array[String]) -> Array[String]:
+	var family_ids: Array[String] = []
+	for offer_id in offer_ids:
+		var family_id: String = _get_offer_family_id(_get_eight_ball_definition(offer_id))
+		if family_id.is_empty() or family_ids.has(family_id):
+			continue
+		family_ids.append(family_id)
+	return family_ids
+
+
+func _get_offer_family_id(definition: Dictionary) -> String:
+	var offer_family_id: String = str(definition.get("offer_family_id", "")).strip_edges()
+	if offer_family_id.is_empty():
+		offer_family_id = str(definition.get("offer_family", "")).strip_edges()
+	if offer_family_id.is_empty():
+		offer_family_id = str(definition.get("family_id", "")).strip_edges()
+	return offer_family_id
 
 
 func _has_regular_direct_pot_support(item_ids: Array[String]) -> bool:
@@ -611,6 +674,123 @@ func _has_regular_direct_pot_support(item_ids: Array[String]) -> bool:
 		if item_ids.has(str(support_id_value)):
 			return true
 	return false
+
+
+func _definition_requires_regular_support(definition: Dictionary) -> bool:
+	var eligibility: Dictionary = _dictionary_value(definition, "eligibility")
+	if (
+		not _string_array_value(eligibility, "requires_owned_any_item_ids").is_empty()
+		or not _string_array_value(
+			eligibility,
+			"requires_owned_any_family_ids"
+		).is_empty()
+	):
+		return true
+	var effect_kind: String = str(definition.get("effect_kind", "")).strip_edges()
+	return effect_kind in [
+		EFFECT_KIND_RETRIGGER_FAMILY,
+		EFFECT_KIND_THRESHOLD_FAMILY_RETRIGGER,
+	]
+
+
+func _is_threshold_family_retrigger_definition(definition: Dictionary) -> bool:
+	return str(definition.get("effect_kind", "")).strip_edges() == (
+		EFFECT_KIND_THRESHOLD_FAMILY_RETRIGGER
+	)
+
+
+func _has_regular_support_for_definition(
+	retrigger_definition: Dictionary,
+	item_ids: Array[String]
+) -> bool:
+	var required_item_ids: Array[String] = _get_required_support_item_ids(
+		retrigger_definition
+	)
+	if not required_item_ids.is_empty():
+		for item_id in item_ids:
+			if required_item_ids.has(item_id):
+				return true
+		return false
+	return _count_regular_support_items(
+		item_ids,
+		_get_required_support_family_ids(retrigger_definition)
+	) > 0
+
+
+func _count_regular_support_items(
+	item_ids: Array[String],
+	support_family_ids: Array[String]
+) -> int:
+	if support_family_ids.is_empty():
+		return 0
+	var count: int = 0
+	for item_id in item_ids:
+		if _is_regular_support_definition(
+			_get_eight_ball_definition(item_id),
+			support_family_ids
+		):
+			count += 1
+	return count
+
+
+func _is_regular_support_definition(
+	definition: Dictionary,
+	support_family_ids: Array[String]
+) -> bool:
+	if definition.is_empty():
+		return false
+	var family_id: String = str(definition.get("family_id", "")).strip_edges()
+	if not support_family_ids.has(family_id):
+		return false
+	var effect_kind: String = str(
+		definition.get("effect_kind", EFFECT_KIND_LEGACY_MODIFIER)
+	).strip_edges()
+	return effect_kind in [EFFECT_KIND_LEGACY_MODIFIER, EFFECT_KIND_NUMERIC_MODIFIER]
+
+
+func _get_required_support_family_ids(definition: Dictionary) -> Array[String]:
+	var support_family_ids: Array[String] = []
+	var eligibility: Dictionary = _dictionary_value(definition, "eligibility")
+	_append_string_values(
+		support_family_ids,
+		eligibility.get("requires_owned_any_family_ids", [])
+	)
+	for key in [
+		"required_support_family_ids",
+		"support_family_ids",
+		"retrigger_family_ids",
+		"matching_family_ids",
+	]:
+		_append_string_values(support_family_ids, definition.get(key, []))
+
+	for key in ["required_support_family_id", "support_family_id", "retrigger_family"]:
+		var family_id: String = str(definition.get(key, "")).strip_edges()
+		if not family_id.is_empty() and not support_family_ids.has(family_id):
+			support_family_ids.append(family_id)
+
+	if (
+		support_family_ids.is_empty()
+		and _is_threshold_family_retrigger_definition(definition)
+	):
+		return TAP_REGULAR_FAMILY_IDS.duplicate()
+	return support_family_ids
+
+
+func _get_required_support_item_ids(definition: Dictionary) -> Array[String]:
+	var eligibility: Dictionary = _dictionary_value(definition, "eligibility")
+	return _string_array_value(eligibility, "requires_owned_any_item_ids")
+
+
+func _append_string_values(destination: Array[String], value: Variant) -> void:
+	if value is Array:
+		for entry_value in value as Array:
+			var entry: String = str(entry_value).strip_edges()
+			if not entry.is_empty() and not destination.has(entry):
+				destination.append(entry)
+		return
+	var entry: String = str(value).strip_edges()
+	if not entry.is_empty() and not destination.has(entry):
+		destination.append(entry)
 
 
 func _get_build_slot_item_ids() -> Array[String]:
@@ -622,6 +802,49 @@ func _get_build_slot_item_ids() -> Array[String]:
 		for item_id_value in raw_ids:
 			slot_item_ids.append(str(item_id_value))
 	return slot_item_ids
+
+
+func _get_retrigger_support_replacement_warning(
+	tray_slot_index: int,
+	replacement_item_id: String
+) -> String:
+	var before_ids: Array[String] = _get_build_slot_item_ids()
+	if tray_slot_index < 0 or tray_slot_index >= before_ids.size():
+		return ""
+	var after_ids: Array[String] = before_ids.duplicate()
+	after_ids[tray_slot_index] = replacement_item_id
+
+	for item_id in before_ids:
+		if item_id.is_empty() or not after_ids.has(item_id):
+			continue
+		var retrigger_definition: Dictionary = _get_eight_ball_definition(item_id)
+		if not _is_threshold_family_retrigger_definition(retrigger_definition):
+			continue
+		if (
+			_has_regular_support_for_definition(retrigger_definition, before_ids)
+			and not _has_regular_support_for_definition(retrigger_definition, after_ids)
+		):
+			return _get_unsupported_retrigger_warning(retrigger_definition)
+	return ""
+
+
+func _get_unsupported_retrigger_warning(definition: Dictionary) -> String:
+	var authored_warning: String = str(
+		definition.get("unsupported_retrigger_warning", "")
+	).strip_edges()
+	if authored_warning.is_empty():
+		authored_warning = str(
+			_dictionary_value(definition, "eligibility").get(
+				"retained_without_support_warning",
+				""
+			)
+		).strip_edges()
+	if not authored_warning.is_empty():
+		return authored_warning
+	var display_name: String = str(definition.get("display_name", "")).strip_edges()
+	if _is_threshold_family_retrigger_definition(definition) or display_name.is_empty():
+		return ECHO_SUPPORT_REPLACEMENT_WARNING
+	return "%s currently has no regular supporting Eight Ball to retrigger." % display_name
 
 
 func _get_pending_replacement_warnings(offered_eight_ball_item_id: String = "") -> Dictionary:
@@ -703,10 +926,16 @@ func _make_reward_snapshot(definition: Dictionary) -> Dictionary:
 		"tooltip": str(definition.get("tooltip", "")),
 		"short_effect": str(definition.get("short_effect", "")),
 		"family_id": str(definition.get("family_id", "")),
+		"offer_family_id": _get_offer_family_id(definition),
+		"offer_family": _get_offer_family_id(definition),
 		"trigger_id": str(definition.get("trigger_id", "")),
 		"modifier_phase": str(definition.get("modifier_phase", "")),
 		"value": definition.get("value", 0),
-		"effect_kind": str(definition.get("effect_kind", "modifier")),
+		"effect_kind": str(definition.get("effect_kind", EFFECT_KIND_LEGACY_MODIFIER)),
+		"requires_regular_support": _definition_requires_regular_support(definition),
+		"required_support_family_ids": _get_required_support_family_ids(definition),
+		"required_support_item_ids": _get_required_support_item_ids(definition),
+		"eligibility": _dictionary_value(definition, "eligibility").duplicate(true),
 		"retrigger_family": str(definition.get("retrigger_family", "")),
 		"retrigger_count": maxi(int(definition.get("retrigger_count", 0)), 0),
 		"rarity": str(definition.get("rarity", "common")),
@@ -773,3 +1002,9 @@ func _emit_changed() -> void:
 func _dictionary_value(container: Dictionary, key: String) -> Dictionary:
 	var value: Variant = container.get(key, {})
 	return (value as Dictionary) if value is Dictionary else {}
+
+
+func _string_array_value(container: Dictionary, key: String) -> Array[String]:
+	var values: Array[String] = []
+	_append_string_values(values, container.get(key, []))
+	return values

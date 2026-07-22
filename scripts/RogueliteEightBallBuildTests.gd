@@ -24,8 +24,11 @@ const REWARD_SYSTEM_SCRIPT := preload("res://scripts/RogueliteRewardSystem.gd")
 const SCORING_SYSTEM_SCRIPT := preload("res://scripts/RogueliteScoringSystem.gd")
 const RESOLVER_SCRIPT := preload("res://scripts/RogueliteScoreResolver.gd")
 const ANALYZER_SCRIPT := preload("res://scripts/ShotLedgerAnalyzer.gd")
+const BUILD_EFFECT_TESTS_SCRIPT := preload(
+	"res://scripts/RogueliteBuildEffectEvaluatorTests.gd"
+)
 
-const EXPECTED_CATALOG_SIZE := 22
+const EXPECTED_CATALOG_SIZE := 32
 const EXPECTED_TRAY_CAPACITY := 5
 const FLOAT_EPSILON := 0.0001
 
@@ -51,6 +54,16 @@ const MULTI_XMULT := "multi_pot_xmult_broadside_dividend"
 const SAME_HAUL := "same_pocket_haul_shared_grave"
 const SAME_MULT := "same_pocket_mult_feeding_frenzy"
 const SAME_XMULT := "same_pocket_xmult_the_maw_below"
+const DOUBLE_TAP_HAUL := "double_tap_haul_second_bite"
+const DOUBLE_TAP_MULT := "double_tap_mult_echoing_toll"
+const DOUBLE_TAP_XMULT := "double_tap_xmult_revenant_rhythm"
+const BALL_TAP_HAUL := "ball_tap_haul_knock_on_plunder"
+const BALL_TAP_MULT := "ball_tap_mult_crowded_wake"
+const BALL_TAP_XMULT := "ball_tap_xmult_carom_current"
+const RATTLE_OF_THE_DEEP := "tap_stateful_xmult_rattle_of_the_deep"
+const ONE_TWO_PUNCH := "tap_hybrid_xmult_one_two_punch"
+const AFTERSHOCK := "tap_ordinal_xmult_aftershock"
+const ECHO_CHAMBER := "tap_legendary_retrigger_echo_chamber"
 
 const TRIGGER_SINGLE := "single_bank_milestone"
 const TRIGGER_DOUBLE := "double_bank_milestone"
@@ -59,6 +72,8 @@ const TRIGGER_COMBINATION := "combination_pot"
 const TRIGGER_DIRECT := "direct_pot"
 const TRIGGER_MULTI := "multi_pot_shot"
 const TRIGGER_SAME_POCKET := "same_pocket_streak"
+const TRIGGER_DOUBLE_TAP := "cue_recontact_milestone"
+const TRIGGER_BALL_TAP := "object_ball_tap_milestone"
 
 const EXPECTED_DEFINITIONS := {
 	SINGLE_HAUL: {
@@ -195,6 +210,73 @@ const EXPECTED_DEFINITIONS := {
 		"value": 1.75,
 		"rarity": "rare",
 	},
+	DOUBLE_TAP_HAUL: {
+		"trigger_id": TRIGGER_DOUBLE_TAP,
+		"effect_kind": "numeric_modifier",
+		"modifier_phase": "add_haul",
+		"value": 10,
+		"rarity": "common",
+	},
+	DOUBLE_TAP_MULT: {
+		"trigger_id": TRIGGER_DOUBLE_TAP,
+		"effect_kind": "numeric_modifier",
+		"modifier_phase": "add_mult",
+		"value": 1,
+		"rarity": "uncommon",
+	},
+	DOUBLE_TAP_XMULT: {
+		"trigger_id": TRIGGER_DOUBLE_TAP,
+		"effect_kind": "numeric_modifier",
+		"modifier_phase": "xmult",
+		"value": 1.25,
+		"rarity": "rare",
+	},
+	BALL_TAP_HAUL: {
+		"trigger_id": TRIGGER_BALL_TAP,
+		"effect_kind": "numeric_modifier",
+		"modifier_phase": "add_haul",
+		"value": 8,
+		"rarity": "common",
+	},
+	BALL_TAP_MULT: {
+		"trigger_id": TRIGGER_BALL_TAP,
+		"effect_kind": "numeric_modifier",
+		"modifier_phase": "add_mult",
+		"value": 1,
+		"rarity": "uncommon",
+	},
+	BALL_TAP_XMULT: {
+		"trigger_id": TRIGGER_BALL_TAP,
+		"effect_kind": "numeric_modifier",
+		"modifier_phase": "xmult",
+		"value": 1.20,
+		"rarity": "rare",
+	},
+	RATTLE_OF_THE_DEEP: {
+		"effect_kind": "persistent_scaler",
+		"modifier_phase": "xmult",
+		"starting_value": 1.0,
+		"growth_per_trigger": 0.2,
+		"rarity": "rare",
+	},
+	ONE_TWO_PUNCH: {
+		"effect_kind": "cross_family_conditional",
+		"modifier_phase": "xmult",
+		"value": 2.0,
+		"rarity": "rare",
+	},
+	AFTERSHOCK: {
+		"effect_kind": "shot_ordinal_multiplier",
+		"modifier_phase": "xmult",
+		"value": 1.25,
+		"rarity": "rare",
+	},
+	ECHO_CHAMBER: {
+		"effect_kind": "threshold_family_retrigger",
+		"threshold": 3,
+		"rarity": "legendary",
+		"offer_weight": 8,
+	},
 }
 
 static var _cases: Array[Dictionary] = []
@@ -230,6 +312,8 @@ static func run_all() -> Dictionary:
 	_test_dead_reckoning_contract()
 	_test_phase5b_overlap_contract()
 	_test_phase5b_reward_contract()
+	_test_phase5c_effect_contract()
+	_test_phase5c_reward_and_state_contract()
 
 	var passed: int = 0
 	var failures: Array[Dictionary] = []
@@ -278,7 +362,7 @@ static func _test_catalog_contract() -> void:
 		ids.append(item_id)
 		actual_by_id[item_id] = definition
 	_record_case(
-		"Catalog has exactly 22 unique definitions",
+		"Catalog has exactly 32 unique definitions",
 		definitions.size() == EXPECTED_CATALOG_SIZE
 			and ids.size() == EXPECTED_CATALOG_SIZE
 			and duplicates.is_empty(),
@@ -334,13 +418,170 @@ static func _test_catalog_contract() -> void:
 		"direct_pot": 4,
 		"multi_pot": 3,
 		"same_pocket": 3,
+		"double_tap": 3,
+		"ball_tap": 3,
+		"tap_oddity": 4,
 	}
 	_record_case(
-		"Catalog family composition is 9 Bank, 3 Combination, 4 Direct, 3 Multi, 3 Same-Pocket",
+		"Catalog family composition includes the six regular and four unusual Tap items",
 		_dictionaries_equal(family_counts, expected_family_counts)
-			and legendary_count == 1,
-		{"families": expected_family_counts, "legendary_count": 1},
+			and legendary_count == 2,
+		{"families": expected_family_counts, "legendary_count": 2},
 		{"families": family_counts, "legendary_count": legendary_count}
+	)
+
+
+static func _test_phase5c_effect_contract() -> void:
+	var report: Dictionary = BUILD_EFFECT_TESTS_SCRIPT.run_self_tests()
+	var result_cases: Variant = report.get("cases", [])
+	if not result_cases is Array:
+		_record_case(
+			"Phase 5C pure effect suite returns cases",
+			false,
+			"non-empty cases",
+			report
+		)
+		return
+	for case_value in result_cases:
+		if not case_value is Dictionary:
+			continue
+		var case_result: Dictionary = case_value as Dictionary
+		_record_case(
+			"Phase 5C / %s" % str(case_result.get("name", "unnamed")),
+			bool(case_result.get("passed", false)),
+			case_result.get("expected"),
+			case_result.get("actual")
+		)
+
+
+static func _test_phase5c_reward_and_state_contract() -> void:
+	var unsupported_build: RogueliteBuildSystem = BUILD_SYSTEM_SCRIPT.new()
+	unsupported_build.begin_fresh_run(51)
+	var unsupported_rewards: RogueliteRewardSystem = REWARD_SYSTEM_SCRIPT.new()
+	unsupported_rewards.setup(5101)
+	unsupported_rewards.set_build_system(unsupported_build)
+	unsupported_rewards.generate_reward_offers(1)
+	var unsupported_diagnostics: Dictionary = _dictionary_value(
+		unsupported_rewards.get_offer_diagnostics(),
+		"details"
+	)
+	_record_case(
+		"Echo Chamber is excluded without regular Tap support",
+		not bool(unsupported_diagnostics.get("echo_chamber_eligible", true)),
+		false,
+		unsupported_diagnostics.get("echo_chamber_eligible")
+	)
+
+	var supported_build: RogueliteBuildSystem = BUILD_SYSTEM_SCRIPT.new()
+	supported_build.begin_fresh_run(52)
+	supported_build.acquire_eight_ball(DOUBLE_TAP_HAUL)
+	supported_build.acquire_eight_ball(DIRECT_HAUL)
+	var supported_rewards: RogueliteRewardSystem = REWARD_SYSTEM_SCRIPT.new()
+	supported_rewards.setup(5201)
+	supported_rewards.set_build_system(supported_build)
+	supported_rewards.generate_reward_offers(1)
+	var supported_diagnostics: Dictionary = _dictionary_value(
+		supported_rewards.get_offer_diagnostics(),
+		"details"
+	)
+	_record_case(
+		"Echo Chamber becomes eligible with regular Tap support",
+		bool(supported_diagnostics.get("echo_chamber_eligible", false)),
+		true,
+		supported_diagnostics.get("echo_chamber_eligible")
+	)
+
+	var legendary_constraint_valid: bool = true
+	var diversity_constraint_valid: bool = true
+	var legendary_failure: Dictionary = {}
+	var diversity_failure: Dictionary = {}
+	for seed_value in range(1, 257):
+		supported_rewards.set_run_reward_seed(seed_value)
+		var snapshot: Dictionary = supported_rewards.generate_reward_offers(seed_value)
+		var offers: Array[Dictionary] = _dictionary_array_value(snapshot, "offers")
+		var legendary_ids: Array[String] = []
+		var offer_families: Dictionary = {}
+		for offer in offers:
+			var offer_id: String = str(offer.get("eight_ball_item_id", offer.get("id", "")))
+			var definition: Dictionary = CATALOG_SCRIPT.get_definition(offer_id)
+			if str(definition.get("rarity", "")) == "legendary":
+				legendary_ids.append(offer_id)
+			offer_families[str(definition.get(
+				"offer_family",
+				definition.get("family_id", "")
+			))] = true
+		if legendary_ids.size() > 1 or (
+			legendary_ids.has(DEAD_RECKONING)
+			and legendary_ids.has(ECHO_CHAMBER)
+		):
+			legendary_constraint_valid = false
+			legendary_failure = {"seed": seed_value, "legendary_ids": legendary_ids}
+			break
+		if offers.size() >= 3 and offer_families.size() < 2:
+			diversity_constraint_valid = false
+			diversity_failure = {"seed": seed_value, "offers": offers}
+			break
+	_record_case(
+		"Reward screens contain at most one Legendary and never pair both retriggers",
+		legendary_constraint_valid,
+		true,
+		legendary_failure if not legendary_constraint_valid else true
+	)
+	_record_case(
+		"Reward screens preserve offer-family diversity with Tap families",
+		diversity_constraint_valid,
+		true,
+		diversity_failure if not diversity_constraint_valid else true
+	)
+
+	var warning_build: RogueliteBuildSystem = BUILD_SYSTEM_SCRIPT.new()
+	warning_build.begin_fresh_run(53)
+	warning_build.acquire_eight_ball(DOUBLE_TAP_HAUL)
+	warning_build.acquire_eight_ball(ECHO_CHAMBER)
+	var warning_rewards: RogueliteRewardSystem = REWARD_SYSTEM_SCRIPT.new()
+	warning_rewards.setup(5301)
+	warning_rewards.set_build_system(warning_build)
+	var support_warning: String = warning_rewards.get_eight_ball_replacement_warning(
+		0,
+		SINGLE_HAUL
+	)
+	_record_case(
+		"Replacing final Echo support exposes the authored warning",
+		support_warning == (
+			"Echo Chamber currently has no regular Tap Eight Ball to retrigger."
+		),
+		"Echo Chamber currently has no regular Tap Eight Ball to retrigger.",
+		support_warning
+	)
+
+	var state_build: RogueliteBuildSystem = BUILD_SYSTEM_SCRIPT.new()
+	state_build.begin_fresh_run(54)
+	var first_rattle: Dictionary = state_build.acquire_eight_ball(RATTLE_OF_THE_DEEP)
+	var first_instance_id: int = int(first_rattle.get("owned_item_instance_id", 0))
+	var grown_state: Dictionary = state_build.get_owned_item_state(first_instance_id)
+	grown_state["current_xmult"] = 3.0
+	grown_state["lifetime_growth_triggers"] = 10
+	state_build.apply_authoritative_state_mutations([{
+		"owned_item_instance_id": first_instance_id,
+		"eight_ball_item_id": RATTLE_OF_THE_DEEP,
+		"state_before": state_build.get_owned_item_state(first_instance_id),
+		"state_after": grown_state,
+	}], "phase5c:rattle_grown")
+	state_build.replace_eight_ball(0, SINGLE_HAUL)
+	var reacquired: Dictionary = state_build.replace_eight_ball(0, RATTLE_OF_THE_DEEP)
+	var reacquired_instance_id: int = int(reacquired.get("owned_item_instance_id", 0))
+	var reacquired_state: Dictionary = state_build.get_owned_item_state(reacquired_instance_id)
+	_record_case(
+		"Reacquired Rattle receives a fresh instance and x1.0 state",
+		reacquired_instance_id > first_instance_id
+			and is_equal_approx(float(reacquired_state.get("current_xmult", 0.0)), 1.0)
+			and int(reacquired_state.get("lifetime_growth_triggers", -1)) == 0,
+		{"fresh_instance": true, "current_xmult": 1.0, "growth": 0},
+		{
+			"first_instance_id": first_instance_id,
+			"reacquired_instance_id": reacquired_instance_id,
+			"state": reacquired_state,
+		}
 	)
 
 
@@ -1838,7 +2079,10 @@ static func _modifier_source_order(score_result: Dictionary) -> Array[String]:
 		var step: Dictionary = step_value
 		if str(step.get("source_type", "")) != "modifier":
 			continue
-		order.append(str(step.get("source_id", "")))
+		var source_id: String = str(step.get("source_id", ""))
+		# Owned-item activation IDs append instance/slot/occurrence identity.
+		# Ordering assertions compare authored item order, not instance identity.
+		order.append(source_id.get_slice("|", 0))
 	return order
 
 

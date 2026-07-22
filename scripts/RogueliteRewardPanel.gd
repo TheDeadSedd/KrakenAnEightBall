@@ -28,6 +28,11 @@ const LEGENDARY_COLOR := Color(1.0, 0.76, 0.28, 1.0)
 const LEGENDARY_PURPLE := Color(0.58, 0.27, 0.74, 1.0)
 const WARNING_COLOR := Color(1.0, 0.61, 0.31, 1.0)
 
+const EFFECT_KIND_PERSISTENT_SCALER := "persistent_scaler"
+const EFFECT_KIND_CROSS_FAMILY_CONDITIONAL := "cross_family_conditional"
+const EFFECT_KIND_SHOT_ORDINAL_MULTIPLIER := "shot_ordinal_multiplier"
+const EFFECT_KIND_THRESHOLD_FAMILY_RETRIGGER := "threshold_family_retrigger"
+
 var latest_snapshot: Dictionary = {}
 var offer_snapshots: Array[Dictionary] = []
 var tray_slot_snapshots: Array[Dictionary] = []
@@ -419,6 +424,12 @@ func _make_offer_card(offer: Dictionary) -> Button:
 	choose_label.text = "Choose"
 	choose_label.custom_minimum_size = Vector2(0.0, 22.0)
 	stack.add_child(choose_label)
+	var support_warning: String = _get_support_warning(offer)
+	if not support_warning.is_empty():
+		var warning_label: Label = _make_label(11, WARNING_COLOR, HORIZONTAL_ALIGNMENT_CENTER)
+		warning_label.text = "SUPPORT WARNING"
+		warning_label.custom_minimum_size = Vector2(0.0, 18.0)
+		stack.add_child(warning_label)
 	return card
 
 
@@ -598,13 +609,28 @@ func _update_tooltip_content() -> void:
 	tooltip_body_label.text = str(hovered_item.get("tooltip", hovered_item.get("description", _get_short_effect(hovered_item))))
 	if hovered_slot_index >= 0:
 		var replacement_warning: String = _get_replacement_warning(hovered_item, hovered_slot_index)
-		tooltip_status_label.text = "Current tray slot %d\nChoose to replace this Eight Ball." % (hovered_slot_index + 1)
+		var status_lines: Array[String] = [
+			"Current tray slot %d" % (hovered_slot_index + 1),
+			"Choose to replace this Eight Ball.",
+		]
+		status_lines.append_array(_get_state_status_lines(hovered_item))
 		if not replacement_warning.is_empty():
-			tooltip_status_label.text += "\nWARNING: %s" % replacement_warning
+			status_lines.append("WARNING: %s" % replacement_warning)
+		tooltip_status_label.text = "\n".join(status_lines)
 	elif _requires_replacement():
-		tooltip_status_label.text = "Tray full. Choosing this opens replacement."
+		var status_lines: Array[String] = ["Tray full. Choosing this opens replacement."]
+		status_lines.append_array(_get_state_status_lines(hovered_item))
+		var support_warning: String = _get_support_warning(hovered_item)
+		if not support_warning.is_empty():
+			status_lines.append("WARNING: %s" % support_warning)
+		tooltip_status_label.text = "\n".join(status_lines)
 	else:
-		tooltip_status_label.text = "Choose to mark this course."
+		var status_lines: Array[String] = ["Choose to mark this course."]
+		status_lines.append_array(_get_state_status_lines(hovered_item))
+		var support_warning: String = _get_support_warning(hovered_item)
+		if not support_warning.is_empty():
+			status_lines.append("WARNING: %s" % support_warning)
+		tooltip_status_label.text = "\n".join(status_lines)
 
 
 func _position_tooltip(source: Control) -> void:
@@ -708,6 +734,11 @@ func _extract_offer_snapshots(snapshot: Dictionary) -> Array[Dictionary]:
 	for offer_value in offers_value:
 		if offer_value is Dictionary:
 			var offer: Dictionary = (offer_value as Dictionary).duplicate(true)
+			var definition_value: Variant = offer.get("definition", offer.get("item", null))
+			if definition_value is Dictionary:
+				var definition: Dictionary = (definition_value as Dictionary).duplicate(true)
+				definition.merge(offer, true)
+				offer = definition
 			if not _get_offer_id(offer).is_empty() and _is_eight_ball_offer(offer):
 				offers.append(offer)
 	return offers
@@ -768,7 +799,115 @@ func _get_offer_id(offer: Dictionary) -> String:
 
 
 func _get_short_effect(offer: Dictionary) -> String:
-	return str(offer.get("short_effect", offer.get("effect", offer.get("description", ""))))
+	var authored: String = str(offer.get("dynamic_short_effect", "")).strip_edges()
+	if not authored.is_empty():
+		return authored
+	var fallback: String = str(offer.get("short_effect", offer.get("effect", offer.get("description", ""))))
+	var effect_kind: String = str(offer.get("effect_kind", ""))
+	var state: Dictionary = _dictionary_value(offer, "state")
+	var value: float = float(offer.get("value", offer.get("multiplier", 1.0)))
+	var is_owned_stateful_item: bool = (
+		not state.is_empty()
+		or int(offer.get("owned_item_instance_id", 0)) > 0
+	)
+	if effect_kind == EFFECT_KIND_PERSISTENT_SCALER and is_owned_stateful_item:
+		return "Tap Shot: x%s Mult" % _format_numeric_value(
+			_get_current_scaler_value(offer, state)
+		)
+	if not fallback.is_empty():
+		return fallback
+	match effect_kind:
+		EFFECT_KIND_PERSISTENT_SCALER:
+			return "Tap Shot: x%s Mult" % _format_numeric_value(
+				_get_current_scaler_value(offer, state)
+			)
+		EFFECT_KIND_CROSS_FAMILY_CONDITIONAL:
+			return "Double Tap + Ball Tap: x%s" % _format_numeric_value(value)
+		EFFECT_KIND_SHOT_ORDINAL_MULTIPLIER:
+			return "Each Tap after first: x%s" % _format_numeric_value(value)
+		EFFECT_KIND_THRESHOLD_FAMILY_RETRIGGER:
+			return "Every %s Tap retriggers" % _format_ordinal_word(
+				maxi(int(offer.get("threshold", 3)), 1)
+			)
+		_:
+			return fallback
+
+
+func _get_state_status_lines(item: Dictionary) -> Array[String]:
+	var lines: Array[String] = []
+	var state: Dictionary = _dictionary_value(item, "state")
+	if str(item.get("effect_kind", "")) == EFFECT_KIND_PERSISTENT_SCALER:
+		lines.append("Current value: x%s Mult" % _format_numeric_value(
+			_get_current_scaler_value(item, state)
+		))
+		var lifetime_growth: int = maxi(int(state.get(
+			"lifetime_growth_triggers",
+			state.get("lifetime_trigger_count", 0)
+		)), 0)
+		if lifetime_growth > 0:
+			lines.append("Lifetime Tap growth: %d" % lifetime_growth)
+	var last_activation_count: int = maxi(int(item.get(
+		"last_shot_activation_count",
+		item.get("last_shot_trigger_count", 0)
+	)), 0)
+	if last_activation_count > 0:
+		lines.append("Activated %d time%s last shot." % [
+			last_activation_count,
+			"" if last_activation_count == 1 else "s",
+		])
+	return lines
+
+
+func _get_current_scaler_value(item: Dictionary, state: Dictionary) -> float:
+	return maxf(float(state.get(
+		"current_xmult",
+		state.get(
+			"current_value",
+			item.get("current_xmult", item.get("starting_value", 1.0))
+		)
+	)), 0.0)
+
+
+func _get_support_warning(item: Dictionary) -> String:
+	for key in ["support_warning", "support_warning_text", "warning_text"]:
+		var warning: String = str(item.get(key, "")).strip_edges()
+		if not warning.is_empty():
+			return warning
+	var warnings_value: Variant = item.get("warnings", [])
+	if warnings_value is Array:
+		for warning_value in warnings_value as Array:
+			if warning_value is Dictionary:
+				var warning: Dictionary = warning_value
+				var warning_kind: String = str(warning.get("kind", warning.get("warning_id", "")))
+				if warning_kind in ["support", "unsupported_retrigger", "missing_support"]:
+					return str(warning.get("message", warning.get("text", ""))).strip_edges()
+			elif warning_value is String and not (warning_value as String).strip_edges().is_empty():
+				return (warning_value as String).strip_edges()
+	return ""
+
+
+func _format_numeric_value(value: Variant) -> String:
+	var number: float = float(value)
+	if is_equal_approx(number, round(number)):
+		return str(int(round(number)))
+	return ("%.2f" % number).trim_suffix("0").trim_suffix("0").trim_suffix(".")
+
+
+func _format_ordinal_word(value: int) -> String:
+	match value:
+		1:
+			return "first"
+		2:
+			return "second"
+		3:
+			return "third"
+		_:
+			return "%dth" % value
+
+
+func _dictionary_value(container: Dictionary, key: String) -> Dictionary:
+	var value: Variant = container.get(key, {})
+	return value as Dictionary if value is Dictionary else {}
 
 
 func _format_family_name(family_id: String) -> String:
@@ -787,6 +926,20 @@ func _format_family_name(family_id: String) -> String:
 			return "Multi-Pot"
 		"same_pocket", "same_pocket_streak":
 			return "Same Pocket"
+		"double_tap", "cue_recontact_milestone":
+			return "Double Tap"
+		"ball_tap", "object_ball_tap_milestone":
+			return "Ball Tap"
+		"tap_growth":
+			return "Tap Growth"
+		"tap_hybrid":
+			return "Tap Hybrid"
+		"tap_escalation":
+			return "Tap Escalation"
+		"tap_retrigger":
+			return "Tap Retrigger"
+		"tap_oddity":
+			return "Tap Oddity"
 		_:
 			return family_id.replace("_", " ").capitalize() if not family_id.is_empty() else "Scoring Engine"
 

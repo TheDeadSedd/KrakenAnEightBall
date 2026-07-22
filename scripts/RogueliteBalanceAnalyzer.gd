@@ -31,10 +31,26 @@ const FAMILY_DIRECT_POT := "direct_pot"
 const FAMILY_MULTI_POT := "multi_pot"
 const FAMILY_SAME_POCKET := "same_pocket"
 const FAMILY_CUE_RECONTACT := "cue_recontact"
+const FAMILY_DOUBLE_TAP := "double_tap"
 const FAMILY_BALL_TAP := "ball_tap"
+const FAMILY_TAP_ODDITY := "tap_oddity"
 const FAMILY_UNKNOWN := "unknown"
 
 const DEAD_RECKONING_ITEM_ID := "direct_pot_legendary_dead_reckoning"
+const RATTLE_ITEM_ID := "tap_stateful_xmult_rattle_of_the_deep"
+const ONE_TWO_PUNCH_ITEM_ID := "tap_hybrid_xmult_one_two_punch"
+const AFTERSHOCK_ITEM_ID := "tap_ordinal_xmult_aftershock"
+const ECHO_CHAMBER_ITEM_ID := "tap_legendary_retrigger_echo_chamber"
+const REGULAR_DOUBLE_TAP_ITEM_IDS: Array[String] = [
+	"double_tap_haul_second_bite",
+	"double_tap_mult_echoing_toll",
+	"double_tap_xmult_revenant_rhythm",
+]
+const REGULAR_BALL_TAP_ITEM_IDS: Array[String] = [
+	"ball_tap_haul_knock_on_plunder",
+	"ball_tap_mult_crowded_wake",
+	"ball_tap_xmult_carom_current",
+]
 const DEAD_RECKONING_SUPPORT_ITEM_IDS: Array[String] = [
 	"direct_pot_haul_clean_plunder",
 	"direct_pot_mult_true_bearing",
@@ -65,6 +81,7 @@ const TAP_EXPLOIT_MAX_CUE_STRIKES_PER_BALL := 6
 const CONTACT_FARM_MIN_REPEATED_CONTACTS_PER_SHOT := 4
 const CONTACT_FARM_REPEATED_TO_UNIQUE_RATIO := 2.0
 const MAX_WATCH_EXAMPLE_SHOTS := 12
+const MAX_PHASE_5C_STATE_HISTORY := 120
 
 const IDENTITY_DOMINANT_SHARE := 0.45
 const IDENTITY_HYBRID_SHARE := 0.25
@@ -136,6 +153,12 @@ static func analyze(completed_telemetry_snapshot: Dictionary) -> Dictionary:
 	var dead_reckoning: Dictionary = _aggregate_dead_reckoning(shots, rounds, items)
 	var triggers: Dictionary = _aggregate_triggers(shots)
 	var tap_metrics: Dictionary = _aggregate_taps(shots, triggers)
+	var phase_5c_tap_items: Dictionary = _aggregate_phase_5c_tap_items(
+		completed_telemetry_snapshot,
+		shots,
+		rounds,
+		items
+	)
 	var run_summary: Dictionary = _aggregate_run_summary(
 		completed_telemetry_snapshot,
 		shots,
@@ -144,7 +167,7 @@ static func analyze(completed_telemetry_snapshot: Dictionary) -> Dictionary:
 		tap_metrics
 	)
 	var attribution: Dictionary = _aggregate_attribution(shots, items, run_summary, diagnostics)
-	var build_identity: Dictionary = _classify_build(items, attribution)
+	var build_identity: Dictionary = _classify_build(items, attribution, phase_5c_tap_items)
 	var shot_distribution: Dictionary = _build_shot_distribution(shots)
 	var watch_flags: Array[Dictionary] = _build_watch_flags(
 		run_summary,
@@ -164,6 +187,7 @@ static func analyze(completed_telemetry_snapshot: Dictionary) -> Dictionary:
 	report["dead_reckoning_metrics"] = dead_reckoning
 	report["trigger_metrics"] = triggers
 	report["tap_metrics"] = tap_metrics
+	report["phase_5c_tap_items"] = phase_5c_tap_items
 	report["offer_metrics"] = offers
 	report["attribution"] = attribution
 	report["build_identity"] = build_identity
@@ -182,6 +206,14 @@ static func analyze(completed_telemetry_snapshot: Dictionary) -> Dictionary:
 		0
 	))
 	diagnostics["ball_tap_milestones"] = int(tap_metrics.get("ball_tap_milestones", 0))
+	diagnostics["phase_5c_state_history_records"] = _dictionary_array_value(
+		phase_5c_tap_items,
+		"state_history"
+	).size()
+	diagnostics["echo_chamber_thresholds"] = int(_dictionary_value(
+		phase_5c_tap_items,
+		"echo_chamber"
+	).get("threshold_milestones", 0))
 	diagnostics["watch_flag_count"] = watch_flags.size()
 	diagnostics["attribution_method"] = "deterministic_leave_one_item_out"
 	diagnostics["interaction_method"] = (
@@ -210,6 +242,7 @@ static func _make_empty_report(snapshot: Dictionary) -> Dictionary:
 		"dead_reckoning_metrics": _empty_dead_reckoning_metrics(),
 		"trigger_metrics": _empty_trigger_metrics(),
 		"tap_metrics": _empty_tap_metrics(),
+		"phase_5c_tap_items": _empty_phase_5c_metrics(),
 		"offer_metrics": _empty_offer_metrics(),
 		"attribution": _empty_attribution(),
 		"build_identity": {
@@ -369,6 +402,71 @@ static func _empty_tap_metrics() -> Dictionary:
 			"contact_farm_min_repeated_contacts_per_shot": CONTACT_FARM_MIN_REPEATED_CONTACTS_PER_SHOT,
 			"contact_farm_repeated_to_unique_ratio": CONTACT_FARM_REPEATED_TO_UNIQUE_RATIO,
 		},
+	}
+
+
+static func _empty_phase_5c_metrics() -> Dictionary:
+	return {
+		"rattle": {
+			"eight_ball_item_id": RATTLE_ITEM_ID,
+			"display_name": "Rattle of the Deep",
+			"owned": false,
+			"shots_owned": 0,
+			"acquired_value": 0.0,
+			"current_xmult": 0.0,
+			"final_xmult": 0.0,
+			"tap_milestones_grown_from": 0,
+			"lifetime_growth": 0,
+			"shots_activated": 0,
+			"non_tap_shots_owned": 0,
+			"marginal_score_uplift": 0,
+			"owned_item_instance_ids": [],
+		},
+		"one_two_punch": {
+			"eight_ball_item_id": ONE_TWO_PUNCH_ITEM_ID,
+			"display_name": "One-Two Punch",
+			"owned": false,
+			"shots_owned": 0,
+			"qualifying_scoring_balls": 0,
+			"activations": 0,
+			"shots_with_only_one_family": 0,
+			"marginal_score_uplift": 0,
+		},
+		"aftershock": {
+			"eight_ball_item_id": AFTERSHOCK_ITEM_ID,
+			"display_name": "Aftershock",
+			"owned": false,
+			"shots_owned": 0,
+			"tap_milestones_while_owned": 0,
+			"ignored_first_milestones": 0,
+			"xmult_activations": 0,
+			"highest_tap_ordinal": 0,
+			"marginal_score_uplift": 0,
+		},
+		"echo_chamber": {
+			"eight_ball_item_id": ECHO_CHAMBER_ITEM_ID,
+			"display_name": "Echo Chamber",
+			"owned": false,
+			"shots_owned": 0,
+			"threshold_milestones": 0,
+			"supported_thresholds": 0,
+			"unsupported_thresholds": 0,
+			"regular_activations_retriggered": 0,
+			"retriggers_by_family": {"double_tap": 0, "ball_tap": 0},
+			"retriggered_add_haul": 0.0,
+			"retriggered_add_mult": 0.0,
+			"retriggered_xmult_activations": 0,
+			"retriggered_xmult_product": 1.0,
+			"rounds_owned_with_support": 0,
+			"rounds_owned_without_support": 0,
+			"round_numbers_owned_with_support": [],
+			"round_numbers_owned_without_support": [],
+			"support_item_ids_seen": [],
+			"marginal_score_uplift": 0,
+		},
+		"state_history": [],
+		"state_history_dropped": 0,
+		"bounded_history_limit": MAX_PHASE_5C_STATE_HISTORY,
 	}
 
 
@@ -984,6 +1082,7 @@ static func _ensure_item_metric(
 			"eight_ball_item_id": item_id,
 			"display_name": str(metadata.get("display_name", item_id)),
 			"family_id": _family_id(metadata),
+			"offer_family": str(metadata.get("offer_family", "")),
 			"modifier_phase": str(metadata.get(
 				"modifier_phase",
 				metadata.get("phase", "")
@@ -991,6 +1090,7 @@ static func _ensure_item_metric(
 			"rarity": str(metadata.get("rarity", "")),
 			"offer_weight": int(metadata.get("offer_weight", 0)),
 			"effect_kind": str(metadata.get("effect_kind", "")),
+			"owned_item_instance_ids": [],
 			"retrigger_family": str(metadata.get(
 				"retrigger_family",
 				metadata.get("retrigger_family_id", "")
@@ -1043,6 +1143,13 @@ static func _ensure_item_metric(
 		metric["modifier_phase"] = str(metadata.get("modifier_phase", metadata.get("phase", "")))
 	if str(metric["effect_kind"]).is_empty():
 		metric["effect_kind"] = str(metadata.get("effect_kind", ""))
+	if str(metric["offer_family"]).is_empty():
+		metric["offer_family"] = str(metadata.get("offer_family", ""))
+	var instance_id: int = int(metadata.get("owned_item_instance_id", -1))
+	if instance_id >= 0:
+		var instance_ids: Array = metric["owned_item_instance_ids"]
+		if not instance_ids.has(instance_id):
+			instance_ids.append(instance_id)
 	if str(metric["retrigger_family"]).is_empty():
 		metric["retrigger_family"] = str(metadata.get(
 			"retrigger_family",
@@ -1584,6 +1691,231 @@ static func _aggregate_taps(shots: Array[Dictionary], triggers: Dictionary) -> D
 	return result
 
 
+static func _aggregate_phase_5c_tap_items(
+	snapshot: Dictionary,
+	shots: Array[Dictionary],
+	rounds: Array[Dictionary],
+	items: Array[Dictionary]
+) -> Dictionary:
+	var result: Dictionary = _empty_phase_5c_metrics()
+	var rattle: Dictionary = _dictionary_value(result, "rattle")
+	var punch: Dictionary = _dictionary_value(result, "one_two_punch")
+	var aftershock: Dictionary = _dictionary_value(result, "aftershock")
+	var echo: Dictionary = _dictionary_value(result, "echo_chamber")
+	var state_history: Array[Dictionary] = []
+	var support_rounds: Dictionary = {}
+	var support_ids_seen: Dictionary = {}
+
+	for shot in shots:
+		var phase: Dictionary = _dictionary_value(shot, "phase_5c_tap_items")
+		if phase.is_empty():
+			continue
+		var shot_key: String = _shot_key(shot)
+		var round_number: int = maxi(int(shot.get("round_number", 1)), 1)
+		var shot_rattle: Dictionary = _dictionary_value(phase, "rattle")
+		if bool(shot_rattle.get("owned", false)):
+			rattle["owned"] = true
+			rattle["shots_owned"] = int(rattle["shots_owned"]) + 1
+			rattle["tap_milestones_grown_from"] = int(
+				rattle["tap_milestones_grown_from"]
+			) + int(shot_rattle.get("tap_milestones_grown_from", 0))
+			if bool(shot_rattle.get("activated_this_shot", false)):
+				rattle["shots_activated"] = int(rattle["shots_activated"]) + 1
+			if bool(shot_rattle.get("non_tap_shot_while_owned", false)):
+				rattle["non_tap_shots_owned"] = int(rattle["non_tap_shots_owned"]) + 1
+			var before: float = float(shot_rattle.get("current_xmult_before", 1.0))
+			var after: float = float(shot_rattle.get("current_xmult_after", before))
+			if float(rattle["acquired_value"]) <= 0.0:
+				rattle["acquired_value"] = before
+			rattle["current_xmult"] = after
+			rattle["final_xmult"] = after
+			rattle["lifetime_growth"] = maxi(
+				int(rattle["lifetime_growth"]),
+				int(shot_rattle.get("lifetime_growth_after", 0))
+			)
+			rattle["marginal_score_uplift"] = int(
+				rattle["marginal_score_uplift"]
+			) + int(shot_rattle.get("marginal_score_uplift", 0))
+			var instance_id: int = int(shot_rattle.get("owned_item_instance_id", -1))
+			var instance_ids: Array = rattle["owned_item_instance_ids"]
+			if instance_id >= 0 and not instance_ids.has(instance_id):
+				instance_ids.append(instance_id)
+			if state_history.size() >= MAX_PHASE_5C_STATE_HISTORY:
+				state_history.pop_front()
+				result["state_history_dropped"] = int(result["state_history_dropped"]) + 1
+			state_history.append({
+				"shot_key": shot_key,
+				"round_number": round_number,
+				"owned_item_instance_id": instance_id,
+				"current_xmult_before": before,
+				"current_xmult_after": after,
+				"tap_milestones": int(shot_rattle.get("tap_milestones_grown_from", 0)),
+				"marginal_score_uplift": int(shot_rattle.get("marginal_score_uplift", 0)),
+			})
+
+		var shot_punch: Dictionary = _dictionary_value(phase, "one_two_punch")
+		if bool(shot_punch.get("owned", false)):
+			punch["owned"] = true
+			punch["shots_owned"] = int(punch["shots_owned"]) + 1
+			punch["qualifying_scoring_balls"] = int(
+				punch["qualifying_scoring_balls"]
+			) + int(shot_punch.get("qualifying_scoring_balls", 0))
+			punch["activations"] = int(punch["activations"]) + int(
+				shot_punch.get("activations", 0)
+			)
+			if bool(shot_punch.get("only_one_tap_family_present", false)):
+				punch["shots_with_only_one_family"] = int(
+					punch["shots_with_only_one_family"]
+				) + 1
+			punch["marginal_score_uplift"] = int(
+				punch["marginal_score_uplift"]
+			) + int(shot_punch.get("marginal_score_uplift", 0))
+
+		var shot_aftershock: Dictionary = _dictionary_value(phase, "aftershock")
+		if bool(shot_aftershock.get("owned", false)):
+			aftershock["owned"] = true
+			aftershock["shots_owned"] = int(aftershock["shots_owned"]) + 1
+			for key in [
+				"tap_milestones_while_owned",
+				"ignored_first_milestones",
+				"xmult_activations",
+				"marginal_score_uplift",
+			]:
+				aftershock[key] = int(aftershock[key]) + int(shot_aftershock.get(key, 0))
+			aftershock["highest_tap_ordinal"] = maxi(
+				int(aftershock["highest_tap_ordinal"]),
+				int(shot_aftershock.get("highest_tap_ordinal", 0))
+			)
+
+		var shot_echo: Dictionary = _dictionary_value(phase, "echo_chamber")
+		if bool(shot_echo.get("owned", false)):
+			echo["owned"] = true
+			echo["shots_owned"] = int(echo["shots_owned"]) + 1
+			for key in [
+				"threshold_milestones",
+				"supported_thresholds",
+				"unsupported_thresholds",
+				"regular_activations_retriggered",
+				"retriggered_xmult_activations",
+				"marginal_score_uplift",
+			]:
+				echo[key] = int(echo[key]) + int(shot_echo.get(key, 0))
+			for key in ["retriggered_add_haul", "retriggered_add_mult"]:
+				echo[key] = float(echo[key]) + float(shot_echo.get(key, 0.0))
+			echo["retriggered_xmult_product"] = float(
+				echo["retriggered_xmult_product"]
+			) * float(shot_echo.get("retriggered_xmult_product", 1.0))
+			var family_counts: Dictionary = _dictionary_value(
+				echo,
+				"retriggers_by_family"
+			).duplicate(true)
+			var shot_family_counts: Dictionary = _dictionary_value(
+				shot_echo,
+				"retriggers_by_family"
+			)
+			for family_value in shot_family_counts.keys():
+				var family_id: String = str(family_value)
+				family_counts[family_id] = int(family_counts.get(family_id, 0)) + int(
+					shot_family_counts[family_value]
+				)
+			echo["retriggers_by_family"] = family_counts
+			var has_support: bool = bool(shot_echo.get("has_regular_tap_support", false))
+			if not support_rounds.has(round_number):
+				support_rounds[round_number] = has_support
+			else:
+				support_rounds[round_number] = bool(support_rounds[round_number]) or has_support
+			for support_id_value in shot_echo.get("support_item_ids", []):
+				support_ids_seen[str(support_id_value)] = true
+
+	for round_record in rounds:
+		var round_number: int = maxi(int(round_record.get("round_number", 1)), 1)
+		var build_ids: Array[String] = _normalize_build_item_ids(round_record.get(
+			"build_at_round_start",
+			[]
+		))
+		if build_ids.is_empty():
+			build_ids = _normalize_build_item_ids(round_record.get(
+				"build_at_round_end",
+				[]
+			))
+		if not build_ids.has(ECHO_CHAMBER_ITEM_ID):
+			continue
+		echo["owned"] = true
+		var has_support: bool = _has_regular_tap_support(build_ids)
+		support_rounds[round_number] = has_support
+		for item_id in REGULAR_DOUBLE_TAP_ITEM_IDS + REGULAR_BALL_TAP_ITEM_IDS:
+			if build_ids.has(item_id):
+				support_ids_seen[item_id] = true
+
+	var with_support: Array[int] = []
+	var without_support: Array[int] = []
+	for round_value in support_rounds.keys():
+		var round_number: int = int(round_value)
+		if bool(support_rounds[round_value]):
+			with_support.append(round_number)
+		else:
+			without_support.append(round_number)
+	with_support.sort()
+	without_support.sort()
+	var support_ids: Array[String] = []
+	for support_id_value in support_ids_seen.keys():
+		support_ids.append(str(support_id_value))
+	support_ids.sort()
+	echo["round_numbers_owned_with_support"] = with_support
+	echo["round_numbers_owned_without_support"] = without_support
+	echo["rounds_owned_with_support"] = with_support.size()
+	echo["rounds_owned_without_support"] = without_support.size()
+	echo["support_item_ids_seen"] = support_ids
+	result["rattle"] = rattle
+	result["one_two_punch"] = punch
+	result["aftershock"] = aftershock
+	result["echo_chamber"] = echo
+	result["state_history"] = state_history
+	var accumulator: Dictionary = _dictionary_value(
+		_dictionary_value(snapshot, "run_accumulators"),
+		"phase_5c_tap_items"
+	)
+	result["state_history_dropped"] = maxi(
+		int(result["state_history_dropped"]),
+		int(accumulator.get("state_history_dropped", 0))
+	)
+	_attach_phase_5c_item_metrics(items, result)
+	return result
+
+
+static func _attach_phase_5c_item_metrics(
+	items: Array[Dictionary],
+	phase_metrics: Dictionary
+) -> void:
+	var metric_key_by_item: Dictionary = {
+		RATTLE_ITEM_ID: "rattle",
+		ONE_TWO_PUNCH_ITEM_ID: "one_two_punch",
+		AFTERSHOCK_ITEM_ID: "aftershock",
+		ECHO_CHAMBER_ITEM_ID: "echo_chamber",
+	}
+	for item in items:
+		var item_id: String = _item_id(item)
+		if not metric_key_by_item.has(item_id):
+			continue
+		var metrics: Dictionary = _dictionary_value(
+			phase_metrics,
+			str(metric_key_by_item[item_id])
+		)
+		item["phase_5c_metrics"] = metrics.duplicate(true)
+		for key_value in metrics.keys():
+			var key: String = str(key_value)
+			if ["eight_ball_item_id", "display_name", "owned"].has(key):
+				continue
+			item[key] = metrics[key_value]
+
+
+static func _has_regular_tap_support(item_ids: Array[String]) -> bool:
+	for item_id in REGULAR_DOUBLE_TAP_ITEM_IDS + REGULAR_BALL_TAP_ITEM_IDS:
+		if item_ids.has(item_id):
+			return true
+	return false
+
+
 static func _aggregate_run_summary(
 	snapshot: Dictionary,
 	shots: Array[Dictionary],
@@ -1704,7 +2036,11 @@ static func _aggregate_attribution(
 	return attribution
 
 
-static func _classify_build(items: Array[Dictionary], attribution: Dictionary) -> Dictionary:
+static func _classify_build(
+	items: Array[Dictionary],
+	attribution: Dictionary,
+	phase_5c_tap_items: Dictionary = {}
+) -> Dictionary:
 	var family_uplift: Dictionary = {}
 	var family_activations: Dictionary = {}
 	var total_uplift: float = 0.0
@@ -1728,6 +2064,11 @@ static func _classify_build(items: Array[Dictionary], attribution: Dictionary) -
 	var direct_share: float = float(uplift_share.get(FAMILY_DIRECT_POT, 0.0))
 	var multi_share: float = float(uplift_share.get(FAMILY_MULTI_POT, 0.0))
 	var same_pocket_share: float = float(uplift_share.get(FAMILY_SAME_POCKET, 0.0))
+	var double_tap_share: float = (
+		float(uplift_share.get(FAMILY_DOUBLE_TAP, 0.0))
+		+ float(uplift_share.get(FAMILY_CUE_RECONTACT, 0.0))
+	)
+	var ball_tap_share: float = float(uplift_share.get(FAMILY_BALL_TAP, 0.0))
 	var bank_share: float = single_share + deep_share
 	var archetype_shares: Dictionary = {
 		"bank": bank_share,
@@ -1735,6 +2076,8 @@ static func _classify_build(items: Array[Dictionary], attribution: Dictionary) -
 		FAMILY_DIRECT_POT: direct_share,
 		FAMILY_MULTI_POT: multi_share,
 		FAMILY_SAME_POCKET: same_pocket_share,
+		FAMILY_DOUBLE_TAP: double_tap_share,
+		FAMILY_BALL_TAP: ball_tap_share,
 	}
 	var hybrid_archetypes: Array[String] = []
 	for archetype_value in archetype_shares.keys():
@@ -1744,8 +2087,39 @@ static func _classify_build(items: Array[Dictionary], attribution: Dictionary) -
 	hybrid_archetypes.sort()
 	var label: String = "Unformed Build"
 	var reason: String = "No analyzed build contribution or activation data."
+	var rattle: Dictionary = _dictionary_value(phase_5c_tap_items, "rattle")
+	var punch: Dictionary = _dictionary_value(phase_5c_tap_items, "one_two_punch")
+	var rattle_uplift: float = float(rattle.get("marginal_score_uplift", 0))
+	var rattle_share: float = _safe_ratio(rattle_uplift, total_uplift)
 	if total_uplift > 0.0:
-		if hybrid_archetypes.size() >= 3:
+		if bool(rattle.get("owned", false)) and rattle_share >= IDENTITY_DOMINANT_SHARE:
+			label = "Tap Growth Engine"
+			reason = "Rattle of the Deep supplied %.1f%% of represented marginal uplift." % (
+				rattle_share * 100.0
+			)
+		elif (
+			double_tap_share >= IDENTITY_HYBRID_SHARE
+			and ball_tap_share >= IDENTITY_HYBRID_SHARE
+		) or (
+			bool(punch.get("owned", false))
+			and int(punch.get("activations", 0)) > 0
+		):
+			label = "Tap Hybrid"
+			reason = (
+				"Double Tap and Ball Tap supplied %.1f%% / %.1f%% of represented marginal "
+				+ "uplift."
+			) % [double_tap_share * 100.0, ball_tap_share * 100.0]
+		elif double_tap_share >= IDENTITY_DOMINANT_SHARE:
+			label = "Double Tap Engine"
+			reason = "Double Tap supplied %.1f%% of represented marginal uplift." % (
+				double_tap_share * 100.0
+			)
+		elif ball_tap_share >= IDENTITY_DOMINANT_SHARE:
+			label = "Ball Tap Engine"
+			reason = "Ball Tap supplied %.1f%% of represented marginal uplift." % (
+				ball_tap_share * 100.0
+			)
+		elif hybrid_archetypes.size() >= 3:
 			label = "Generalist"
 			reason = (
 				"At least three trigger families each supplied 25%% or more of represented "
@@ -1802,14 +2176,42 @@ static func _classify_build(items: Array[Dictionary], attribution: Dictionary) -
 			label = "Generalist"
 			reason = "No family reached the 45%% dominant-uplift threshold."
 	elif total_activations > 0.0:
-		label = "Generalist"
-		reason = "Items activated, but represented marginal uplift was zero."
+		if bool(rattle.get("owned", false)) and int(rattle.get("shots_activated", 0)) > 0:
+			label = "Tap Growth Engine"
+			reason = "Rattle of the Deep activated, but represented marginal uplift was zero."
+		elif bool(punch.get("owned", false)) and int(punch.get("activations", 0)) > 0:
+			label = "Tap Hybrid"
+			reason = "One-Two Punch joined Double Tap and Ball Tap on a scoring ball."
+		elif (
+			(
+				float(activation_share.get(FAMILY_DOUBLE_TAP, 0.0))
+				+ float(activation_share.get(FAMILY_CUE_RECONTACT, 0.0))
+			) >= IDENTITY_HYBRID_SHARE
+			and float(activation_share.get(FAMILY_BALL_TAP, 0.0)) >= IDENTITY_HYBRID_SHARE
+		):
+			label = "Tap Hybrid"
+			reason = "Double Tap and Ball Tap both supplied at least 25% of activations."
+		elif (
+			float(activation_share.get(FAMILY_DOUBLE_TAP, 0.0))
+			+ float(activation_share.get(FAMILY_CUE_RECONTACT, 0.0))
+		) >= IDENTITY_DOMINANT_SHARE:
+			label = "Double Tap Engine"
+			reason = "Double Tap supplied the dominant activation share."
+		elif float(activation_share.get(FAMILY_BALL_TAP, 0.0)) >= IDENTITY_DOMINANT_SHARE:
+			label = "Ball Tap Engine"
+			reason = "Ball Tap supplied the dominant activation share."
+		else:
+			label = "Generalist"
+			reason = "Items activated, but represented marginal uplift was zero."
 	return {
 		"label": label,
 		"reason": reason,
 		"family_uplift": family_uplift,
 		"family_uplift_share": uplift_share,
 		"family_activation_share": activation_share,
+		"double_tap_uplift_share": double_tap_share,
+		"ball_tap_uplift_share": ball_tap_share,
+		"rattle_uplift_share": rattle_share,
 		"interaction_surplus": int(attribution.get("interaction_surplus", 0)),
 	}
 
@@ -1826,6 +2228,10 @@ static func _identity_archetype_label(archetype: String) -> String:
 			return "Multi-Pot"
 		FAMILY_SAME_POCKET:
 			return "Same-Pocket"
+		FAMILY_DOUBLE_TAP:
+			return "Double Tap"
+		FAMILY_BALL_TAP:
+			return "Ball Tap"
 		_:
 			return archetype.capitalize()
 
@@ -2106,6 +2512,49 @@ static func _format_copy_summary(report: Dictionary) -> String:
 			int(tap_metrics.get("ball_tap_score_supplied", 0)),
 			int(tap_metrics.get("total_tap_score_supplied", 0)),
 		])
+	var phase_5c: Dictionary = _dictionary_value(report, "phase_5c_tap_items")
+	var rattle: Dictionary = _dictionary_value(phase_5c, "rattle")
+	var punch: Dictionary = _dictionary_value(phase_5c, "one_two_punch")
+	var aftershock: Dictionary = _dictionary_value(phase_5c, "aftershock")
+	var echo: Dictionary = _dictionary_value(phase_5c, "echo_chamber")
+	if (
+		bool(rattle.get("owned", false))
+		or bool(punch.get("owned", false))
+		or bool(aftershock.get("owned", false))
+		or bool(echo.get("owned", false))
+	):
+		lines.append("")
+		lines.append("Tap Engine:")
+		if bool(rattle.get("owned", false)):
+			lines.append("Rattle x%.2f -> x%.2f, %d growth Taps, %d marginal score" % [
+				float(rattle.get("acquired_value", 0.0)),
+				float(rattle.get("final_xmult", 0.0)),
+				int(rattle.get("tap_milestones_grown_from", 0)),
+				int(rattle.get("marginal_score_uplift", 0)),
+			])
+		if bool(punch.get("owned", false)):
+			lines.append("One-Two Punch: %d qualifying balls, %d activations, %d marginal score" % [
+				int(punch.get("qualifying_scoring_balls", 0)),
+				int(punch.get("activations", 0)),
+				int(punch.get("marginal_score_uplift", 0)),
+			])
+		if bool(aftershock.get("owned", false)):
+			lines.append("Aftershock: %d xMult activations, highest Tap %d, %d marginal score" % [
+				int(aftershock.get("xmult_activations", 0)),
+				int(aftershock.get("highest_tap_ordinal", 0)),
+				int(aftershock.get("marginal_score_uplift", 0)),
+			])
+		if bool(echo.get("owned", false)):
+			lines.append("Echo Chamber: %d supported / %d unsupported thresholds, %d retriggers, %d marginal score" % [
+				int(echo.get("supported_thresholds", 0)),
+				int(echo.get("unsupported_thresholds", 0)),
+				int(echo.get("regular_activations_retriggered", 0)),
+				int(echo.get("marginal_score_uplift", 0)),
+			])
+			lines.append("Echo support rounds: %d with / %d without" % [
+				int(echo.get("rounds_owned_with_support", 0)),
+				int(echo.get("rounds_owned_without_support", 0)),
+			])
 	var valuable: Dictionary = _dictionary_value(summary, "most_valuable_item")
 	if not valuable.is_empty():
 		lines.append("")
@@ -2136,12 +2585,21 @@ static func _format_copy_summary(report: Dictionary) -> String:
 
 static func _format_item_table(report: Dictionary) -> String:
 	var lines: Array[String] = [
-		"Item\tFamily\tSlot\tRounds Owned\tActivations\tRegular\tRetriggers\t+Haul\t+Mult\txMult Product\tMarginal Score\tBuild Uplift %"
+		"Item\tFamily\tEffect Kind\tSlot\tRounds Owned\tActivations\tRegular\tRetriggers\t+Haul\t+Mult\txMult Product\tMarginal Score\tBuild Uplift %\tState / Support"
 	]
 	for item in _dictionary_array_value(report, "item_metrics"):
-		lines.append("%s\t%s\t%d\t%d\t%d\t%d\t%d\t%.1f\t%.1f\t%.3f\t%d\t%.1f%%" % [
+		var state_summary: String = ""
+		if item.has("final_xmult"):
+			state_summary = "x%.2f" % float(item.get("final_xmult", 0.0))
+		elif item.has("rounds_owned_without_support"):
+			state_summary = "%d with / %d without support" % [
+				int(item.get("rounds_owned_with_support", 0)),
+				int(item.get("rounds_owned_without_support", 0)),
+			]
+		lines.append("%s\t%s\t%s\t%d\t%d\t%d\t%d\t%d\t%.1f\t%.1f\t%.3f\t%d\t%.1f%%\t%s" % [
 			str(item.get("display_name", item.get("eight_ball_item_id", "Unknown"))),
 			str(item.get("family_id", FAMILY_UNKNOWN)),
+			str(item.get("effect_kind", "")),
 			int(item.get("tray_slot", -1)),
 			int(item.get("rounds_owned", 0)),
 			int(item.get("trigger_occurrences", 0)),
@@ -2152,6 +2610,7 @@ static func _format_item_table(report: Dictionary) -> String:
 			float(item.get("cumulative_xmult_factor", 1.0)),
 			int(item.get("final_score_uplift", 0)),
 			float(item.get("percentage_of_build_uplift", 0.0)),
+			state_summary,
 		])
 	return "\n".join(lines)
 
@@ -2357,13 +2816,24 @@ static func _shot_item_metadata(shot: Dictionary, item_id: String) -> Dictionary
 			return _item_metadata(activation)
 	var build_snapshot: Dictionary = _dictionary_value(shot, "build_snapshot")
 	var definitions_value: Variant = build_snapshot.get("item_definitions_by_slot", [])
+	var slots_value: Variant = build_snapshot.get("slots", [])
 	if definitions_value is Array:
-		for definition_value in definitions_value as Array:
+		for definition_index in range((definitions_value as Array).size()):
+			var definition_value: Variant = (definitions_value as Array)[definition_index]
 			if definition_value is Dictionary and _item_id(
 				definition_value as Dictionary
 			) == item_id:
-				return _item_metadata(definition_value as Dictionary)
-	var slots_value: Variant = build_snapshot.get("slots", [])
+				var metadata: Dictionary = _item_metadata(definition_value as Dictionary)
+				if slots_value is Array and definition_index < (slots_value as Array).size():
+					var slot_value: Variant = (slots_value as Array)[definition_index]
+					if slot_value is Dictionary:
+						metadata["owned_item_instance_id"] = int(
+							(slot_value as Dictionary).get("owned_item_instance_id", -1)
+						)
+						metadata["acquired_round"] = int(
+							(slot_value as Dictionary).get("acquired_round", 0)
+						)
+				return metadata
 	if slots_value is Array:
 		for slot_value in slots_value as Array:
 			if not slot_value is Dictionary:
@@ -2371,11 +2841,17 @@ static func _shot_item_metadata(shot: Dictionary, item_id: String) -> Dictionary
 			var slot: Dictionary = slot_value as Dictionary
 			var definition: Dictionary = _dictionary_value(slot, "definition")
 			if _item_id(definition) == item_id:
-				return _item_metadata(definition)
-	return _phase_5b_item_fallback_metadata(item_id)
+				var metadata: Dictionary = _item_metadata(definition)
+				metadata["owned_item_instance_id"] = int(slot.get(
+					"owned_item_instance_id",
+					-1
+				))
+				metadata["acquired_round"] = int(slot.get("acquired_round", 0))
+				return metadata
+	return _item_fallback_metadata(item_id)
 
 
-static func _phase_5b_item_fallback_metadata(item_id: String) -> Dictionary:
+static func _item_fallback_metadata(item_id: String) -> Dictionary:
 	var family_id: String = ""
 	if item_id.begins_with("direct_pot_"):
 		family_id = FAMILY_DIRECT_POT
@@ -2383,6 +2859,14 @@ static func _phase_5b_item_fallback_metadata(item_id: String) -> Dictionary:
 		family_id = FAMILY_MULTI_POT
 	elif item_id.begins_with("same_pocket_"):
 		family_id = FAMILY_SAME_POCKET
+	elif item_id.begins_with("double_tap_"):
+		family_id = FAMILY_DOUBLE_TAP
+	elif item_id.begins_with("ball_tap_"):
+		family_id = FAMILY_BALL_TAP
+	elif [RATTLE_ITEM_ID, ONE_TWO_PUNCH_ITEM_ID, AFTERSHOCK_ITEM_ID, ECHO_CHAMBER_ITEM_ID].has(
+		item_id
+	):
+		family_id = FAMILY_TAP_ODDITY
 	if family_id.is_empty():
 		return {}
 	var phase: String = ""
@@ -2403,6 +2887,16 @@ static func _phase_5b_item_fallback_metadata(item_id: String) -> Dictionary:
 		"same_pocket_haul_shared_grave": "Shared Grave",
 		"same_pocket_mult_feeding_frenzy": "Feeding Frenzy",
 		"same_pocket_xmult_the_maw_below": "The Maw Below",
+		"double_tap_haul_second_bite": "Second Bite",
+		"double_tap_mult_echoing_toll": "Echoing Toll",
+		"double_tap_xmult_revenant_rhythm": "Revenant Rhythm",
+		"ball_tap_haul_knock_on_plunder": "Knock-On Plunder",
+		"ball_tap_mult_crowded_wake": "Crowded Wake",
+		"ball_tap_xmult_carom_current": "Carom Current",
+		RATTLE_ITEM_ID: "Rattle of the Deep",
+		ONE_TWO_PUNCH_ITEM_ID: "One-Two Punch",
+		AFTERSHOCK_ITEM_ID: "Aftershock",
+		ECHO_CHAMBER_ITEM_ID: "Echo Chamber",
 	}
 	return {
 		"eight_ball_item_id": item_id,
@@ -2523,10 +3017,12 @@ static func _item_metadata(source: Dictionary) -> Dictionary:
 		"eight_ball_item_id": _item_id(source),
 		"display_name": str(source.get("display_name", _item_id(source))),
 		"family_id": _family_id(source),
+		"offer_family": str(source.get("offer_family", "")),
 		"modifier_phase": str(source.get("modifier_phase", source.get("phase", ""))),
 		"rarity": str(source.get("rarity", "")),
 		"offer_weight": int(source.get("offer_weight", 0)),
 		"effect_kind": str(source.get("effect_kind", "")),
+		"owned_item_instance_id": int(source.get("owned_item_instance_id", -1)),
 		"retrigger_family": str(source.get(
 			"retrigger_family",
 			source.get("retrigger_family_id", "")

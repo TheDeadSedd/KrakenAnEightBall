@@ -55,6 +55,74 @@ class MockWallet:
 		}
 
 
+class MockBuildState:
+	extends RefCounted
+
+	var current_xmult: float = 1.0
+	var application_count: int = 0
+	var reject_preparation: bool = false
+
+
+	func prepare(transaction_key: String, mutations: Array) -> Dictionary:
+		if reject_preparation:
+			return {"success": false, "reason": "forced_invalid_mutation"}
+		var state_after: float = current_xmult
+		if not mutations.is_empty() and mutations[0] is Dictionary:
+			var mutation: Dictionary = mutations[0] as Dictionary
+			var after_value: Variant = mutation.get("state_after", {})
+			if after_value is Dictionary:
+				state_after = float((after_value as Dictionary).get(
+					"current_xmult",
+					current_xmult
+				))
+		return {
+			"success": true,
+			"transaction_key": transaction_key,
+			"mutation_count": mutations.size(),
+			"pending_state_mutations": mutations.duplicate(true),
+			"state_before": {"current_xmult": current_xmult},
+			"simulated_state_after": {"current_xmult": state_after},
+		}
+
+
+	func apply(transaction_key: String, mutations: Array) -> Dictionary:
+		var prepared: Dictionary = prepare(transaction_key, mutations)
+		if not bool(prepared.get("success", false)):
+			return prepared
+		current_xmult = float(
+			(prepared.get("simulated_state_after", {}) as Dictionary).get(
+				"current_xmult",
+				current_xmult
+			)
+		)
+		application_count += 1
+		return {
+			"success": true,
+			"applied": true,
+			"duplicate_suppressed": false,
+			"transaction_key": transaction_key,
+			"mutation_count": mutations.size(),
+			"state_before": prepared.get("state_before", {}).duplicate(true),
+			"state_after": {"current_xmult": current_xmult},
+		}
+
+
+class TerminalBuildProbe:
+	extends RefCounted
+
+	var build_state: MockBuildState
+	var observed_xmult: float = -1.0
+
+
+	func setup(run_system: RogueliteRunSystem, state: MockBuildState) -> void:
+		build_state = state
+		run_system.run_failed.connect(_on_run_failed)
+
+
+	func _on_run_failed(_snapshot: Dictionary) -> void:
+		observed_xmult = build_state.current_xmult
+
+
 func _init() -> void:
 	call_deferred("_run_cli")
 
@@ -80,6 +148,8 @@ static func run_all() -> Dictionary:
 	_test_duplicate_transaction_suppresses_payout(cases)
 	_test_rewind_restoration(cases)
 	_test_rewind_replay_new_attempt(cases)
+	_test_invalid_build_mutation_rejects_atomic_shot(cases)
+	_test_terminal_build_mutation_precedes_signal(cases)
 	return _build_report(cases)
 
 
@@ -387,6 +457,86 @@ static func _test_rewind_replay_new_attempt(cases: Array[Dictionary]) -> void:
 			"replay_shots": 2,
 		},
 		{"first": first, "replay": replay}
+	)
+
+
+static func _test_invalid_build_mutation_rejects_atomic_shot(
+	cases: Array[Dictionary]
+) -> void:
+	var run_system: RogueliteRunSystem = _new_run()
+	var build_state: MockBuildState = MockBuildState.new()
+	build_state.reject_preparation = true
+	run_system.set_build_state_mutation_handlers(
+		Callable(build_state, "prepare"),
+		Callable(build_state, "apply")
+	)
+	var before: Dictionary = run_system.get_snapshot()
+	var result: Dictionary = run_system.resolve_completed_shot(
+		10,
+		2,
+		"invalid-build-state",
+		{},
+		[{"state_after": {"current_xmult": 1.2}}]
+	)
+	var after: Dictionary = run_system.get_snapshot()
+	_record_case(
+		cases,
+		"invalid build mutation rejects the complete shot transaction",
+		not bool(result.get("accepted", true))
+			and int(after.get("round_score", -1)) == int(before.get("round_score", -2))
+			and int(after.get("hull", -1)) == int(before.get("hull", -2))
+			and int(after.get("shots_left", -1)) == int(before.get("shots_left", -2))
+			and build_state.application_count == 0,
+		{"accepted": false, "score_hull_shots_unchanged": true, "applications": 0},
+		{"result": result, "before": before, "after": after}
+	)
+
+
+static func _test_terminal_build_mutation_precedes_signal(
+	cases: Array[Dictionary]
+) -> void:
+	var run_system: RogueliteRunSystem = _new_run()
+	var build_state: MockBuildState = MockBuildState.new()
+	var terminal_probe: TerminalBuildProbe = TerminalBuildProbe.new()
+	run_system.set_build_state_mutation_handlers(
+		Callable(build_state, "prepare"),
+		Callable(build_state, "apply")
+	)
+	terminal_probe.setup(run_system, build_state)
+	run_system.hull = 1
+	run_system.queue_shot_hull_damage(1, "terminal-build-state")
+	var mutation: Array = [{"state_after": {"current_xmult": 1.2}}]
+	var first: Dictionary = run_system.resolve_completed_shot(
+		10,
+		2,
+		"terminal-build-state",
+		{},
+		mutation
+	)
+	var duplicate: Dictionary = run_system.resolve_completed_shot(
+		10,
+		2,
+		"terminal-build-state",
+		{},
+		mutation
+	)
+	_record_case(
+		cases,
+		"terminal build mutation applies before outcome signal and only once",
+		bool(first.get("accepted", false))
+			and bool(first.get("build_state_mutation_applied", false))
+			and is_equal_approx(build_state.current_xmult, 1.2)
+			and is_equal_approx(terminal_probe.observed_xmult, 1.2)
+			and build_state.application_count == 1
+			and bool(duplicate.get("duplicate", false)),
+		{"xmult": 1.2, "signal_observed": 1.2, "applications": 1, "duplicate": true},
+		{
+			"first": first,
+			"duplicate": duplicate,
+			"current_xmult": build_state.current_xmult,
+			"signal_observed": terminal_probe.observed_xmult,
+			"applications": build_state.application_count,
+		}
 	)
 
 

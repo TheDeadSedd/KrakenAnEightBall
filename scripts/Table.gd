@@ -637,6 +637,11 @@ func _setup_roguelite_mode_if_needed() -> void:
 	roguelite_run_system.set_doubloon_payout_applier(
 		Callable(score_system, "apply_roguelite_shot_payout")
 	)
+	if roguelite_build_system != null:
+		roguelite_run_system.set_build_state_mutation_handlers(
+			Callable(roguelite_build_system, "prepare_item_state_mutation_transaction"),
+			Callable(roguelite_build_system, "apply_item_state_mutations_once")
+		)
 	roguelite_balance_telemetry = ROGUELITE_BALANCE_TELEMETRY_SCRIPT.new()
 	roguelite_balance_telemetry.begin_fresh_run(
 		run_ball_identity_system.get_run_generation(),
@@ -955,11 +960,30 @@ func commit_roguelite_completed_shot(
 		if payout_value is Dictionary
 		else {}
 	)
+	var build_evaluation_value: Variant = score_result.get(
+		"eight_ball_build_evaluation",
+		{}
+	)
+	var build_evaluation: Dictionary = (
+		(build_evaluation_value as Dictionary)
+		if build_evaluation_value is Dictionary
+		else {}
+	)
+	var build_mutations_value: Variant = build_evaluation.get(
+		"authoritative_state_mutations",
+		[]
+	)
+	var build_state_mutations: Array = (
+		(build_mutations_value as Array).duplicate(true)
+		if build_mutations_value is Array
+		else []
+	)
 	return roguelite_run_system.resolve_completed_shot(
 		maxi(int(score_result.get("shot_score", 0)), 0),
 		scoreable_ball_count,
 		transaction_key,
-		doubloon_payout
+		doubloon_payout,
+		build_state_mutations
 	)
 
 
